@@ -3,12 +3,25 @@ import { ref, computed } from 'vue'
 import Header from './components/Header.vue'
 import StepNavigation from './components/StepNavigation.vue'
 import Step1CoreSelection from './components/Step1CoreSelection.vue'
+import Step2MetaConfiguration from './components/Step2MetaConfiguration.vue'
 import { ARCHETYPES } from './data/archetypes'
+import { META_PRESETS } from './data/metaPresets'
+import { TournamentMeta, OptimizationTargetId } from './types/deck'
 
 const archetypes = ref(ARCHETYPES)
 const selectedArchetypeId = ref<string>('dragapult-xatu')
 const currentStep = ref<number>(1)
 const hasCalculated = ref<boolean>(false)
+
+// Tournament meta sliders state (defaults to Regional Balanced)
+const tournamentMeta = ref<TournamentMeta>({
+  aggroRate: META_PRESETS[1].meta.aggroRate,
+  evolutionRate: META_PRESETS[1].meta.evolutionRate,
+  controlRate: META_PRESETS[1].meta.controlRate,
+})
+
+// Priority target state
+const selectedTargetId = ref<OptimizationTargetId>('anti_brick')
 
 const activeArchetype = computed(() => {
   return archetypes.value.find(a => a.id === selectedArchetypeId.value) || archetypes.value[0]
@@ -16,6 +29,7 @@ const activeArchetype = computed(() => {
 
 function handleSelectArchetype(id: string) {
   selectedArchetypeId.value = id
+  hasCalculated.value = false
 }
 
 function handleSelectStep(step: number) {
@@ -26,6 +40,22 @@ function handleNextStep() {
   if (currentStep.value < 3) {
     currentStep.value++
   }
+}
+
+function handlePreviousStep() {
+  if (currentStep.value > 1) {
+    currentStep.value--
+  }
+}
+
+function handleUpdateMeta(newMeta: TournamentMeta) {
+  tournamentMeta.value = newMeta
+  hasCalculated.value = false
+}
+
+function handleUpdateTarget(newTargetId: OptimizationTargetId) {
+  selectedTargetId.value = newTargetId
+  hasCalculated.value = false
 }
 </script>
 
@@ -50,6 +80,19 @@ function handleNextStep() {
           :archetypes="archetypes"
           :selectedArchetypeId="selectedArchetypeId"
           @selectArchetype="handleSelectArchetype"
+          @nextStep="handleNextStep"
+        />
+      </div>
+
+      <!-- Step 2: Tournament Meta Sliders & Optimization Target -->
+      <div v-show="currentStep === 2">
+        <Step2MetaConfiguration
+          :meta="tournamentMeta"
+          :selectedTargetId="selectedTargetId"
+          :archetypeName="activeArchetype.name"
+          @updateMeta="handleUpdateMeta"
+          @updateTarget="handleUpdateTarget"
+          @previousStep="handlePreviousStep"
           @nextStep="handleNextStep"
         />
       </div>
