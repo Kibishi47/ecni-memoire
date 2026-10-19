@@ -8,7 +8,6 @@ export interface Card {
   count: number
   set: string
   number: string
-  rarity?: string
   roleDescription?: string
 }
 
@@ -23,80 +22,57 @@ export interface CandidateCard {
   set: string
   number: string
   role: string
-  sensitivityCategory: 'energy' | 'search' | 'draw' | 'setup'
-  impactText: string
 }
 
 export interface Archetype {
-  id: 'dragapult-xatu' | 'charizard-pidgeot'
+  id: 'charizard-pidgeot' | 'dragapult-xatu'
   name: string
   nameEn: string
-  subname: string
-  tier: string
+  subtitle: string
   coreCount: number
   flexSlotsCount: number
   description: string
-  primaryColor: string
-  accentColor: string
-  badgeText: string
+  iconName: string
+  badgeColor: string
   coreCards: Card[]
   candidates: CandidateCard[]
   standardFlexAllocation: Record<string, number>
-  baseStats: {
-    turn2SetupRate: number
-    deadHandRisk: number
-    disruptionResilience: number
-  }
 }
 
 export interface TournamentMeta {
-  aggroRate: number // e.g. 45% (Ire-Foudre ex, Rugit-Lune)
-  evolutionRate: number // e.g. 35% (Dracaufeu ex, Lanssorien ex)
-  controlRate: number // e.g. 20% (Gardevoir ex, Ronflex Stall)
+  aggroRate: number // e.g. 50%
+  evolutionRate: number // e.g. 35%
+  controlRate: number // e.g. 15%
 }
 
-export type OptimizationTargetId = 'turn2_speed' | 'anti_brick' | 'late_game_resilience'
+export type OptimizationTargetId = 'anti_brick' | 'turn2_speed'
 
 export interface OptimizationTarget {
   id: OptimizationTargetId
   label: string
   shortLabel: string
   description: string
-  impactSummary: string
-  icon: string
 }
 
-export interface EnergySensitivityPoint {
-  energyCount: number
-  underpowerRisk: number // Underpowered / cannot attack T2 (%)
-  brickRisk: number // Drawing dead with too many energies (%)
-  optimalScore: number // Overall efficiency (0-100)
-  status: 'critical_low' | 'suboptimal' | 'optimal' | 'surcharge'
-  recommendation: string
+export interface RecommendedCardItem {
+  cardId: string
+  cardName: string
+  recommendedCount: number
+  standardCount: number
+  diff: number
+  badgeText?: string
+  badgeType?: 'success' | 'info' | 'neutral'
+  simpleExplanation: string
 }
 
 export interface OptimizationResult {
   archetypeId: string
-  prescribedAllocation: Record<string, number>
-  standardAllocation: Record<string, number>
+  archetypeName: string
+  metaPresetName: string
   totalFlexSlots: number
-  standardScore: number
-  optimizedScore: number
-  gainPercentage: number
-  rationaleList: {
-    cardId: string
-    cardName: string
-    diff: number // e.g. +1, -1, 0
-    recommendedCount: number
-    standardCount: number
-    reason: string
-  }[]
-  matchupPerformance: {
-    aggro: { standard: number; optimized: number }
-    evolution: { standard: number; optimized: number }
-    control: { standard: number; optimized: number }
-  }
-  energySensitivity: EnergySensitivityPoint[]
-  exploredPermutations: number
-  evaluationTimeMs: number
+  recommendedCards: RecommendedCardItem[]
+  prescribedAllocation: Record<string, number>
+  whyText: string
+  deadHandReductionPercent: number
+  energyRecommendationSummary: string
 }
