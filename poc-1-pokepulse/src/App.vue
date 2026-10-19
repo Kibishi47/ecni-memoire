@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { DeckPreset, CardItem } from './types/pokemon-tcg'
+import { ref, computed, watch, onMounted } from 'vue'
+import type { DeckPreset, CardItem, OpponentId, SimulationResult } from './types/pokemon-tcg'
 import { DECK_PRESETS } from './data/presets'
+import { OPPONENT_GAUNTLETS } from './data/opponents'
+import { computeSimulation } from './data/simulations'
 import { parsePtcglText } from './utils/deck-parser'
 import DeckPresetsSelector from './components/DeckPresetsSelector.vue'
 import DeckImportDrawer from './components/DeckImportDrawer.vue'
 import DeckTaxonomyView from './components/DeckTaxonomyView.vue'
+import OpponentGauntletSelector from './components/OpponentGauntletSelector.vue'
+import SimulationTriggerBar from './components/SimulationTriggerBar.vue'
 import { Swords } from 'lucide-vue-next'
 
 // Active deck state
@@ -14,6 +18,12 @@ const isCustomDeck = ref(false)
 const customCards = ref<CardItem[]>([])
 const customPtcglText = ref('')
 const isImportModalOpen = ref(false)
+
+// Active matchup & simulation state
+const activeOpponentId = ref<OpponentId>('aggro_turbo')
+const goingFirst = ref(true)
+const isSimulating = ref(false)
+const simulationResult = ref<SimulationResult | null>(null)
 
 const activeCards = computed<CardItem[]>(() => {
   if (isCustomDeck.value) {
@@ -29,13 +39,39 @@ const activeDeckName = computed(() => {
   return currentPreset.value.name
 })
 
+const activeOpponent = computed(() => {
+  return OPPONENT_GAUNTLETS.find(o => o.id === activeOpponentId.value) || OPPONENT_GAUNTLETS[0]
+})
+
 const totalCards = computed(() => {
   return activeCards.value.reduce((acc, c) => acc + c.count, 0)
 })
 
+// Trigger simulated run (500ms)
+const runSimulation = () => {
+  if (isSimulating.value) return
+  isSimulating.value = true
+
+  setTimeout(() => {
+    simulationResult.value = computeSimulation(
+      isCustomDeck.value ? 'custom' : currentPreset.value.id,
+      activeOpponentId.value,
+      goingFirst.value,
+      activeCards.value
+    )
+    isSimulating.value = false
+  }, 550)
+}
+
 const onSelectPreset = (preset: DeckPreset) => {
   currentPreset.value = preset
   isCustomDeck.value = false
+  runSimulation()
+}
+
+const onSelectOpponent = (opponentId: OpponentId) => {
+  activeOpponentId.value = opponentId
+  runSimulation()
 }
 
 const onImportDeck = (ptcglText: string) => {
@@ -44,8 +80,18 @@ const onImportDeck = (ptcglText: string) => {
     customCards.value = parsed
     customPtcglText.value = ptcglText
     isCustomDeck.value = true
+    runSimulation()
   }
 }
+
+watch(goingFirst, () => {
+  runSimulation()
+})
+
+// Initialize with a simulation on mount
+onMounted(() => {
+  runSimulation()
+})
 </script>
 
 <template>
@@ -94,7 +140,22 @@ const onImportDeck = (ptcglText: string) => {
         @toggle-import-modal="isImportModalOpen = true"
       />
 
-      <!-- Section A.2: Automatic Taxonomy View -->
+      <!-- Section B: Opponent Gauntlet Selector -->
+      <OpponentGauntletSelector
+        :active-opponent-id="activeOpponentId"
+        v-model:goingFirst="goingFirst"
+        @select-opponent="onSelectOpponent"
+      />
+
+      <!-- Section C.1: Hero Simulation Trigger Bar -->
+      <SimulationTriggerBar
+        :deck-name="activeDeckName"
+        :opponent-name="activeOpponent.name"
+        :is-simulating="isSimulating"
+        @run-simulation="runSimulation"
+      />
+
+      <!-- Section A.2: Automatic Taxonomy View (Collapsible or Full) -->
       <DeckTaxonomyView
         :cards="activeCards"
         :deck-name="activeDeckName"
