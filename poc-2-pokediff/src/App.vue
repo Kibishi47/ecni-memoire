@@ -1,264 +1,158 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { INITIAL_CARDS } from './data/defaultDeck'
-import { SCENARIOS } from './data/scenarios'
-import { runSameSeedSimulation, getSamplePairedSeeds } from './services/seedEngine'
-import type { Card, ScenarioPreset, DeckDiff, SimulationResult } from './types/deck'
+import { ref, computed } from 'vue'
+import { DECK_PROFILES, getDefaultKeyCards } from './data/wizardData'
+import { evaluateWizardComparison } from './services/wizardSimulator'
+import type { DeckArchetype, KeyCardItem, PresetChange, WizardResult } from './types/wizard'
 
-import HeaderNav from './components/HeaderNav.vue'
-import ScenarioSelector from './components/ScenarioSelector.vue'
-import DiffSummary from './components/DiffSummary.vue'
-import DeckDiffEditor from './components/DeckDiffEditor.vue'
-import SimulationTrigger from './components/SimulationTrigger.vue'
-import DeltaMatrix from './components/DeltaMatrix.vue'
-import CriticalMetrics from './components/CriticalMetrics.vue'
-import AnalyticalVerdict from './components/AnalyticalVerdict.vue'
-import SameSeedInspectorModal from './components/SameSeedInspectorModal.vue'
+import WizardHeader from './components/WizardHeader.vue'
+import Step1DeckChoice from './components/Step1DeckChoice.vue'
+import Step2CardSwap from './components/Step2CardSwap.vue'
+import Step3Comparison from './components/Step3Comparison.vue'
 
-// Reactive State
-const cards = ref<Card[]>(JSON.parse(JSON.stringify(INITIAL_CARDS)))
-const activeScenarioId = ref<string | null>('scenario-1')
-const isSimulating = ref(false)
-const currentSeed = ref(42890)
-const isInspectorOpen = ref(false)
+// Wizard Step State: 1, 2, or 3 (Only ONE screen visible at a time)
+const currentStep = ref<number>(1)
 
-// Initialize with Scenario 1 by default so the user immediately sees a live comparison!
-function applyScenario(scenario: ScenarioPreset) {
-  // Reset all to baseline A first
-  for (const c of cards.value) {
-    c.countB = c.countA
+// Selected Deck Archetype
+const selectedDeckId = ref<DeckArchetype>('dracaufeu')
+
+// 6 Key Cards for the selected deck
+const keyCards = ref<KeyCardItem[]>(getDefaultKeyCards('dracaufeu'))
+
+// Active Preset ID (defaults to 'stability')
+const activePresetId = ref<string | null>('stability')
+
+// Initial setup with preset 'stability' applied so that when user reaches step 2, a realistic swap is already loaded
+function applyInitialPreset() {
+  const defaultList = getDefaultKeyCards(selectedDeckId.value)
+  const boss = defaultList.find((c) => c.id === 'boss')
+  const poffin = defaultList.find((c) => c.id === 'poffin')
+  if (boss && poffin) {
+    boss.currentCount = Math.max(0, boss.defaultCount - 1)
+    poffin.currentCount = poffin.defaultCount + 1
   }
-  // Apply specific changes
-  for (const change of scenario.changes) {
-    const target = cards.value.find((c) => c.id === change.cardId)
-    if (target) {
-      target.countB = Math.max(target.min, Math.min(target.max, target.countB + change.delta))
-    }
-  }
-  activeScenarioId.value = scenario.id
+  keyCards.value = defaultList
+  activePresetId.value = 'stability'
 }
 
-onMounted(() => {
-  // Apply Scenario 1 by default for zero-friction user testing
-  applyScenario(SCENARIOS[0])
-})
+applyInitialPreset()
 
-// Counts
-const deckACount = computed(() => {
-  return cards.value.reduce((acc, c) => acc + c.countA, 0)
-})
-
-const deckBCount = computed(() => {
-  return cards.value.reduce((acc, c) => acc + c.countB, 0)
-})
-
-const isValid = computed(() => {
-  return deckACount.value === 60 && deckBCount.value === 60
-})
-
-// Diffs
-const diffs = computed<DeckDiff[]>(() => {
-  return cards.value
-    .filter((c) => c.countB !== c.countA)
-    .map((c) => ({
-      cardId: c.id,
-      cardName: c.name,
-      cardNameEn: c.nameEn,
-      category: c.category,
-      delta: c.countB - c.countA,
-      from: c.countA,
-      to: c.countB,
-    }))
-})
-
-// Simulation Result (computed dynamically or triggered)
-const simulationResult = computed<SimulationResult>(() => {
-  return runSameSeedSimulation(cards.value, currentSeed.value, 10000)
-})
-
-// Sample paired seeds for inspector
-const samplePairedSeeds = computed(() => {
-  return getSamplePairedSeeds(cards.value, 4)
-})
-
-// Event Handlers
-function handleSelectScenario(scenario: ScenarioPreset) {
-  applyScenario(scenario)
+// Handlers for Step 1
+function handleSelectDeck(deckId: DeckArchetype) {
+  selectedDeckId.value = deckId
+  applyInitialPreset()
 }
 
-function handleSelectBaseline() {
-  for (const c of cards.value) {
-    c.countB = c.countA
+function handleGoToStep2() {
+  currentStep.value = 2
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// Handlers for Step 2
+function handleApplyPreset(preset: PresetChange) {
+  // Reset all to defaults first
+  const resetList = getDefaultKeyCards(selectedDeckId.value)
+  const removeCard = resetList.find((c) => c.id === preset.removeCardId)
+  const addCard = resetList.find((c) => c.id === preset.addCardId)
+
+  if (removeCard && addCard) {
+    removeCard.currentCount = Math.max(removeCard.min, removeCard.defaultCount - 1)
+    addCard.currentCount = Math.min(addCard.max, addCard.defaultCount + 1)
   }
-  activeScenarioId.value = 'baseline'
+
+  keyCards.value = resetList
+  activePresetId.value = preset.id
 }
 
-function handleUpdateCardB(cardId: string, newCount: number) {
-  const card = cards.value.find((c) => c.id === cardId)
+function handleUpdateCardCount(cardId: string, delta: number) {
+  const card = keyCards.value.find((c) => c.id === cardId)
   if (card) {
-    card.countB = newCount
-    // Check if current configuration matches any preset
-    checkIfMatchesPreset()
-  }
-}
-
-function handleAddFlexCard(cardId: string) {
-  const card = cards.value.find((c) => c.id === cardId)
-  if (card && card.countB < card.max) {
-    card.countB++
-    checkIfMatchesPreset()
-  }
-}
-
-function checkIfMatchesPreset() {
-  // Compare current diffs with presets
-  for (const sc of SCENARIOS) {
-    const matchesAll = sc.changes.every((ch) => {
-      const c = cards.value.find((card) => card.id === ch.cardId)
-      return c && c.countB - c.countA === ch.delta
-    })
-    const noOtherChanges = diffs.value.length === sc.changes.length
-    if (matchesAll && noOtherChanges) {
-      activeScenarioId.value = sc.id
-      return
+    const nextCount = card.currentCount + delta
+    if (nextCount >= card.min && nextCount <= card.max) {
+      card.currentCount = nextCount
+      activePresetId.value = null // Custom user adjustment
     }
   }
-
-  if (diffs.value.length === 0) {
-    activeScenarioId.value = 'baseline'
-  } else {
-    activeScenarioId.value = null // Custom user adjustments
-  }
 }
 
-function handleRunSimulation() {
-  isSimulating.value = true
-  // Generates new random seed for fresh 10,000 paired sample
-  currentSeed.value = Math.floor(Math.random() * 90000) + 10000
-
-  setTimeout(() => {
-    isSimulating.value = false
-  }, 400)
+function handleResetChanges() {
+  keyCards.value = getDefaultKeyCards(selectedDeckId.value)
+  activePresetId.value = null
 }
+
+function handleGoToStep3() {
+  currentStep.value = 3
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// Comparison Evaluation (Computed dynamically for Step 3)
+const comparisonResult = computed<WizardResult>(() => {
+  return evaluateWizardComparison(selectedDeckId.value, keyCards.value)
+})
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-    <!-- Top Navigation Header -->
-    <HeaderNav
-      :deck-a-count="deckACount"
-      :deck-b-count="deckBCount"
-      :is-valid="isValid"
-      :seed="currentSeed"
-      :sim-count="simulationResult.sampleSize"
-      @reset="handleSelectBaseline"
-      @open-inspector="isInspectorOpen = true"
+  <div class="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans antialiased">
+    <!-- Top Stepper Header (1. Deck ➔ 2. Changement ➔ 3. Comparaison) -->
+    <WizardHeader
+      :current-step="currentStep"
+      @go-to-step="(step) => { currentStep = step }"
     />
 
-    <!-- Main Container -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      <!-- Context & UX Hero Banner ("Wizard of Oz") -->
-      <section class="p-4 sm:p-5 rounded-2xl bg-slate-900/50 border border-slate-800 text-xs sm:text-sm text-slate-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div class="space-y-1">
-          <div class="flex items-center space-x-2">
-            <span class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-[11px] font-bold">
-              47,5 % des Joueurs Compétitifs
-            </span>
-            <span class="text-slate-400 font-medium">
-              changent 1 à 3 cartes au feeling la veille d'un tournoi majeur.
-            </span>
-          </div>
-          <p class="text-slate-400 text-xs">
-            Ce comparateur élimine le doute en simulant <strong class="text-slate-200">l'impact statistique exact</strong> de votre arbitrage sur une séquence couplée de <strong class="text-indigo-400">10 000 tirages à graine identique ("Same-Seed Testing")</strong>.
-          </p>
+    <!-- Main Container: ONLY ONE SCREEN VISIBLE AT A TIME -->
+    <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <!-- SCREEN 1: Deck de départ -->
+      <transition name="fade" mode="out-in">
+        <div v-if="currentStep === 1" key="step-1">
+          <Step1DeckChoice
+            :selected-deck-id="selectedDeckId"
+            @select-deck="handleSelectDeck"
+            @next-step="handleGoToStep2"
+          />
         </div>
 
-        <div class="flex items-center space-x-3 shrink-0">
-          <div class="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 font-mono text-xs">
-            <span class="text-sky-400 font-bold">A : Dracaufeu / Roucarnage</span>
-            <span class="text-slate-500">vs</span>
-            <span class="text-violet-400 font-bold">B : Variante Test</span>
-          </div>
+        <!-- SCREEN 2: Changer 1 à 3 cartes -->
+        <div v-else-if="currentStep === 2" key="step-2">
+          <Step2CardSwap
+            :deck-id="selectedDeckId"
+            :cards="keyCards"
+            :active-preset-id="activePresetId"
+            @prev-step="currentStep = 1"
+            @next-step="handleGoToStep3"
+            @apply-preset="handleApplyPreset"
+            @update-card-count="handleUpdateCardCount"
+            @reset-changes="handleResetChanges"
+          />
         </div>
-      </section>
 
-      <!-- Section A: Scenario Presets Selector -->
-      <section>
-        <ScenarioSelector
-          :active-scenario-id="activeScenarioId"
-          @select-scenario="handleSelectScenario"
-          @select-baseline="handleSelectBaseline"
-        />
-      </section>
-
-      <!-- Section A (cont.): Diff Summary (Git Diff Style) -->
-      <section>
-        <DiffSummary
-          :diffs="diffs"
-          :deck-a-count="deckACount"
-          :deck-b-count="deckBCount"
-          :is-valid="isValid"
-          @sync-b-to-a="handleSelectBaseline"
-        />
-      </section>
-
-      <!-- Section B: Coupled Simulation Trigger Button (400ms visual animation) -->
-      <section>
-        <SimulationTrigger
-          :is-simulating="isSimulating"
-          :sample-size="simulationResult.sampleSize"
-          :seed="currentSeed"
-          :duration-ms="simulationResult.durationMs"
-          :is-valid="isValid"
-          @run-simulation="handleRunSimulation"
-          @open-inspector="isInspectorOpen = true"
-        />
-      </section>
-
-      <!-- Section C: Delta Dashboard (The Core Analytical Experience) -->
-      <section class="space-y-6">
-        <!-- 1. Matchup Delta Matrix (3 Columns) -->
-        <DeltaMatrix :matchups="simulationResult.matchups" />
-
-        <!-- 2. Critical Metrics Dual Bars -->
-        <CriticalMetrics :metrics="simulationResult.criticalMetrics" />
-
-        <!-- 3. Automated Analytical Verdict -->
-        <AnalyticalVerdict
-          :verdict="simulationResult.verdict"
-          :is-valid="isValid"
-        />
-      </section>
-
-      <!-- Section A (Editor): Side-by-Side A/B Deck Diff Editor -->
-      <section>
-        <DeckDiffEditor
-          :cards="cards"
-          :deck-a-count="deckACount"
-          :deck-b-count="deckBCount"
-          @update-card-b="handleUpdateCardB"
-          @add-flex-card="handleAddFlexCard"
-        />
-      </section>
+        <!-- SCREEN 3: Quel est l'impact de ce changement ? -->
+        <div v-else-if="currentStep === 3" key="step-3">
+          <Step3Comparison
+            :deck="DECK_PROFILES[selectedDeckId]"
+            :result="comparisonResult"
+            @back-to-step2="currentStep = 2"
+            @back-to-step1="currentStep = 1"
+          />
+        </div>
+      </transition>
     </main>
 
-    <!-- Footer -->
-    <footer class="border-t border-slate-800/80 bg-slate-950 py-6 text-center text-xs text-slate-500">
-      <div class="max-w-7xl mx-auto px-4 space-y-1">
-        <p>
-          PokéDiff Matchup Comparator • POC Interactif Haute-Fidélité pour Tests Utilisateurs UX/UI (Piste 2).
-        </p>
-        <p class="text-[11px] text-slate-600 font-mono">
-          Same-Seed Coupled Monte-Carlo Engine (Mulberry32 PRNG) • 10 000 tirages simultanés appariés.
-        </p>
+    <!-- Clean Minimalist Footer -->
+    <footer class="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
+      <div class="max-w-5xl mx-auto px-4">
+        <span>PokéDiff • Assistant d'arbitrage de cartes Pokémon TCG • Prototype UX/UI en 3 étapes</span>
       </div>
     </footer>
-
-    <!-- Same-Seed Inspector Modal -->
-    <SameSeedInspectorModal
-      :is-open="isInspectorOpen"
-      :samples="samplePairedSeeds"
-      @close="isInspectorOpen = false"
-    />
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s ease-in-out;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

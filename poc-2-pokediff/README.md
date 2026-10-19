@@ -1,75 +1,69 @@
-# PokéDiff Matchup Comparator ⚔️🔬
-> **Piste 2 : Comparateur différentiel A/B de micro-ajustements Pokémon TCG (Same-Seed 10 000 tirages)**
-> Proof of Concept (POC) haute-fidélité ("Wizard of Oz") conçu pour des tests utilisateurs UX/UI.
+# PokéDiff • Comparateur de micro-ajustements Pokémon TCG ⚡
+> **Assistant d'arbitrage en 3 étapes (Thème Clair & Minimaliste)**  
+> Conçu pour des tests utilisateurs UX/UI rapides : un joueur comprend en 5 secondes ce qu'il compare.
 
 ---
 
-## 🎯 1. Contexte & Problématique Métier
-**47,5 % des joueurs compétitifs de Pokémon TCG modifient 1 à 3 cartes au feeling la veille d'un tournoi majeur.**
-Dans un test physique classique (10-20 parties), la chance de tirage (pioche des cartes Récompenses, mulligans, mains mortes) fausse les conclusions.
+## 🎯 1. Contexte & Approche UX
+47,5 % des joueurs compétitifs modifient 1 à 3 cartes au feeling la veille d'un tournoi.
+Cette refonte élimine le jargon complexe ("Same-Seed", "Delta", "Variance") et l'esthétique néon sombre au profit d'un **parcours linéaire en 3 écrans (un seul écran visible à la fois)** :
 
-**PokéDiff** résout ce biais grâce au **"Same-Seed Testing"** :
-Les deux listes (Variante A de référence vs Variante B modifiée) sont testées sur **la même séquence déterministe de 10 000 paquets mélangés** (Mulberry32 PRNG couplé). Seul l'impact mathématique de la carte modifiée est mesuré, à variance RNG nulle.
+```
+[1. Deck de départ] ➔ [2. Changement de cartes] ➔ [3. Comparaison & Verdict]
+```
 
 ---
 
-## 🚀 2. Démarrage Rapide
+## 🧭 2. Les 3 Écrans du Wizard
 
-### Prérequis
-- Node.js >= 18.x
-- npm >= 9.x
+### Écran 1 : Deck de départ
+- Choix entre les 2 archétypes compétitifs majeurs :
+  - **Dracaufeu ex (Liste standard)**
+  - **Lanssorien ex (Liste standard)**
+- Récapitulatif clair : Liste officielle de 60 cartes vérifiées.
+- Bouton : `Tester un changement de cartes →`.
 
-### Lancement
+### Écran 2 : Changer 1 à 3 cartes
+- **3 changements prêts à tester en 1 clic :**
+  1. *Plus de stabilité au Tour 1 :* Retirer 1 Ordres du Boss ➔ Ajouter 1 Poffin Pote-Pote.
+  2. *Sortir l'attaquant plus vite :* Retirer 1 Hyper Ball ➔ Ajouter 1 Super Bonbon.
+  3. *Sécuriser la fin de partie :* Retirer 1 Énergie ➔ Ajouter 1 Civière Nocturne.
+- **Encart côte-à-côte visuel :**
+  - Colonne gauche (Rouge très pâle) : `Carte retirée (-1)`
+  - Colonne droite (Vert très pâle) : `Carte ajoutée (+1)`
+- **Ajustement manuel simplifié :** Liste épurée des 6 cartes clés avec boutons `[-]` et `[+]` (aucun encombrement des 60 cartes).
+- Bouton : `Comparer les 2 versions →`.
+
+### Écran 3 : Quel est l'impact de ce changement ?
+- **Rappel du changement testé :** Bandeau synthétique avec bouton retour `← Tester un autre changement`.
+- **Verdict en 1 phrase :** Encadré bleu lisible en 3 secondes (ex: *"Ce changement est recommandé : vous réduisez nettement vos mains mortes au Tour 1 sans affaiblir votre attaque."*).
+- **3 cartes de résultats Avant vs Après :**
+  1. *Stabilité au Tour 1 (Poser ses Pokémon de base) :* `Avant : 81 %` ➔ `Après : 87 %` (Badge vert `+6 %`).
+  2. *Vitesse d'attaque au Tour 2 :* `Avant : 74 %` ➔ `Après : 75 %` (Badge vert `+1 %`).
+  3. *Risque de manquer d'énergie :* `Avant : 12 %` ➔ `Après : 12 %` (Badge `Identique`).
+- **Impact selon l'adversaire (3 lignes simples) :**
+  - Contre un deck Rapide (ex: Ire-Foudre ex).
+  - Contre un deck Évolution (Miroir).
+  - Contre un deck Contrôle / Bloquant (ex: Ronflex).
+
+---
+
+## 🎨 3. Charte Graphique & Design System
+- **Fond :** `bg-slate-50`
+- **Cartes & Conteneurs :** `bg-white`, bordures `border-slate-200`, texte `text-slate-900`
+- **Action principale :** `bg-blue-600 text-white font-semibold rounded-xl`
+- **Badges d'amélioration :** `bg-emerald-50 text-emerald-700 border-emerald-200`
+- **Badges de baisse :** `bg-red-50 text-red-700 border-red-200`
+- **Badges neutres :** `bg-slate-100 text-slate-700 border-slate-200`
+
+---
+
+## 🚀 4. Lancer l'application en local
+
 ```bash
 cd poc-2-pokediff
 npm install
 npm run dev
 ```
 
-L'application sera accessible sur `http://localhost:5173`.
-
-Pour compiler pour la production :
-```bash
-npm run build
-npm run preview
-```
-
----
-
-## ⚡ 3. Fonctionnalités Clés Implémentées
-
-### A. Sélecteur de Scénarios d'Arbitrage Pré-configurés & Éditeur Rapide
-- **Liste A (Référence) :** 60 cartes compétitives complètes de *Dracaufeu ex / Roucarnage ex*.
-- **3 "Dilemmes du Vendredi Soir" (Presets 1-Clic) :**
-  1. *Stabilité T1 vs Puissance Fin de Partie :* `-1 Ordres du Boss, -1 Énergie Feu` / `+1 Poffin Pote-Pote, +1 Faiblo Ball`.
-  2. *Accélération vs Régularité Supporter :* `-1 Recherche Professorale, -1 Hyper Ball` / `+1 Arven, +1 Super Bonbon`.
-  3. *Tech Anti-Contrôle & Stall :* `-1 Mashynn, -1 Énergie Feu` / `+1 Civière Nocturne, +1 Plan du Professeur Turo`.
-- **Éditeur A/B Haute-Fidélité :** Boutons `[-]` et `[+]` sur chaque carte avec limites légales (min/max), tiroir de cartes candidates Tech (Flex Spots), filtres par catégorie et recherche textuelle instantanée.
-- **Diff Résumé (Git Diff Style) :** Encart visuel indiquant `-1 Carte X` en rose et `+1 Carte Y` en vert, vérifiant la stricte conformité au format légal **60/60 cartes**.
-
-### B. Moteur de Simulation Couplée ("Same-Seed Engine")
-- Bouton interactif **"Comparer sur 10 000 tirages couplés (Graines identiques)"** avec micro-animation de 400ms et feedback haptique/confettis.
-- **Inspecteur de Graines ("Same-Seed Proof Viewer") :** Visualiseur modal permettant d'explorer graine par graine (ex: Seed `#1042`) la main de 7 cartes et les 6 Récompenses pour A et B, prouvant comment la carte substituée transforme une main morte en un banc opérationnel au Tour 1.
-
-### C. Tableau de Bord des Deltas en Temps Réel
-1. **Matrice des Deltas par Matchup Clé (3 colonnes) :**
-   - *vs Aggro (Ire-Foudre ex) :* Taux de survie et sortie T2 de A vs B avec gros badge delta (`+5,8 %` / `-2,4 %`).
-   - *vs Setup Mirror (Dracaufeu / Lanssorien) :* Taux d'évolution Super Bonbon T2 réussi (A vs B + delta).
-   - *vs Disruption (Gardevoir ex / Mashynn T3) :* Taux de reprise après réinitialisation de main à 1-2 cartes.
-2. **Comparaison Directe des Métriques Critiques (Barres Doubles A vs B) :**
-   - *2+ Salamèche sur le banc au Tour 1.*
-   - *Combo Arven → Poffin + Super Bonbon au Tour 2.*
-   - *Risque de "Main Morte" au Tour 1 (aucun Supporter ni Ball jouable).*
-   - *Risque de manquer d'Énergie Feu pour attaquer au Tour 2.*
-3. **Verdict Analytique Automatisé :**
-   - Synthèse d'aide à la décision formulée en français clair, explicitant le compromis mathématique exact et fournissant une recommandation stratégique adaptée au métagame du tournoi.
-
----
-
-## 🎨 4. Design System & Charte Graphique
-- **Thème :** Dark analytique compétitif (fond `slate-950` / `slate-900`).
-- **Variante A (Référence) :** `sky-400` / `sky-600`.
-- **Variante B (Micro-ajustement) :** `violet-400` / `violet-600`.
-- **Deltas Positifs :** `emerald-400` (gain de régularité / baisse de risque).
-- **Deltas Négatifs :** `rose-400` (perte de tempo / hausse de risque).
-- **Icônes :** `lucide-vue-next`.
+Ouvrez [http://localhost:5173](http://localhost:5173).
