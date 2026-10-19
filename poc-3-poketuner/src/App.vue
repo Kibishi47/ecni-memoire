@@ -4,14 +4,16 @@ import Header from './components/Header.vue'
 import StepNavigation from './components/StepNavigation.vue'
 import Step1CoreSelection from './components/Step1CoreSelection.vue'
 import Step2MetaConfiguration from './components/Step2MetaConfiguration.vue'
+import Step3OptimizationResult from './components/Step3OptimizationResult.vue'
 import { ARCHETYPES } from './data/archetypes'
 import { META_PRESETS } from './data/metaPresets'
-import { TournamentMeta, OptimizationTargetId } from './types/deck'
+import { TournamentMeta, OptimizationTargetId, OptimizationResult } from './types/deck'
 
 const archetypes = ref(ARCHETYPES)
 const selectedArchetypeId = ref<string>('dragapult-xatu')
 const currentStep = ref<number>(1)
 const hasCalculated = ref<boolean>(false)
+const latestResult = ref<OptimizationResult | null>(null)
 
 // Tournament meta sliders state (defaults to Regional Balanced)
 const tournamentMeta = ref<TournamentMeta>({
@@ -48,6 +50,10 @@ function handlePreviousStep() {
   }
 }
 
+function handleGoToStep1() {
+  currentStep.value = 1
+}
+
 function handleUpdateMeta(newMeta: TournamentMeta) {
   tournamentMeta.value = newMeta
   hasCalculated.value = false
@@ -56,6 +62,11 @@ function handleUpdateMeta(newMeta: TournamentMeta) {
 function handleUpdateTarget(newTargetId: OptimizationTargetId) {
   selectedTargetId.value = newTargetId
   hasCalculated.value = false
+}
+
+function handleCalculationFinished(result: OptimizationResult) {
+  latestResult.value = result
+  hasCalculated.value = true
 }
 </script>
 
@@ -94,6 +105,18 @@ function handleUpdateTarget(newTargetId: OptimizationTargetId) {
           @updateTarget="handleUpdateTarget"
           @previousStep="handlePreviousStep"
           @nextStep="handleNextStep"
+        />
+      </div>
+
+      <!-- Step 3: Heuristic Convergence Animation & Ratio Recommendation View -->
+      <div v-show="currentStep === 3">
+        <Step3OptimizationResult
+          :archetype="activeArchetype"
+          :meta="tournamentMeta"
+          :targetId="selectedTargetId"
+          @previousStep="handlePreviousStep"
+          @goToStep1="handleGoToStep1"
+          @calculationFinished="handleCalculationFinished"
         />
       </div>
 
