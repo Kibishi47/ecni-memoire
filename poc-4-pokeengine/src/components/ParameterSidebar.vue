@@ -132,7 +132,7 @@ function onSeedInputChange(event: Event) {
       </button>
     </div>
 
-    <div class="p-4 space-y-5 overflow-y-auto flex-1">
+    <div class="p-4 space-y-5">
       <!-- 1. Volume de simulations (N) & Horizon de Tours (1 à 10) -->
       <section class="space-y-3">
         <div class="space-y-2">
@@ -535,8 +535,8 @@ function onSeedInputChange(event: Event) {
       </section>
     </div>
 
-    <!-- Action Footer -->
-    <div class="p-4 border-t border-slate-200 bg-slate-50">
+    <!-- Action Footer (placed directly below parameters, not pushed to bottom of body) -->
+    <div class="p-4 border-y border-slate-200 bg-slate-50">
       <button
         type="button"
         class="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-60"
