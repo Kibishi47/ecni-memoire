@@ -212,8 +212,9 @@ function nextGame() {
                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                 : 'bg-slate-100 text-slate-700 border-slate-200'
             "
+            title="Règle officielle JCC Pokémon : Redonne obligatoire uniquement lorsque la main initiale de 7 cartes ne contient aucun Pokémon de Base."
           >
-            Mulligans subis : {{ currentGame.mulliganCount }}
+            Mulligans (0 Base) : {{ currentGame.mulliganCount }}
           </span>
           <span
             v-if="currentGame.turn2CharizardReady"

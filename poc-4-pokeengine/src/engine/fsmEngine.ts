@@ -2599,7 +2599,7 @@ export function runMonteCarloSimulation(config: SimulationConfig): SimulationRes
     },
     hypergeometricAudit: {
       mulliganRate: buildHypergeometricAudit({
-        metricName: 'Probabilité de Mulligan Initial (0 Base en 7 cartes)',
+        metricName: 'Mulligan Obligatoire (Redonne forcée : 0 Pokémon de Base en 7 cartes)',
         formulaLabel: `P(X = 0) = C(${60 - actualBasicCount}, 7) / C(60, 7)  [N=60, K=${actualBasicCount}, n=7]`,
         populationN: 60,
         successesK: actualBasicCount,

@@ -165,7 +165,7 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
-            <span>Mulligans moyens / partie :</span>
+            <span title="Au JCC Pokémon, le Mulligan est strictement obligatoire et intervient uniquement si la main de 7 cartes contient 0 Pokémon de Base.">Mulligans forcés (0 Base) / partie :</span>
             <strong class="text-slate-800">{{ result.strategicMetrics.avgMulligansPerGame }}</strong>
           </div>
         </div>
