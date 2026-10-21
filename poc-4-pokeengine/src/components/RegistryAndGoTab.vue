@@ -10,7 +10,7 @@ import {
   Sliders,
 } from 'lucide-vue-next'
 import { DEFAULT_CARD_REGISTRY, packCard } from '@/engine/cardRegistry'
-import { GO_WASM_REFERENCE_SOURCE } from '@/engine/goReference'
+import { GO_ENGINE_FILES, GO_WASM_REFERENCE_SOURCE } from '@/engine/goReference'
 import type { DeclarativeCardDefinition } from '@/types/engine'
 
 const props = defineProps<{
@@ -23,8 +23,18 @@ const emit = defineEmits<{
 }>()
 
 const selectedCardId = ref<number>(10) // Default selected: Poffin Pote-Pote (ID 10)
+const selectedGoFile = ref<string>('state.go')
 const copiedGo = ref(false)
 const liveAppliedBanner = ref(false)
+
+const currentGoFileEntry = computed(() => {
+  return GO_ENGINE_FILES.find((f) => f.filename === selectedGoFile.value) ?? null
+})
+
+const displayedGoCode = computed(() => {
+  if (selectedGoFile.value === 'ALL') return GO_WASM_REFERENCE_SOURCE
+  return currentGoFileEntry.value?.content ?? GO_WASM_REFERENCE_SOURCE
+})
 
 const selectedCard = computed<DeclarativeCardDefinition>(() => {
   return (
@@ -73,7 +83,7 @@ function updatePrimitiveParam(
 
 async function copyGoSource() {
   try {
-    await navigator.clipboard.writeText(GO_WASM_REFERENCE_SOURCE)
+    await navigator.clipboard.writeText(displayedGoCode.value)
     copiedGo.value = true
     setTimeout(() => {
       copiedGo.value = false
@@ -374,22 +384,59 @@ async function copyGoSource() {
           </div>
         </div>
 
-        <!-- Code Source Go / Wasm (`engine.go`) -->
+        <!-- Code Source Go / Wasm (`./go-engine/*.go`) -->
         <div class="border border-slate-200 rounded-lg overflow-hidden">
-          <div class="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex items-center justify-between">
+          <div class="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Code2 class="w-4 h-4 text-slate-700" />
               <span class="text-xs font-mono font-bold text-slate-800">
-                engine.go — Struct `[60]uint16` Zero-Allocation & Beam Search (Cible Go/Wasm)
+                Dossier `./poc-4-pokeengine/go-engine/` — Fichiers Sources Go Éditables (`?raw` HMR)
               </span>
             </div>
             <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Parité Bit-Exacte avec Web Worker TS
+              Synchronisé en direct avec `./go-engine/*.go`
             </span>
           </div>
+
+          <!-- Sélecteur des fichiers du dossier go-engine/ -->
+          <div class="px-4 py-2 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button
+                v-for="file in GO_ENGINE_FILES"
+                :key="file.filename"
+                type="button"
+                class="px-2.5 py-1 rounded border text-xs font-mono font-semibold transition-colors"
+                :class="
+                  selectedGoFile === file.filename
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                "
+                @click="selectedGoFile = file.filename"
+              >
+                {{ file.filename }}
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1 rounded border text-xs font-mono font-semibold transition-colors"
+                :class="
+                  selectedGoFile === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                "
+                @click="selectedGoFile = 'ALL'"
+              >
+                Tous les fichiers
+              </button>
+            </div>
+
+            <span v-if="currentGoFileEntry" class="text-[11px] font-mono text-slate-500">
+              poc-4-pokeengine/{{ currentGoFileEntry.relativePath }} — {{ currentGoFileEntry.description }}
+            </span>
+          </div>
+
           <pre
             class="p-4 bg-slate-50 text-xs font-mono text-slate-800 overflow-x-auto leading-relaxed max-h-[520px]"
-          >{{ GO_WASM_REFERENCE_SOURCE }}</pre>
+          >{{ displayedGoCode }}</pre>
         </div>
       </div>
     </section>
