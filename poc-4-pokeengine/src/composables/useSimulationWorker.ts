@@ -30,6 +30,16 @@ export function useSimulationWorker() {
   const result = ref<SimulationResultPayload | null>(null)
   const totalRunsTriggered = ref(0)
 
+  // Live notification banner & progress state
+  const showStatusBanner = ref(false)
+  const statusBannerPhase = ref<'RUNNING' | 'COMPLETED'>('RUNNING')
+  const progressCompletedGames = ref(0)
+  const progressTotalGames = ref(10000)
+  const progressPct = ref(0)
+  let runStartTimestamp = 0
+  let hideBannerTimeout: ReturnType<typeof setTimeout> | null = null
+  let minDisplayTimeout: ReturnType<typeof setTimeout> | null = null
+
   // Real-time Main Thread UI FPS Telemetry via requestAnimationFrame
   const currentFps = ref(60)
   const minFpsDuringRun = ref(60)
@@ -60,23 +70,51 @@ export function useSimulationWorker() {
     rafId = requestAnimationFrame(loop)
   }
 
+  function finalizeSimulationResult(payload: SimulationResultPayload) {
+    const elapsedSinceTrigger = performance.now() - runStartTimestamp
+    // Ensure the "Simulation en cours..." banner is perceptible for at least 260ms even on ultra-fast 3ms runs
+    const remainingMinDisplayMs = Math.max(0, 260 - elapsedSinceTrigger)
+
+    if (minDisplayTimeout) clearTimeout(minDisplayTimeout)
+    minDisplayTimeout = setTimeout(() => {
+      result.value = payload
+      isRunning.value = false
+      progressCompletedGames.value = payload.config.iterations
+      progressTotalGames.value = payload.config.iterations
+      progressPct.value = 100
+      statusBannerPhase.value = 'COMPLETED'
+      showStatusBanner.value = true
+
+      if (hideBannerTimeout) clearTimeout(hideBannerTimeout)
+      hideBannerTimeout = setTimeout(() => {
+        if (!isRunning.value) {
+          showStatusBanner.value = false
+        }
+      }, 3600)
+    }, remainingMinDisplayMs)
+  }
+
   function initWorker() {
     try {
       worker = new Worker(new URL('../worker/simulation.worker.ts', import.meta.url), {
         type: 'module',
       })
       worker.onmessage = (event: MessageEvent<WorkerResponseMessage>) => {
-        const { requestId, result: payload } = event.data
-        if (requestId === latestRequestId) {
-          result.value = payload
-          isRunning.value = false
+        const data = event.data
+        if (data.requestId !== latestRequestId) return
+
+        if (data.type === 'PROGRESS') {
+          progressCompletedGames.value = data.completedGames
+          progressTotalGames.value = data.totalGames
+          progressPct.value = Math.min(99, Math.round((data.completedGames / data.totalGames) * 100))
+        } else if (data.type === 'RESULT') {
+          finalizeSimulationResult(data.result)
         }
       }
       worker.onerror = () => {
-        // Fallback to synchronous execution if worker fails
         const rawConfig = structuredClone(toRaw(config))
-        result.value = runMonteCarloSimulation(rawConfig)
-        isRunning.value = false
+        const syncResult = runMonteCarloSimulation(rawConfig)
+        finalizeSimulationResult(syncResult)
       }
     } catch {
       worker = null
@@ -86,7 +124,16 @@ export function useSimulationWorker() {
   function triggerSimulation() {
     latestRequestId++
     const reqId = latestRequestId
+    if (hideBannerTimeout) clearTimeout(hideBannerTimeout)
+    if (minDisplayTimeout) clearTimeout(minDisplayTimeout)
+
+    runStartTimestamp = performance.now()
     isRunning.value = true
+    statusBannerPhase.value = 'RUNNING'
+    showStatusBanner.value = true
+    progressCompletedGames.value = 0
+    progressTotalGames.value = config.iterations
+    progressPct.value = 12
     minFpsDuringRun.value = currentFps.value
     totalRunsTriggered.value++
 
@@ -100,8 +147,8 @@ export function useSimulationWorker() {
       worker.postMessage(msg)
     } else {
       setTimeout(() => {
-        result.value = runMonteCarloSimulation(plainConfig)
-        isRunning.value = false
+        const syncRes = runMonteCarloSimulation(plainConfig)
+        finalizeSimulationResult(syncRes)
       }, 10)
     }
   }
@@ -132,6 +179,10 @@ export function useSimulationWorker() {
     triggerSimulation()
   }
 
+  function dismissStatusBanner() {
+    showStatusBanner.value = false
+  }
+
   onMounted(() => {
     startFpsMonitor()
     initWorker()
@@ -140,6 +191,8 @@ export function useSimulationWorker() {
 
   onBeforeUnmount(() => {
     if (rafId) cancelAnimationFrame(rafId)
+    if (hideBannerTimeout) clearTimeout(hideBannerTimeout)
+    if (minDisplayTimeout) clearTimeout(minDisplayTimeout)
     if (worker) worker.terminate()
   })
 
@@ -150,6 +203,12 @@ export function useSimulationWorker() {
     currentFps,
     minFpsDuringRun,
     totalRunsTriggered,
+    showStatusBanner,
+    statusBannerPhase,
+    progressCompletedGames,
+    progressTotalGames,
+    progressPct,
+    dismissStatusBanner,
     triggerSimulation,
     randomizeSeed,
     resetToDefaults,

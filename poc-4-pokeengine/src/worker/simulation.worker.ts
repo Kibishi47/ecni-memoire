@@ -6,15 +6,32 @@ export interface WorkerRequestMessage {
   config: SimulationConfig
 }
 
-export interface WorkerResponseMessage {
-  requestId: number
-  result: SimulationResultPayload
-}
+export type WorkerResponseMessage =
+  | {
+      type: 'PROGRESS'
+      requestId: number
+      completedGames: number
+      totalGames: number
+    }
+  | {
+      type: 'RESULT'
+      requestId: number
+      result: SimulationResultPayload
+    }
 
 self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
   const { requestId, config } = event.data
-  const result = runMonteCarloSimulation(config)
+  const result = runMonteCarloSimulation(config, (completedGames, totalGames) => {
+    const progressMsg: WorkerResponseMessage = {
+      type: 'PROGRESS',
+      requestId,
+      completedGames,
+      totalGames,
+    }
+    self.postMessage(progressMsg)
+  })
   const response: WorkerResponseMessage = {
+    type: 'RESULT',
     requestId,
     result,
   }

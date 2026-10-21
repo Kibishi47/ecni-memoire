@@ -2320,6 +2320,7 @@ function runBatchForMode(
   lookup: DeclarativeCardDefinition[],
   invariants: InvariantTrackerCounters,
   collectSamples: boolean,
+  onProgress?: (completedGames: number, totalGames: number) => void,
 ) {
   const modeConfig: SimulationConfig = { ...config, aiMode }
 
@@ -2343,8 +2344,12 @@ function runBatchForMode(
   let foundPerfectT2 = false
   let foundBrick = false
   let foundCandyPrized = false
+  const progressStep = Math.max(10, Math.floor(iterations / 10))
 
   for (let i = 0; i < iterations; i++) {
+    if (onProgress && (i + 1) % progressStep === 0) {
+      onProgress(i + 1, iterations)
+    }
     // Always record the first 100 games, plus any special archetype games if not yet captured
     const needSpecialSample =
       collectSamples && (!foundPerfectT2 || !foundBrick || !foundCandyPrized) && i < 1500
@@ -2422,7 +2427,10 @@ function runBatchForMode(
 /**
  * Master entry point: executes the full Monte-Carlo simulation + Hypergeometric math validation + Invariant audit.
  */
-export function runMonteCarloSimulation(config: SimulationConfig): SimulationResultPayload {
+export function runMonteCarloSimulation(
+  config: SimulationConfig,
+  onProgress?: (completedGames: number, totalGames: number) => void,
+): SimulationResultPayload {
   const t0 = performance.now()
 
   const registry =
@@ -2464,6 +2472,7 @@ export function runMonteCarloSimulation(config: SimulationConfig): SimulationRes
     lookup,
     invariants,
     true,
+    onProgress,
   )
 
   // Also compute comparison metrics for the other two AI modes (using up to 1,000 iterations for instant responsiveness)

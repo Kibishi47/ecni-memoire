@@ -7,7 +7,9 @@ import {
   Cpu,
   Database,
   GitBranch,
+  Loader2,
   ShieldCheck,
+  X,
 } from 'lucide-vue-next'
 import GameInspectorTab from '@/components/GameInspectorTab.vue'
 import ParameterSidebar from '@/components/ParameterSidebar.vue'
@@ -22,6 +24,13 @@ const {
   result,
   currentFps,
   minFpsDuringRun,
+  totalRunsTriggered,
+  showStatusBanner,
+  statusBannerPhase,
+  progressCompletedGames,
+  progressTotalGames,
+  progressPct,
+  dismissStatusBanner,
   triggerSimulation,
   randomizeSeed,
   resetToDefaults,
@@ -74,14 +83,25 @@ function resetRegistryOnly() {
         <!-- Live Hardware & Compliance Status Pills -->
         <div v-if="result" class="flex flex-wrap items-center gap-2 text-xs font-mono">
           <div
-            class="px-2.5 py-1 rounded-md border bg-slate-50 border-slate-200 text-slate-700 flex items-center gap-1.5"
+            class="px-2.5 py-1 rounded-md border flex items-center gap-1.5 transition-colors"
+            :class="
+              isRunning
+                ? 'bg-blue-50 border-blue-300 text-blue-800 font-semibold'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            "
           >
-            <Cpu class="w-3.5 h-3.5 text-blue-600" />
-            <span>{{ result.telemetry.executionTimeMs.toFixed(1) }} ms</span>
-            <span class="text-slate-300">|</span>
-            <strong class="text-slate-900"
-              >{{ result.telemetry.gamesPerSecond.toLocaleString('fr-FR') }} parties/s</strong
-            >
+            <Loader2 v-if="isRunning" class="w-3.5 h-3.5 text-blue-600 animate-spin" />
+            <Cpu v-else class="w-3.5 h-3.5 text-blue-600" />
+            <span v-if="isRunning">
+              Calcul {{ config.iterations.toLocaleString('fr-FR') }} parties ({{ progressPct }}%)...
+            </span>
+            <template v-else>
+              <span>{{ result.telemetry.executionTimeMs.toFixed(1) }} ms</span>
+              <span class="text-slate-300">|</span>
+              <strong class="text-slate-900"
+                >{{ result.telemetry.gamesPerSecond.toLocaleString('fr-FR') }} parties/s</strong
+              >
+            </template>
           </div>
 
           <div
@@ -100,6 +120,65 @@ function resetRegistryOnly() {
               {{ result.invariantsAudit.totalGamesAudited.toLocaleString('fr-FR') }} (100%)</span
             >
           </div>
+        </div>
+      </div>
+
+      <!-- Bandeau de Notification d'Exécution de Simulation (Visible sous le Header) -->
+      <div
+        v-if="showStatusBanner"
+        class="mt-2.5 px-3.5 py-2 rounded-lg border text-xs font-mono flex flex-wrap items-center justify-between gap-3 transition-all"
+        :class="
+          statusBannerPhase === 'RUNNING'
+            ? 'bg-blue-50 border-blue-300 text-blue-900'
+            : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+        "
+      >
+        <div class="flex items-center gap-2.5 min-w-0">
+          <Loader2
+            v-if="statusBannerPhase === 'RUNNING'"
+            class="w-4 h-4 text-blue-600 animate-spin shrink-0"
+          />
+          <CheckCircle2 v-else class="w-4 h-4 text-emerald-600 shrink-0" />
+
+          <div class="truncate">
+            <template v-if="statusBannerPhase === 'RUNNING'">
+              <strong class="font-bold">Simulation #{{ totalRunsTriggered }} en cours :</strong>
+              Exécution de
+              <strong>{{ progressTotalGames.toLocaleString('fr-FR') }} parties</strong>
+              (T1➔T{{ config.maxTurns }} • Seed #{{ config.seed }}) dans le Web Worker...
+              <span v-if="progressCompletedGames > 0" class="ml-1 text-blue-700">
+                [{{ progressCompletedGames.toLocaleString('fr-FR') }} /
+                {{ progressTotalGames.toLocaleString('fr-FR') }} — {{ progressPct }} %]
+              </span>
+            </template>
+            <template v-else-if="result">
+              <strong class="font-bold">Simulation #{{ totalRunsTriggered }} terminée :</strong>
+              <strong>{{ result.config.iterations.toLocaleString('fr-FR') }} parties</strong>
+              (T1➔T{{ result.config.maxTurns }} • Seed #{{ result.config.seed }}) calculées en
+              <strong>{{ result.telemetry.executionTimeMs.toFixed(1) }} ms</strong>
+              ({{ result.telemetry.gamesPerSecond.toLocaleString('fr-FR') }} parties/s • UI maintenue à {{ currentFps }} FPS)
+            </template>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 shrink-0">
+          <!-- Barre de progression en direct -->
+          <div class="w-28 sm:w-36 h-2 rounded-full bg-white/80 border border-slate-300 overflow-hidden">
+            <div
+              class="h-full transition-all duration-150"
+              :class="statusBannerPhase === 'RUNNING' ? 'bg-blue-600' : 'bg-emerald-600'"
+              :style="{ width: `${progressPct}%` }"
+            />
+          </div>
+
+          <button
+            type="button"
+            class="p-0.5 rounded hover:bg-black/5 text-slate-500 hover:text-slate-800"
+            title="Masquer la notification"
+            @click="dismissStatusBanner"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </header>
@@ -177,7 +256,10 @@ function resetRegistryOnly() {
         </div>
 
         <!-- Tab Content Container -->
-        <div class="p-5 flex-1 overflow-y-auto">
+        <div
+          class="p-5 flex-1 overflow-y-auto transition-opacity duration-150"
+          :class="isRunning ? 'opacity-70' : 'opacity-100'"
+        >
           <template v-if="result">
             <TelemetryAndAuditTab
               v-if="activeTab === 'TELEMETRY_AUDIT'"
