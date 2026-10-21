@@ -115,7 +115,7 @@ function nextGame() {
               :key="g.gameIndex"
               :value="idx"
             >
-              Partie #{{ g.gameIndex }} (Seed {{ g.seedUsed }} • Score {{ g.finalBoardScore }} pts)
+              Partie #{{ g.gameIndex }} ({{ g.turnsPlayed }}/{{ g.maxTurnsConfigured }} tours • Seed {{ g.seedUsed }} • {{ g.finalBoardScore }} pts)
             </option>
           </select>
 
@@ -193,6 +193,18 @@ function nextGame() {
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+          <span
+            class="px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold border"
+            :class="
+              currentGame.endedEarly
+                ? currentGame.endReason === 'VICTORY_ALL_PRIZES'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-blue-50 text-blue-700 border-blue-200'
+            "
+          >
+            {{ currentGame.turnsPlayed }} / {{ currentGame.maxTurnsConfigured }} tour(s) • {{ currentGame.endReasonLabel }}
+          </span>
           <span
             class="px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold border"
             :class="
@@ -353,6 +365,33 @@ function nextGame() {
         >
           <AlertOctagon class="w-4 h-4 text-amber-600 shrink-0" />
           <strong>{{ turn.disruptionApplied }}</strong>
+        </div>
+
+        <!-- Résolution d'Attaque de Fin de Tour si présente -->
+        <div
+          v-if="turn.attackExecuted"
+          class="px-5 py-2 bg-emerald-50/70 border-b border-emerald-200 text-emerald-800 text-xs font-mono flex items-center gap-2"
+        >
+          <Swords class="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{{ turn.attackExecuted }}</span>
+        </div>
+
+        <!-- Événement de Fin de Partie Anticipée / Terminale si présent -->
+        <div
+          v-if="turn.terminalEvent"
+          class="px-5 py-2.5 border-b text-xs font-mono font-bold flex items-center gap-2"
+          :class="
+            currentGame.endReason === 'VICTORY_ALL_PRIZES'
+              ? 'bg-emerald-100/80 border-emerald-300 text-emerald-900'
+              : 'bg-red-100/80 border-red-300 text-red-900'
+          "
+        >
+          <CheckCircle2
+            v-if="currentGame.endReason === 'VICTORY_ALL_PRIZES'"
+            class="w-4 h-4 text-emerald-700 shrink-0"
+          />
+          <AlertOctagon v-else class="w-4 h-4 text-red-700 shrink-0" />
+          <span>🏁 {{ turn.terminalEvent }}</span>
         </div>
 
         <div class="p-5 grid grid-cols-1 xl:grid-cols-12 gap-5">

@@ -7,8 +7,8 @@ export const GO_WASM_REFERENCE_SOURCE = `//go:build js && wasm
 package pokeengine
 
 // PackedCard encodes a Pokémon TCG card & live board state in a single 16-bit integer (uint16):
-//   Bits 0..5   (6 bits) : CardID (1..31) — Declarative Registry Template ID
-//   Bits 6..8   (3 bits) : TurnPlayed (0..7) — Enforces Rule Invariant #2 (turnPlayed < currentTurn)
+//   Bits 0..4   (5 bits) : CardID (1..31) — Declarative Registry Template ID
+//   Bits 5..8   (4 bits) : TurnPlayed (0..15) — Enforces Rule Invariant #2 (turnPlayed < currentTurn) up to T10+
 //   Bits 9..12  (4 bits) : AttachedEnergies (0..15) — Fire Energy counter
 //   Bit  13     (1 bit)  : ForestSealStone (VSTAR Power available on this Pokémon V)
 //   Bit  14     (1 bit)  : AbilityUsedThisTurn (Once-per-turn lock for Quick Search)
@@ -16,9 +16,9 @@ package pokeengine
 type PackedCard uint16
 
 const (
-	MaskCardID      PackedCard = 0x003F
-	ShiftTurnPlayed uint16     = 6
-	MaskTurnPlayed  PackedCard = 0x01C0
+	MaskCardID      PackedCard = 0x001F
+	ShiftTurnPlayed uint16     = 5
+	MaskTurnPlayed  PackedCard = 0x01E0
 	ShiftEnergies   uint16     = 9
 	MaskEnergies    PackedCard = 0x1E00
 	BitSealStone    PackedCard = 1 << 13

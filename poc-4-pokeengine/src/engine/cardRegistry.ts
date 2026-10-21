@@ -2,16 +2,16 @@ import type { DeclarativeCardDefinition, SimulationConfig } from '@/types/engine
 
 /**
  * Bit-packing constants for Uint16 card/board representation (matches Go [60]uint16 struct)
- * Bits 0..5   (6 bits) : Card Template ID (1..31)
- * Bits 6..8   (3 bits) : Turn Played (0..7) -> enforces Invariant #2 (turnPlayed < currentTurn)
+ * Bits 0..4   (5 bits) : Card Template ID (1..31)
+ * Bits 5..8   (4 bits) : Turn Played (0..15) -> enforces Invariant #2 (turnPlayed < currentTurn) up to Turn 10+
  * Bits 9..12  (4 bits) : Attached Fire Energies count (0..15)
  * Bit  13     (1 bit)  : Forest Seal Stone attached (enables VSTAR Power)
  * Bit  14     (1 bit)  : Once-per-turn Ability used this turn
  * Bit  15     (1 bit)  : Generic Tool attached
  */
-export const PACK_CARD_ID_MASK = 0x003f
-export const PACK_TURN_SHIFT = 6
-export const PACK_TURN_MASK = 0x01c0
+export const PACK_CARD_ID_MASK = 0x001f
+export const PACK_TURN_SHIFT = 5
+export const PACK_TURN_MASK = 0x01e0
 export const PACK_ENERGY_SHIFT = 9
 export const PACK_ENERGY_MASK = 0x1e00
 export const PACK_SEAL_STONE_BIT = 1 << 13
@@ -28,7 +28,7 @@ export function packCard(
 ): number {
   return (
     (cardId & PACK_CARD_ID_MASK) |
-    ((turnPlayed & 0x7) << PACK_TURN_SHIFT) |
+    ((turnPlayed & 0xf) << PACK_TURN_SHIFT) |
     ((energies & 0xf) << PACK_ENERGY_SHIFT) |
     (hasSealStone ? PACK_SEAL_STONE_BIT : 0) |
     (abilityUsed ? PACK_ABILITY_USED_BIT : 0) |
@@ -49,7 +49,7 @@ export function unpackEnergies(packed: number): number {
 }
 
 export function setPackedTurnPlayed(packed: number, turn: number): number {
-  return (packed & ~PACK_TURN_MASK) | ((turn & 0x7) << PACK_TURN_SHIFT)
+  return (packed & ~PACK_TURN_MASK) | ((turn & 0xf) << PACK_TURN_SHIFT)
 }
 
 export function addPackedEnergies(packed: number, delta: number): number {
@@ -62,7 +62,7 @@ export function evolvePackedPokemon(packedBase: number, newCardId: number, curre
   // Preserves attached energies and tools, updates cardId and sets turnPlayed = currentTurn
   // (also resets abilityUsedThisTurn on newly evolved Pokemon)
   const preservedFlags = packedBase & (PACK_ENERGY_MASK | PACK_SEAL_STONE_BIT | PACK_OTHER_TOOL_BIT)
-  return (newCardId & PACK_CARD_ID_MASK) | ((currentTurn & 0x7) << PACK_TURN_SHIFT) | preservedFlags
+  return (newCardId & PACK_CARD_ID_MASK) | ((currentTurn & 0xf) << PACK_TURN_SHIFT) | preservedFlags
 }
 
 /**

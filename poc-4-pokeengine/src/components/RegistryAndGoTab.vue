@@ -320,23 +320,23 @@ async function copyGoSource() {
 
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs font-mono">
             <div class="p-2.5 rounded bg-white border border-slate-200">
-              <div class="text-[10px] text-slate-500">Bits 0..5 (6 bits)</div>
+              <div class="text-[10px] text-slate-500">Bits 0..4 (5 bits)</div>
               <div class="font-bold text-slate-900 mt-0.5">CardID = {{ selectedCard.id }}</div>
-              <div class="text-[10px] text-emerald-700">{{ selectedCard.id.toString(2).padStart(6, '0') }}</div>
+              <div class="text-[10px] text-emerald-700">{{ selectedCard.id.toString(2).padStart(5, '0') }}</div>
             </div>
             <div class="p-2.5 rounded bg-white border border-slate-200">
-              <div class="text-[10px] text-slate-500">Bits 6..8 (3 bits)</div>
+              <div class="text-[10px] text-slate-500">Bits 5..8 (4 bits)</div>
               <div class="font-bold text-slate-900 mt-0.5 flex items-center justify-between">
                 <span>TurnPlayed = T{{ previewTurnPlayed }}</span>
                 <button
                   type="button"
                   class="px-1.5 py-0.2 rounded bg-slate-100 hover:bg-slate-200 text-[10px]"
-                  @click="previewTurnPlayed = (previewTurnPlayed % 4) + 1"
+                  @click="previewTurnPlayed = (previewTurnPlayed % 10) + 1"
                 >
                   +1
                 </button>
               </div>
-              <div class="text-[10px] text-blue-700">{{ previewTurnPlayed.toString(2).padStart(3, '0') }}</div>
+              <div class="text-[10px] text-blue-700">{{ previewTurnPlayed.toString(2).padStart(4, '0') }}</div>
             </div>
             <div class="p-2.5 rounded bg-white border border-slate-200">
               <div class="text-[10px] text-slate-500">Bits 9..12 (4 bits)</div>

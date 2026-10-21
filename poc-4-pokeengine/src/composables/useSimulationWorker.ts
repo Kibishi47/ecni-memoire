@@ -11,6 +11,7 @@ import type { WorkerRequestMessage, WorkerResponseMessage } from '@/worker/simul
 export function useSimulationWorker() {
   const config = reactive<SimulationConfig>({
     iterations: 10000,
+    maxTurns: 4,
     aiMode: 'OPTIMAL_BEAM',
     goingFirst: false, // 2nd player allows T1 Arven/Supporter by default, toggleable in 1 click
     prizesEnabled: true,
@@ -112,6 +113,7 @@ export function useSimulationWorker() {
 
   function resetToDefaults() {
     config.iterations = 10000
+    config.maxTurns = 4
     config.aiMode = 'OPTIMAL_BEAM'
     config.goingFirst = false
     config.prizesEnabled = true

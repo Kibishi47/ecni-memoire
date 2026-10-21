@@ -4,6 +4,7 @@ import type {
   BoardPokemonSnapshot,
   DecisionBranchRecord,
   DeclarativeCardDefinition,
+  GameEndReason,
   RuleInvariantAudit,
   SampledGameRecord,
   SimulationConfig,
@@ -1710,8 +1711,8 @@ function createBoardPokemonSnapshot(
 }
 
 /**
- * Runs a single complete game from Setup through Turn 4.
- * If `recordDetailedLog` is true, records the full Turn 1..4 timeline and Beam Search branches for Tab 2 Inspector.
+ * Runs a single complete game from Setup through `config.maxTurns` (1..10 turns),
+ * stopping early if a terminal condition (6 Prizes claimed, Deck-Out, or KO with empty Bench) occurs.
  */
 export function simulateSingleGame(
   gameIndex: number,
@@ -1732,11 +1733,15 @@ export function simulateSingleGame(
   charizardPrizedCount: number
   boardScoreT2: number
   boardScoreT4: number
+  turnsPlayed: number
+  endedEarly: boolean
+  endReason: GameEndReason
   thinningTotal: number
   branchesEvaluated: number
   actionsExecuted: number
   sampledRecord: SampledGameRecord | null
 } {
+  const maxTurns = Math.max(1, Math.min(10, config.maxTurns || 4))
   const gameSeed = deriveGameSeed(config.seed, gameIndex)
   const rng = new Mulberry32(gameSeed)
   const state = createEmptyGameState(config.goingFirst)
@@ -1818,6 +1823,7 @@ export function simulateSingleGame(
   let rareCandyPrizedCount = 0
   let charizardPrizedCount = 0
   const prizeCardNames: string[] = []
+  let virtualPrizesRemaining = 6
 
   if (config.prizesEnabled) {
     state.prizesLen = 6
@@ -1839,13 +1845,17 @@ export function simulateSingleGame(
   let turn2CharizardReady = false
   let pidgeotInPlayByT2 = false
   let boardScoreT2 = 0
-  let boardScoreT4 = 0
+  let boardScoreFinal = 0
   let totalBranchesEvaluated = 0
   let totalActionsExecuted = 0
+  let turnsPlayed = 0
+  let endReason: GameEndReason = 'MAX_TURNS_REACHED'
+  let endReasonLabel = `Horizon de ${maxTurns} tour(s) atteint`
   const turnsTimeline: TurnTimelineRecord[] = []
 
-  // 4. Main Simulation Loop: Turns 1 to 4
-  for (let turn = 1; turn <= 4; turn++) {
+  // 4. Main Simulation Loop: Turns 1 to maxTurns (with early termination if game ends)
+  for (let turn = 1; turn <= maxTurns; turn++) {
+    turnsPlayed = turn
     state.currentTurn = turn
     state.supporterPlayedCount = 0
     state.energyAttachedCount = 0
@@ -1861,6 +1871,8 @@ export function simulateSingleGame(
     }
 
     let disruptionMessage: string | null = null
+    let attackMessage: string | null = null
+    let terminalEventMessage: string | null = null
 
     // Apply Turn 3 Opponent Disruption if configured
     if (turn === 3 && config.turn3Disruption !== 'NONE') {
@@ -1909,9 +1921,73 @@ export function simulateSingleGame(
           const promotedName = lookup[unpackCardId(promoted)]?.name ?? 'Banc'
           disruptionMessage = `Perturbation T3 : KO de ${koName} Actif ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
         } else {
+          // Early Game Over Condition #1: No Pokemon left on Bench after Active KO!
           disruptionMessage = `Perturbation T3 : KO de ${koName} Actif (Banc vide)`
+          endReason = 'DEFEAT_NO_POKEMON'
+          endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par KO sans Pokémon de remplacement sur le Banc`
+          terminalEventMessage = endReasonLabel
+          boardScoreFinal = evaluateBoardState(state, lookup, false).score
+          if (recordDetailedLog) {
+            turnsTimeline.push({
+              turnNumber: turn,
+              drawnCardName: null,
+              disruptionApplied: disruptionMessage,
+              attackExecuted: null,
+              terminalEvent: terminalEventMessage,
+              deckCountStart: state.deckLen,
+              deckCountEnd: state.deckLen,
+              branchesEvaluated: 0,
+              branches: [],
+              activePokemon: null,
+              benchPokemon: [],
+              handCardNames: [],
+              prizesRemaining: config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining,
+              supporterPlayedThisTurn: false,
+              energyAttachedThisTurn: false,
+              vstarUsedInGame: state.vstarUsedInGame,
+            })
+          }
+          break
         }
       }
+    }
+
+    // Early Game Over Condition #2: Start-of-turn Deck-Out (0 cards in deck before mandatory draw)
+    if (state.deckLen <= 0) {
+      endReason = 'DEFEAT_DECK_OUT'
+      endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par Deck-Out (0 carte dans le deck à la pioche du tour)`
+      terminalEventMessage = endReasonLabel
+      boardScoreFinal = evaluateBoardState(state, lookup, false).score
+      if (recordDetailedLog) {
+        const benchSnapshots: BoardPokemonSnapshot[] = []
+        for (let b = 0; b < state.benchLen; b++) {
+          benchSnapshots.push(createBoardPokemonSnapshot(state.bench[b], lookup))
+        }
+        const handNames: string[] = []
+        for (let h = 0; h < state.handLen; h++) {
+          handNames.push(lookup[unpackCardId(state.hand[h])]?.name ?? 'Carte')
+        }
+        turnsTimeline.push({
+          turnNumber: turn,
+          drawnCardName: null,
+          disruptionApplied: disruptionMessage,
+          attackExecuted: null,
+          terminalEvent: terminalEventMessage,
+          deckCountStart: 0,
+          deckCountEnd: 0,
+          branchesEvaluated: 0,
+          branches: [],
+          activePokemon:
+            state.active !== 0 ? createBoardPokemonSnapshot(state.active, lookup) : null,
+          benchPokemon: benchSnapshots,
+          handCardNames: handNames,
+          prizesRemaining: config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining,
+          supporterPlayedThisTurn: false,
+          energyAttachedThisTurn: false,
+          vstarUsedInGame: state.vstarUsedInGame,
+        })
+      }
+      break
     }
 
     const deckCountStart = state.deckLen
@@ -2041,18 +2117,61 @@ export function simulateSingleGame(
       }
     }
 
-    // Prize claim simulation when Charizard ex attacks on Turn 2+
-    if (
-      turn >= 2 &&
-      state.active !== 0 &&
-      unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX &&
-      unpackEnergies(state.active) >= 2 &&
-      state.prizesLen > 0
-    ) {
-      state.prizesLen--
-      const claimedPrize = state.prizes[state.prizesLen]
-      state.prizes[state.prizesLen] = 0
-      state.hand[state.handLen++] = packCard(unpackCardId(claimedPrize))
+    // Attack & Prize claim simulation on Turn 2+
+    if (turn >= 2 && state.active !== 0) {
+      const activeCid = unpackCardId(state.active)
+      const activeEnergies = unpackEnergies(state.active)
+
+      if (activeCid === CARD_IDS.CHARIZARD_EX && activeEnergies >= 2) {
+        // Charizard ex attacks with Combustion Obscure (180+ damage):
+        // Takes 1 Prize on Turn 2 against a single-prize lead, and 2 Prizes on Turn 3+ against opponent's ex/V
+        const prizesToClaim = turn >= 3 ? 2 : 1
+        let claimedNames: string[] = []
+        let claimedCount = 0
+
+        if (config.prizesEnabled) {
+          for (let c = 0; c < prizesToClaim && state.prizesLen > 0; c++) {
+            state.prizesLen--
+            const claimedPrize = state.prizes[state.prizesLen]
+            state.prizes[state.prizesLen] = 0
+            const pCid = unpackCardId(claimedPrize)
+            state.hand[state.handLen++] = packCard(pCid)
+            claimedCount++
+            if (recordDetailedLog) {
+              claimedNames.push(lookup[pCid]?.name ?? 'Carte')
+            }
+          }
+          virtualPrizesRemaining = state.prizesLen
+        } else {
+          claimedCount = Math.min(prizesToClaim, virtualPrizesRemaining)
+          virtualPrizesRemaining -= claimedCount
+        }
+
+        if (recordDetailedLog && claimedCount > 0) {
+          attackMessage =
+            claimedNames.length > 0
+              ? `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse : récupère ${claimedCount} Récompense(s) (${claimedNames.join(', ')})`
+              : `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse (${claimedCount} Récompense(s) théorique(s), reste ${virtualPrizesRemaining})`
+        }
+      } else if (activeCid === CARD_IDS.PIDGEOT_EX && activeEnergies >= 2) {
+        // Pidgeot ex attacks with Bourrasque Tournoyante (120 damage): takes 1 Prize
+        if (config.prizesEnabled && state.prizesLen > 0) {
+          state.prizesLen--
+          const claimedPrize = state.prizes[state.prizesLen]
+          state.prizes[state.prizesLen] = 0
+          const pCid = unpackCardId(claimedPrize)
+          state.hand[state.handLen++] = packCard(pCid)
+          virtualPrizesRemaining = state.prizesLen
+          if (recordDetailedLog) {
+            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ récupère 1 Récompense (${lookup[pCid]?.name ?? 'Carte'})`
+          }
+        } else if (!config.prizesEnabled && virtualPrizesRemaining > 0) {
+          virtualPrizesRemaining--
+          if (recordDetailedLog) {
+            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ 1 Récompense théorique prise (reste ${virtualPrizesRemaining})`
+          }
+        }
+      }
     }
 
     // Evaluate Turn Milestones
@@ -2060,7 +2179,11 @@ export function simulateSingleGame(
       const charCount = countLineOnBoard(state, lookup, 'CHARIZARD')
       const pidgCount = countLineOnBoard(state, lookup, 'PIDGEOT')
       turn1SetupSuccess =
-        (charCount >= 2 && pidgCount >= 1) || (charCount >= 1 && pidgCount >= 1 && state.benchLen >= 2)
+        (charCount >= 2 && pidgCount >= 1) ||
+        (charCount >= 1 && pidgCount >= 1 && state.benchLen >= 2)
+      if (maxTurns === 1) {
+        boardScoreT2 = evaluateBoardState(state, lookup, false).score
+      }
     }
     if (turn === 2) {
       const activeIsZardReady =
@@ -2069,8 +2192,18 @@ export function simulateSingleGame(
       pidgeotInPlayByT2 = hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)
       boardScoreT2 = evaluateBoardState(state, lookup, false).score
     }
-    if (turn === 4) {
-      boardScoreT4 = evaluateBoardState(state, lookup, false).score
+
+    boardScoreFinal = evaluateBoardState(state, lookup, false).score
+
+    // Early Game Over Condition #3: All 6 Prizes Claimed (Victory!)
+    const remainingPrizesNow = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
+    if (remainingPrizesNow <= 0) {
+      endReason = 'VICTORY_ALL_PRIZES'
+      endReasonLabel =
+        turn < maxTurns
+          ? `Victoire anticipée au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées (Partie arrêtée)`
+          : `Victoire au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées`
+      terminalEventMessage = endReasonLabel
     }
 
     if (recordDetailedLog) {
@@ -2087,6 +2220,8 @@ export function simulateSingleGame(
         turnNumber: turn,
         drawnCardName,
         disruptionApplied: disruptionMessage,
+        attackExecuted: attackMessage,
+        terminalEvent: terminalEventMessage,
         deckCountStart,
         deckCountEnd: state.deckLen,
         branchesEvaluated: config.aiMode === 'OPTIMAL_BEAM' ? 3 : 1,
@@ -2095,22 +2230,32 @@ export function simulateSingleGame(
           state.active !== 0 ? createBoardPokemonSnapshot(state.active, lookup) : null,
         benchPokemon: benchSnapshots,
         handCardNames: handNames,
-        prizesRemaining: state.prizesLen,
+        prizesRemaining: remainingPrizesNow,
         supporterPlayedThisTurn: state.supporterPlayedCount > 0,
         energyAttachedThisTurn: state.energyAttachedCount > 0,
         vstarUsedInGame: state.vstarUsedInGame,
       })
     }
+
+    if (endReason !== 'MAX_TURNS_REACHED') {
+      break
+    }
   }
 
+  const endedEarly = turnsPlayed < maxTurns || endReason !== 'MAX_TURNS_REACHED'
   const pidgeotInPlay = hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX) || pidgeotInPlayByT2
   const hasAnyCharizard = hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX) || turn2CharizardReady
-  const bricked = !turn2CharizardReady && !hasAnyCharizard && !pidgeotInPlay
+  const bricked =
+    maxTurns >= 2
+      ? !turn2CharizardReady && !hasAnyCharizard && !pidgeotInPlay
+      : !turn1SetupSuccess
 
   let sampledRecord: SampledGameRecord | null = null
   if (recordDetailedLog) {
     const tags: SampledGameRecord['tags'] = []
-    if (turn2CharizardReady && pidgeotInPlayByT2) tags.push('PERFECT_T2')
+    if ((turn2CharizardReady && pidgeotInPlayByT2) || (maxTurns === 1 && turn1SetupSuccess)) {
+      tags.push('PERFECT_T2')
+    }
     if (bricked) tags.push('BRICK')
     if (rareCandyPrizedCount >= 2 || (rareCandyPrizedCount >= 1 && charizardPrizedCount >= 1)) {
       tags.push('CANDY_PRIZED')
@@ -2131,7 +2276,12 @@ export function simulateSingleGame(
       pidgeotInPlayByT2,
       bricked,
       rareCandyLockedInPrizes: rareCandyPrizedCount >= 2,
-      finalBoardScore: boardScoreT4,
+      finalBoardScore: boardScoreFinal,
+      turnsPlayed,
+      maxTurnsConfigured: maxTurns,
+      endedEarly,
+      endReason,
+      endReasonLabel,
       tags,
       turns: turnsTimeline,
     }
@@ -2148,7 +2298,10 @@ export function simulateSingleGame(
     rareCandyPrizedCount,
     charizardPrizedCount,
     boardScoreT2,
-    boardScoreT4,
+    boardScoreT4: boardScoreFinal,
+    turnsPlayed,
+    endedEarly,
+    endReason,
     thinningTotal: state.thinningCount,
     branchesEvaluated: totalBranchesEvaluated,
     actionsExecuted: totalActionsExecuted,
@@ -2180,6 +2333,8 @@ function runBatchForMode(
   let candyPrizedWarningCount = 0
   let sumScoreT2 = 0
   let sumScoreT4 = 0
+  let sumTurnsPlayed = 0
+  let earlyEndedCount = 0
   let sumThinning = 0
   let totalBranches = 0
   let totalActions = 0
@@ -2216,6 +2371,8 @@ function runBatchForMode(
     }
     sumScoreT2 += res.boardScoreT2
     sumScoreT4 += res.boardScoreT4
+    sumTurnsPlayed += res.turnsPlayed
+    if (res.endedEarly) earlyEndedCount++
     sumThinning += res.thinningTotal
     totalBranches += res.branchesEvaluated
     totalActions += res.actionsExecuted
@@ -2253,6 +2410,8 @@ function runBatchForMode(
     candyPrizedWarningCount,
     sumScoreT2,
     sumScoreT4,
+    sumTurnsPlayed,
+    earlyEndedCount,
     sumThinning,
     totalBranches,
     totalActions,
@@ -2474,6 +2633,8 @@ export function runMonteCarloSimulation(config: SimulationConfig): SimulationRes
       avgMulligansPerGame: Number((mainBatch.totalMulligans / N).toFixed(2)),
       avgBoardScoreT2: Number((mainBatch.sumScoreT2 / N).toFixed(1)),
       avgBoardScoreT4: Number((mainBatch.sumScoreT4 / N).toFixed(1)),
+      avgTurnsPlayed: Number((mainBatch.sumTurnsPlayed / N).toFixed(2)),
+      earlyTerminationRatePct: Number(((mainBatch.earlyEndedCount / N) * 100).toFixed(1)),
     },
     aiComparison,
     sampledGames: mainBatch.sampledGames,

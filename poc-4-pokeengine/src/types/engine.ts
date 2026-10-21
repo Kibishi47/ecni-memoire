@@ -86,8 +86,15 @@ export type AIStrategyMode = 'OPTIMAL_BEAM' | 'GREEDY' | 'NAIVE_RANDOM'
 
 export type Turn3DisruptionMode = 'NONE' | 'IONO_HAND_TO_3' | 'KO_ACTIVE_POKEMON'
 
+export type GameEndReason =
+  | 'MAX_TURNS_REACHED'
+  | 'VICTORY_ALL_PRIZES'
+  | 'DEFEAT_DECK_OUT'
+  | 'DEFEAT_NO_POKEMON'
+
 export interface SimulationConfig {
   iterations: 100 | 1000 | 10000 | 100000
+  maxTurns: number // 1..10 turns (early stop if game ends before maxTurns)
   aiMode: AIStrategyMode
   goingFirst: boolean
   prizesEnabled: boolean
@@ -127,6 +134,8 @@ export interface TurnTimelineRecord {
   turnNumber: number
   drawnCardName: string | null
   disruptionApplied: string | null
+  attackExecuted: string | null
+  terminalEvent: string | null
   deckCountStart: number
   deckCountEnd: number
   branchesEvaluated: number
@@ -155,6 +164,11 @@ export interface SampledGameRecord {
   bricked: boolean
   rareCandyLockedInPrizes: boolean
   finalBoardScore: number
+  turnsPlayed: number
+  maxTurnsConfigured: number
+  endedEarly: boolean
+  endReason: GameEndReason
+  endReasonLabel: string
   tags: ('PERFECT_T2' | 'BRICK' | 'CANDY_PRIZED' | 'NORMAL')[]
   turns: TurnTimelineRecord[]
 }
@@ -220,6 +234,8 @@ export interface SimulationResultPayload {
     avgMulligansPerGame: number
     avgBoardScoreT2: number
     avgBoardScoreT4: number
+    avgTurnsPlayed: number
+    earlyTerminationRatePct: number
   }
   aiComparison: AIModeComparisonMetric[]
   sampledGames: SampledGameRecord[]

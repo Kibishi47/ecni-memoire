@@ -51,9 +51,19 @@ const disruptionOptions: { value: Turn3DisruptionMode; label: string }[] = [
   { value: 'KO_ACTIVE_POKEMON', label: 'KO du Pokémon Actif au Tour 3' },
 ]
 
+const turnOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 function setIterations(val: SimulationConfig['iterations']) {
   props.config.iterations = val
   emit('run')
+}
+
+function setMaxTurns(turns: number) {
+  const clamped = Math.max(1, Math.min(10, turns))
+  if (props.config.maxTurns !== clamped) {
+    props.config.maxTurns = clamped
+    emit('run')
+  }
 }
 
 function setAiMode(val: AIStrategyMode) {
@@ -123,33 +133,70 @@ function onSeedInputChange(event: Event) {
     </div>
 
     <div class="p-4 space-y-5 overflow-y-auto flex-1">
-      <!-- 1. Volume de simulations (N) -->
-      <section class="space-y-2">
-        <div class="flex items-center justify-between">
-          <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-            <span
-              class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
-              >1</span
+      <!-- 1. Volume de simulations (N) & Horizon de Tours (1 à 10) -->
+      <section class="space-y-3">
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <span
+                class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
+                >1</span
+              >
+              Volume Monte-Carlo (N)
+            </label>
+            <span class="text-[11px] font-mono text-slate-500">Web Worker</span>
+          </div>
+          <div class="grid grid-cols-4 gap-1.5">
+            <button
+              v-for="n in iterationOptions"
+              :key="n"
+              type="button"
+              class="py-1.5 px-2 rounded border text-xs font-mono font-semibold transition-all"
+              :class="
+                config.iterations === n
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+              "
+              @click="setIterations(n)"
             >
-            Volume Monte-Carlo (N)
-          </label>
-          <span class="text-[11px] font-mono text-slate-500">Web Worker</span>
+              {{ n.toLocaleString('fr-FR') }}
+            </button>
+          </div>
         </div>
-        <div class="grid grid-cols-4 gap-1.5">
-          <button
-            v-for="n in iterationOptions"
-            :key="n"
-            type="button"
-            class="py-1.5 px-2 rounded border text-xs font-mono font-semibold transition-all"
-            :class="
-              config.iterations === n
-                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
-            "
-            @click="setIterations(n)"
-          >
-            {{ n.toLocaleString('fr-FR') }}
-          </button>
+
+        <!-- Sélecteur du Nombre de Tours (1 à 10 tours max avec arrêt anticipé) -->
+        <div class="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-800">
+              Nombre de Tours max (1 à 10)
+            </span>
+            <span
+              class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200"
+            >
+              T1 ➔ T{{ config.maxTurns }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-5 gap-1">
+            <button
+              v-for="t in turnOptions"
+              :key="t"
+              type="button"
+              class="py-1 rounded border text-xs font-mono font-semibold transition-all"
+              :class="
+                config.maxTurns === t
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              "
+              @click="setMaxTurns(t)"
+            >
+              T{{ t }}
+            </button>
+          </div>
+
+          <p class="text-[10px] text-slate-500 leading-snug font-mono">
+            Arrêt anticipé automatique si la partie se termine avant T{{ config.maxTurns }} (6 Récompenses prises, Deck-Out ou KO sans Banc).
+          </p>
         </div>
       </section>
 

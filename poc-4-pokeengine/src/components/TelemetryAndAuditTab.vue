@@ -80,7 +80,7 @@ const emit = defineEmits<{
             <span class="text-xs font-mono text-slate-500">parties / sec</span>
           </div>
           <div class="mt-1 text-[11px] font-mono text-emerald-700 font-medium">
-            {{ result.telemetry.microsecondsPerGame }} µs / partie simulée (T1➔T4)
+            {{ result.telemetry.microsecondsPerGame }} µs / partie (T1➔T{{ result.config.maxTurns }} • moy. {{ result.strategicMetrics.avgTurnsPlayed }} tours)
           </div>
         </div>
 
@@ -132,7 +132,7 @@ const emit = defineEmits<{
         <div class="flex items-center gap-2">
           <Flame class="w-4 h-4 text-slate-700" />
           <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800">
-            2. Résultats Stratégiques Temps Réel ({{ result.config.iterations.toLocaleString('fr-FR') }} Parties • Seed #{{ result.config.seed }})
+            2. Résultats Stratégiques Temps Réel ({{ result.config.iterations.toLocaleString('fr-FR') }} Parties • Horizon Max {{ result.config.maxTurns }} Tour(s) • Seed #{{ result.config.seed }})
           </h3>
         </div>
         <button
@@ -221,8 +221,8 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
-            <span>Score moyen T4 :</span>
-            <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT4 }} pts</strong>
+            <span>Score final (T{{ result.config.maxTurns }}) : <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT4 }} pts</strong></span>
+            <span>Arrêt anticipé : <strong class="text-emerald-700">{{ result.strategicMetrics.earlyTerminationRatePct }} %</strong></span>
           </div>
         </div>
 
