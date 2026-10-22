@@ -94,6 +94,7 @@ export const CARD_IDS = {
   TM_EVOLUTION: 23,
   COLLAPSED_STADIUM: 24,
   FIRE_ENERGY: 25,
+  COUNTER_CATCHER: 26,
 } as const
 
 /**
@@ -324,7 +325,7 @@ export const DEFAULT_CARD_REGISTRY: DeclarativeCardDefinition[] = [
     evolutionLine: 'NONE',
     priorityActive: 0,
     strategicValue: 82,
-    defaultCount: 4,
+    defaultCount: 3,
     primitives: [
       {
         opcode: 'SEARCH_DECK_TO_BENCH',
@@ -416,6 +417,26 @@ export const DEFAULT_CARD_REGISTRY: DeclarativeCardDefinition[] = [
         maxTargets: 1,
         precondition: 'NONE',
         description: 'Placez 1 Pokémon ou 1 carte Énergie de base de votre pile de défausse dans votre main.',
+      },
+    ],
+  },
+  {
+    id: CARD_IDS.COUNTER_CATCHER,
+    code: 'PAR-160',
+    name: 'Attrape-Riposte (Counter Catcher)',
+    category: 'ITEM',
+    evolutionLine: 'NONE',
+    priorityActive: 0,
+    strategicValue: 88,
+    defaultCount: 2,
+    primitives: [
+      {
+        opcode: 'GUST_OPPONENT_BENCH',
+        filter: 'NONE',
+        maxTargets: 1,
+        precondition: 'PLAYER_BEHIND_ON_PRIZES',
+        description:
+          'Jouable uniquement s’il vous reste plus de cartes Récompense qu’à votre adversaire : échangez son Pokémon Actif contre 1 de ses Pokémon de Banc (sans consommer le Supporter du tour).',
       },
     ],
   },
@@ -592,7 +613,7 @@ export const DEFAULT_CARD_REGISTRY: DeclarativeCardDefinition[] = [
     evolutionLine: 'NONE',
     priorityActive: 0,
     strategicValue: 35,
-    defaultCount: 2,
+    defaultCount: 1,
     primitives: [
       {
         opcode: 'PLAY_STADIUM',

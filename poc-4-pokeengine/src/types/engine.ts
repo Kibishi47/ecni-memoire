@@ -50,6 +50,7 @@ export type PreconditionRule =
   | 'ONCE_PER_GAME_VSTAR'
   | 'NO_SUPPORTER_T1_GOING_FIRST'
   | 'OPPONENT_KNOCKED_OUT_LAST_TURN'
+  | 'PLAYER_BEHIND_ON_PRIZES'
 
 export interface AtomicEffectPrimitive {
   opcode: AtomicOpcode

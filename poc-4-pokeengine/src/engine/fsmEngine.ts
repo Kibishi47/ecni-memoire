@@ -5,6 +5,7 @@ import type {
   DecisionBranchRecord,
   DeclarativeCardDefinition,
   GameEndReason,
+  OpponentPokemonSnapshot,
   RuleInvariantAudit,
   SampledGameRecord,
   SimulationConfig,
@@ -32,11 +33,20 @@ import {
   exactProbabilityAtLeastOne,
   exactProbabilityZeroSuccesses,
 } from '@/engine/hypergeometric'
+import {
+  advanceOpponentBoardTurn,
+  countOpponentBasicEvolvers,
+  createOpponentPokemonSnapshot,
+  evaluateTargetThreatScoreFast,
+  initOpponentBoardState,
+  OPPONENT_POKEMON_CATALOG,
+  removeKnockedOutOpponentSlot,
+} from '@/engine/opponentThreatEngine'
 import { deriveGameSeed, fisherYatesShuffleUint16, Mulberry32 } from '@/engine/prng'
 
 /**
- * Low-level contiguous memory state representation using Uint16Array buffers.
- * Mirrors the Go/Wasm `GameState` struct (`[60]uint16`).
+ * Low-level contiguous memory state representation using Uint16Array & Uint8Array buffers.
+ * Mirrors the Go/Wasm `GameState` struct (`[60]uint16`) plus Dual-Board Opponent state & Prize Checking flags.
  */
 export interface LowLevelGameState {
   deck: Uint16Array
@@ -58,7 +68,19 @@ export interface LowLevelGameState {
   vstarUsedInGame: boolean
   mulliganCount: number
   thinningCount: number
+  thinningBeforeDrawCount: number
+  randomDrawExecutedThisTurn: boolean
   koOccurredLastTurn: boolean
+  prizesKnown: boolean
+  firstSearchTurn: number
+  manualEnergyBankedOnBench: boolean
+  gustUsedThisTurn: number // 0 = none, 1 = Boss's Orders, 2 = Counter Catcher
+  gustTargetSlot: number
+  gustThreatScoreEliminated: number
+  oppIds: Uint8Array // 0 = Opponent Active, 1..5 = Opponent Bench
+  oppEnergies: Uint8Array // 0..5 energies per slot
+  oppBenchLen: number
+  oppPrizesRemaining: number
 }
 
 export function createEmptyGameState(goingFirst: boolean): LowLevelGameState {
@@ -82,32 +104,25 @@ export function createEmptyGameState(goingFirst: boolean): LowLevelGameState {
     vstarUsedInGame: false,
     mulliganCount: 0,
     thinningCount: 0,
+    thinningBeforeDrawCount: 0,
+    randomDrawExecutedThisTurn: false,
     koOccurredLastTurn: false,
+    prizesKnown: false,
+    firstSearchTurn: 0,
+    manualEnergyBankedOnBench: false,
+    gustUsedThisTurn: 0,
+    gustTargetSlot: 0,
+    gustThreatScoreEliminated: 0,
+    oppIds: new Uint8Array(6),
+    oppEnergies: new Uint8Array(6),
+    oppBenchLen: 0,
+    oppPrizesRemaining: 6,
   }
 }
 
 export function cloneLowLevelState(src: LowLevelGameState): LowLevelGameState {
   const dst = createEmptyGameState(src.goingFirst)
-  dst.deck.set(src.deck.subarray(0, src.deckLen))
-  dst.hand.set(src.hand.subarray(0, src.handLen))
-  dst.prizes.set(src.prizes.subarray(0, src.prizesLen))
-  dst.discard.set(src.discard.subarray(0, src.discardLen))
-  dst.bench.set(src.bench.subarray(0, src.benchLen))
-  dst.active = src.active
-  dst.deckLen = src.deckLen
-  dst.handLen = src.handLen
-  dst.prizesLen = src.prizesLen
-  dst.discardLen = src.discardLen
-  dst.benchLen = src.benchLen
-  dst.currentTurn = src.currentTurn
-  dst.goingFirst = src.goingFirst
-  dst.supporterPlayedCount = src.supporterPlayedCount
-  dst.energyAttachedCount = src.energyAttachedCount
-  dst.stadiumPlayedThisTurn = src.stadiumPlayedThisTurn
-  dst.vstarUsedInGame = src.vstarUsedInGame
-  dst.mulliganCount = src.mulliganCount
-  dst.thinningCount = src.thinningCount
-  dst.koOccurredLastTurn = src.koOccurredLastTurn
+  copyIntoLowLevelState(src, dst)
   return dst
 }
 
@@ -131,7 +146,19 @@ export function copyIntoLowLevelState(src: LowLevelGameState, dst: LowLevelGameS
   dst.vstarUsedInGame = src.vstarUsedInGame
   dst.mulliganCount = src.mulliganCount
   dst.thinningCount = src.thinningCount
+  dst.thinningBeforeDrawCount = src.thinningBeforeDrawCount
+  dst.randomDrawExecutedThisTurn = src.randomDrawExecutedThisTurn
   dst.koOccurredLastTurn = src.koOccurredLastTurn
+  dst.prizesKnown = src.prizesKnown
+  dst.firstSearchTurn = src.firstSearchTurn
+  dst.manualEnergyBankedOnBench = src.manualEnergyBankedOnBench
+  dst.gustUsedThisTurn = src.gustUsedThisTurn
+  dst.gustTargetSlot = src.gustTargetSlot
+  dst.gustThreatScoreEliminated = src.gustThreatScoreEliminated
+  dst.oppIds.set(src.oppIds)
+  dst.oppEnergies.set(src.oppEnergies)
+  dst.oppBenchLen = src.oppBenchLen
+  dst.oppPrizesRemaining = src.oppPrizesRemaining
 }
 
 export function resetLowLevelState(dst: LowLevelGameState, goingFirst: boolean): void {
@@ -149,7 +176,19 @@ export function resetLowLevelState(dst: LowLevelGameState, goingFirst: boolean):
   dst.vstarUsedInGame = false
   dst.mulliganCount = 0
   dst.thinningCount = 0
+  dst.thinningBeforeDrawCount = 0
+  dst.randomDrawExecutedThisTurn = false
   dst.koOccurredLastTurn = false
+  dst.prizesKnown = false
+  dst.firstSearchTurn = 0
+  dst.manualEnergyBankedOnBench = false
+  dst.gustUsedThisTurn = 0
+  dst.gustTargetSlot = 0
+  dst.gustThreatScoreEliminated = 0
+  dst.oppIds.fill(0)
+  dst.oppEnergies.fill(0)
+  dst.oppBenchLen = 0
+  dst.oppPrizesRemaining = 6
 }
 
 // Pre-allocated arena buffers to eliminate GC pressure during 100,000-game runs (especially on mobile CPUs)
@@ -268,12 +307,73 @@ function findHandIndexById(state: LowLevelGameState, targetId: number): number {
   return -1
 }
 
+function countCardIdInDeck(state: LowLevelGameState, targetId: number): number {
+  let c = 0
+  for (let i = 0; i < state.deckLen; i++) {
+    if (unpackCardId(state.deck[i]) === targetId) c++
+  }
+  return c
+}
+
 /**
- * Evaluates a terminal intra-turn board state according to Section 4.C specifications:
+ * Marks that a `SEARCH_DECK` action occurred (unlocking `prizesKnown` Prize Checking)
+ * and tracks whether deterministic extraction happened BEFORE random draw effects (+12 pts canonical sequencing).
+ */
+function markDeckSearchedAndThinning(state: LowLevelGameState, extractedCount: number): void {
+  if (!state.prizesKnown) {
+    state.prizesKnown = true
+    if (state.firstSearchTurn === 0) {
+      state.firstSearchTurn = state.currentTurn
+    }
+  }
+  if (extractedCount > 0) {
+    state.thinningCount += extractedCount
+    if (!state.randomDrawExecutedThisTurn) {
+      state.thinningBeforeDrawCount += extractedCount
+    }
+  }
+}
+
+/**
+ * Computes whether an opponent Bench target has a Threat Score at least +35 pts higher than the opponent Active.
+ * Returns `{ bestBenchSlot, bestBenchThreat, activeThreat, diff }`.
+ */
+const POOL_GUST_CHECK = {
+  bestBenchSlot: -1,
+  bestBenchThreat: 0,
+  activeThreat: 0,
+  diff: 0,
+}
+
+function findHighPriorityOpponentBenchTarget(state: LowLevelGameState): typeof POOL_GUST_CHECK {
+  const playerPrizes = state.prizesLen > 0 ? state.prizesLen : 6
+  const basicEvolvers = countOpponentBasicEvolvers(state)
+  const activeThreat = evaluateTargetThreatScoreFast(state, 0, playerPrizes, basicEvolvers)
+  let bestSlot = -1
+  let bestThreat = -1
+
+  for (let slot = 1; slot <= state.oppBenchLen; slot++) {
+    const t = evaluateTargetThreatScoreFast(state, slot, playerPrizes, basicEvolvers)
+    if (t > bestThreat) {
+      bestThreat = t
+      bestSlot = slot
+    }
+  }
+
+  POOL_GUST_CHECK.bestBenchSlot = bestSlot
+  POOL_GUST_CHECK.bestBenchThreat = bestThreat
+  POOL_GUST_CHECK.activeThreat = activeThreat
+  POOL_GUST_CHECK.diff = bestSlot !== -1 ? bestThreat - activeThreat : 0
+  return POOL_GUST_CHECK
+}
+
+/**
+ * Evaluates a terminal intra-turn board state according to Section 3 & 4.C specifications:
  * - +50 pts : Dracaufeu ex actif avec 2+ Énergies Feu (Attaque prête)
  * - +30 pts : Roucarnage ex en jeu sur le Banc (Moteur Recherche Rapide actif)
  * - +15 pts : Au moins 2 Salamèche et 1 Roucool en jeu (Lignées établies)
- * Plus secondary strategic bonuses (Deck Thinning, bench backup, hand resources).
+ * - +12 pts : Bonus Ordre Canonique & Épuration avant pioche aléatoire
+ * Plus Threat Elimination bonus (Ordres du Boss / Attrape-Riposte), Energy Banking, and hand retention.
  */
 export function evaluateBoardState(
   state: LowLevelGameState,
@@ -333,13 +433,27 @@ export function evaluateBoardState(
     }
   }
 
-  // 4. Support Pokemon V & Forest Seal Stone readiness
+  // 4. Support Pokemon (Motisma V / Fezandipiti ex)
   if (hasCardIdOnBoard(state, CARD_IDS.ROTOM_V)) {
     score += 6
     if (recordBreakdown) breakdown.push('+6 pts : Motisma V en jeu (Charge Instantanée)')
   }
+  if (hasCardIdOnBoard(state, CARD_IDS.FEZANDIPITI_EX)) {
+    score += 8
+    if (recordBreakdown) breakdown.push('+8 pts : Fezandipiti ex en jeu (Protection anti-KO / Mashynn)')
+  }
 
-  // 5. Deck Thinning bonus (+2 pts per targeted card extracted before random draws)
+  // 5. Canonical Sequencing Bonus (+12 pts if deterministic extraction executed BEFORE random draws)
+  if (state.thinningBeforeDrawCount > 0) {
+    score += 12
+    if (recordBreakdown) {
+      breakdown.push(
+        `+12 pts : Ordre Canonique respecté (${state.thinningBeforeDrawCount} extraction(s) déterministe(s) avant pioche aléatoire)`,
+      )
+    }
+  }
+
+  // 6. Deck Thinning bonus (+2 pts per targeted card extracted)
   if (state.thinningCount > 0) {
     const thinPts = state.thinningCount * 2
     score += thinPts
@@ -348,7 +462,19 @@ export function evaluateBoardState(
     }
   }
 
-  // 6. Hand combo retention bonus (having Rare Candy + Stage 2 ready for next turn)
+  // 7. Threat Elimination Bonus via Boss's Orders / Counter Catcher (+35% of threat differential)
+  if (state.gustUsedThisTurn > 0 && state.gustThreatScoreEliminated > 0) {
+    const gustBonus = Math.round(state.gustThreatScoreEliminated * 0.45) + (state.gustUsedThisTurn === 2 ? 18 : 10)
+    score += gustBonus
+    if (recordBreakdown) {
+      const gustCardName = state.gustUsedThisTurn === 2 ? 'Attrape-Riposte (Contre-Tempo)' : 'Ordres du Boss'
+      breakdown.push(
+        `+${gustBonus} pts : Ciblage de menace prioritaire via ${gustCardName} (+${state.gustThreatScoreEliminated} pts de menace neutralisée)`,
+      )
+    }
+  }
+
+  // 8. Hand combo retention bonus (having Rare Candy + Stage 2 ready for next turn)
   const candiesInHand = countCardIdInHand(state, CARD_IDS.RARE_CANDY)
   const zardsInHand = countCardIdInHand(state, CARD_IDS.CHARIZARD_EX)
   const pidgeotsInHand = countCardIdInHand(state, CARD_IDS.PIDGEOT_EX)
@@ -400,6 +526,8 @@ function verifyStateInvariants(
 
 /**
  * Selects the best target card in `state.deck` for a declarative `SEARCH_DECK_TO_HAND` or `VSTAR_POWER` or `QUICK_SEARCH` primitive.
+ * Uses Typed Move Grouping (equivalence classes by `cardId`) and Prize Checking (`prizesKnown` / actual deck availability)
+ * so the AI never searches for a combo piece whose counterpart is 100% locked in the 6 Prizes.
  */
 function selectBestDeckTargetIndex(
   state: LowLevelGameState,
@@ -417,11 +545,29 @@ function selectBestDeckTargetIndex(
   const hasZardOnBoard = hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX)
   const hasPidgeotOnBoard = hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)
 
+  // Prize Checking: verify if Stage 2 or Rare Candy are actually accessible (in hand or deck, not 100% Prized)
+  const hasZardAvailable = hasZardInHand || countCardIdInDeck(state, CARD_IDS.CHARIZARD_EX) > 0
+  const hasPidgeotAvailable = hasPidgeotInHand || countCardIdInDeck(state, CARD_IDS.PIDGEOT_EX) > 0
+  const hasCandyAvailable = hasCandyInHand || countCardIdInDeck(state, CARD_IDS.RARE_CANDY) > 0
+
+  const gustCheck =
+    preferComboPiece && state.currentTurn >= 2 && state.gustUsedThisTurn === 0
+      ? findHighPriorityOpponentBenchTarget(state)
+      : null
+  const wantsGustTarget = gustCheck !== null && gustCheck.diff >= 35
+  const playerPrizes = state.prizesLen > 0 ? state.prizesLen : 6
+  const behindOnPrizes = playerPrizes > state.oppPrizesRemaining
+
   let bestIdx = -1
   let bestScore = -1
+  let seenCardIdsMask = 0 // Equivalence class bitmask for cardIds 1..30 (Typed Move Grouping)
 
   for (let i = 0; i < state.deckLen; i++) {
     const cid = unpackCardId(state.deck[i])
+    const bit = 1 << cid
+    if ((seenCardIdsMask & bit) !== 0) continue // Skip duplicate copies of same cardId equivalence class
+    seenCardIdsMask |= bit
+
     const def = lookup[cid]
     if (!def) continue
 
@@ -441,7 +587,7 @@ function selectBestDeckTargetIndex(
         else if (cid === CARD_IDS.ROTOM_V && !hasCardIdOnBoard(state, CARD_IDS.ROTOM_V)) candidateScore += 85
         else if (cid === CARD_IDS.ARVEN && !state.goingFirst) candidateScore += 90
       } else {
-        // Turn 2+ priorities: Complete missing half of Rare Candy + Stage 2 combo!
+        // Turn 2+ priorities with Prize Checking & Threat Gusting:
         if (
           cid === CARD_IDS.RARE_CANDY &&
           !hasCandyInHand &&
@@ -464,14 +610,46 @@ function selectBestDeckTargetIndex(
           hasCandyInHand
         ) {
           candidateScore += 190
-        } else if (cid === CARD_IDS.RARE_CANDY && !hasCandyInHand && (hasEvolveReadyCharmander || hasEvolveReadyPidgey)) {
+        } else if (
+          wantsGustTarget &&
+          behindOnPrizes &&
+          cid === CARD_IDS.COUNTER_CATCHER &&
+          (hasZardOnBoard || (hasEvolveReadyCharmander && hasCandyInHand && hasZardInHand))
+        ) {
+          candidateScore += 182
+        } else if (
+          wantsGustTarget &&
+          state.supporterPlayedCount === 0 &&
+          cid === CARD_IDS.BOSS_ORDERS &&
+          hasZardOnBoard
+        ) {
+          candidateScore += 175
+        } else if (
+          cid === CARD_IDS.RARE_CANDY &&
+          !hasCandyInHand &&
+          ((hasEvolveReadyCharmander && hasZardAvailable) || (hasEvolveReadyPidgey && hasPidgeotAvailable))
+        ) {
           candidateScore += 155
-        } else if (cid === CARD_IDS.PIDGEOT_EX && !hasPidgeotOnBoard && !hasPidgeotInHand && hasEvolveReadyPidgey) {
+        } else if (
+          cid === CARD_IDS.PIDGEOT_EX &&
+          !hasPidgeotOnBoard &&
+          !hasPidgeotInHand &&
+          hasEvolveReadyPidgey &&
+          hasCandyAvailable
+        ) {
           candidateScore += 145
-        } else if (cid === CARD_IDS.CHARIZARD_EX && !hasZardInHand && hasEvolveReadyCharmander) {
+        } else if (
+          cid === CARD_IDS.CHARIZARD_EX &&
+          !hasZardInHand &&
+          hasEvolveReadyCharmander &&
+          hasCandyAvailable
+        ) {
           candidateScore += 140
         } else if (cid === CARD_IDS.ARVEN && state.supporterPlayedCount === 0) {
           candidateScore += 125
+        } else if (cid === CARD_IDS.CHARMELEON && hasEvolveReadyCharmander && !hasCandyAvailable) {
+          // Prize Checking adaptation: if Rare Candies are prized/unavailable, prioritize Stage 1 Charmeleon!
+          candidateScore += 150
         } else if (cid === CARD_IDS.CHARMELEON && hasEvolveReadyCharmander && !hasCandyInHand) {
           candidateScore += 110
         }
@@ -519,34 +697,57 @@ function canLineEvolveThisTurn(
   return false
 }
 
+// Pre-allocated zero-allocation scratch buffers for Ultra Ball & Super Rod / Night Stretcher
+const SCRATCH_HAND_INDICES = new Uint8Array(60)
+const SCRATCH_HAND_SCORES = new Int16Array(60)
+const SCRATCH_DISCARD_ELIGIBLE = new Uint8Array(60)
+const NAIVE_RANDOM_CANDIDATE_ACTIONS: DeclarativeActionType[] = [
+  'PLAY_DRAW_SUPPORTER',
+  'ATTACH_MANUAL_ENERGY',
+  'PLAY_BASIC_FROM_HAND',
+  'PLAY_POFFIN_OR_NEST',
+  'PLAY_STAGE_EVOLUTION',
+  'PLAY_RARE_CANDY',
+  'PLAY_ULTRA_BALL',
+  'PLAY_ARVEN',
+]
+
+type DeclarativeActionType =
+  | 'PLAY_BASIC_FROM_HAND'
+  | 'PLAY_POFFIN_OR_NEST'
+  | 'PLAY_ULTRA_BALL'
+  | 'PLAY_ARVEN'
+  | 'PLAY_SEAL_STONE_AND_VSTAR'
+  | 'USE_QUICK_SEARCH'
+  | 'USE_FLIP_THE_SCRIPT'
+  | 'PLAY_RARE_CANDY'
+  | 'PLAY_STAGE_EVOLUTION'
+  | 'PLAY_SUPER_ROD_OR_STRETCHER'
+  | 'PLAY_GUST_EFFECT'
+  | 'ATTACH_MANUAL_ENERGY'
+  | 'PLAY_DRAW_SUPPORTER'
+  | 'USE_ROTOM_INSTANT_CHARGE'
+
 /**
  * Executes a single declarative action on `state`, verifying all regulatory invariants.
+ * Zero-allocation when `logs === null`.
  */
 function executeDeclarativeCardOrAbility(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
   rng: Mulberry32,
   invariants: InvariantTrackerCounters,
-  actionType:
-    | 'PLAY_BASIC_FROM_HAND'
-    | 'PLAY_POFFIN_OR_NEST'
-    | 'PLAY_ULTRA_BALL'
-    | 'PLAY_ARVEN'
-    | 'PLAY_SEAL_STONE_AND_VSTAR'
-    | 'USE_QUICK_SEARCH'
-    | 'USE_FLIP_THE_SCRIPT'
-    | 'PLAY_RARE_CANDY'
-    | 'PLAY_STAGE_EVOLUTION'
-    | 'PLAY_SUPER_ROD_OR_STRETCHER'
-    | 'ATTACH_MANUAL_ENERGY'
-    | 'PLAY_DRAW_SUPPORTER'
-    | 'USE_ROTOM_INSTANT_CHARGE',
+  actionType: DeclarativeActionType,
   smartTargeting: boolean,
   logs: string[] | null,
 ): boolean {
   switch (actionType) {
     case 'PLAY_BASIC_FROM_HAND': {
       if (state.benchLen >= 5) return false
+      // Canonical Ordering: pick Basic Pokemon from hand by canonical priority and ascending cardId
+      let bestHandIdx = -1
+      let bestCanonicalKey = 999999
+
       for (let i = 0; i < state.handLen; i++) {
         const cid = unpackCardId(state.hand[i])
         const def = lookup[cid]
@@ -561,37 +762,45 @@ function executeDeclarativeCardOrAbility(
           if (!canUseLuminous && state.benchLen >= 2) continue
         }
 
-        // Prioritize Charmander / Pidgey / Rotom V
-        removeAtUint16(state.hand, state.handLen, i)
-        state.handLen--
-        const placed = packCard(cid, state.currentTurn, 0, false, false, false)
-        state.bench[state.benchLen++] = placed
+        const canonicalKey = smartTargeting ? cid : i
+        if (canonicalKey < bestCanonicalKey) {
+          bestCanonicalKey = canonicalKey
+          bestHandIdx = i
+        }
+      }
 
-        if (logs) logs.push(`Pose ${def.name} sur le Banc (tour de pose T${state.currentTurn})`)
+      if (bestHandIdx === -1) return false
 
-        // Check if card has ABILITY_LUMINOUS_SIGN (Luminéon V)
-        for (const prim of def.primitives) {
-          if (prim.opcode === 'ABILITY_LUMINOUS_SIGN') {
-            const supIdx = selectBestDeckTargetIndex(state, lookup, prim.filter, smartTargeting)
-            if (supIdx !== -1) {
-              const supCard = removeAtUint16(state.deck, state.deckLen, supIdx)
-              state.deckLen--
-              state.hand[state.handLen++] = packCard(unpackCardId(supCard))
-              state.thinningCount++
-              fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
-              if (logs) {
-                logs.push(
-                  `Talent Signe Lumineux (${def.name}) ➔ ajoute ${lookup[unpackCardId(supCard)]?.name} à la main`,
-                )
-              }
+      const cid = unpackCardId(state.hand[bestHandIdx])
+      const def = lookup[cid]!
+      removeAtUint16(state.hand, state.handLen, bestHandIdx)
+      state.handLen--
+      const placed = packCard(cid, state.currentTurn, 0, false, false, false)
+      state.bench[state.benchLen++] = placed
+
+      if (logs) logs.push(`Pose ${def.name} sur le Banc (Ordre canonique #${cid}, T${state.currentTurn})`)
+
+      // Check if card has ABILITY_LUMINOUS_SIGN (Luminéon V)
+      for (const prim of def.primitives) {
+        if (prim.opcode === 'ABILITY_LUMINOUS_SIGN') {
+          const supIdx = selectBestDeckTargetIndex(state, lookup, prim.filter, smartTargeting)
+          if (supIdx !== -1) {
+            const supCard = removeAtUint16(state.deck, state.deckLen, supIdx)
+            state.deckLen--
+            state.hand[state.handLen++] = packCard(unpackCardId(supCard))
+            markDeckSearchedAndThinning(state, 1)
+            fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
+            if (logs) {
+              logs.push(
+                `Talent Signe Lumineux (${def.name}) ➔ ajoute ${lookup[unpackCardId(supCard)]?.name} à la main`,
+              )
             }
           }
         }
-
-        verifyStateInvariants(state, invariants)
-        return true
       }
-      return false
+
+      verifyStateInvariants(state, invariants)
+      return true
     }
 
     case 'PLAY_POFFIN_OR_NEST': {
@@ -611,7 +820,8 @@ function executeDeclarativeCardOrAbility(
 
         const maxTargets = benchPrim.maxTargets || 1
         const maxHp = benchPrim.maxHp ?? (benchPrim.filter === 'BASIC_HP_LTE_70' ? 70 : 999)
-        const foundNames: string[] = []
+        const foundNames: string[] | null = logs ? [] : null
+        let extractedCount = 0
 
         for (let t = 0; t < maxTargets && state.benchLen < 5; t++) {
           let bestDeckIdx = -1
@@ -630,6 +840,7 @@ function executeDeclarativeCardOrAbility(
               if (dCid === CARD_IDS.CHARMANDER && charCount < 2) prio += 50
               else if (dCid === CARD_IDS.PIDGEY && pidgCount < 1) prio += 55
               else if (dCid === CARD_IDS.ROTOM_V && !hasCardIdOnBoard(state, CARD_IDS.ROTOM_V)) prio += 45
+              else if (dCid === CARD_IDS.FEZANDIPITI_EX && !hasCardIdOnBoard(state, CARD_IDS.FEZANDIPITI_EX) && state.currentTurn >= 2) prio += 42
               else if (dCid === CARD_IDS.LUMINEON_V) prio -= 30 // Don't waste Lumineon V via Nest Ball unless desperate
             }
 
@@ -644,15 +855,18 @@ function executeDeclarativeCardOrAbility(
             state.deckLen--
             const bCid = unpackCardId(drawn)
             state.bench[state.benchLen++] = packCard(bCid, state.currentTurn, 0, false, false, false)
-            state.thinningCount++
-            foundNames.push(lookup[bCid]?.name ?? 'Pokémon')
+            extractedCount++
+            if (foundNames) {
+              foundNames.push(lookup[bCid]?.name ?? 'Pokémon')
+            }
           }
         }
 
+        markDeckSearchedAndThinning(state, extractedCount)
         fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
-        if (logs) {
+        if (logs && foundNames) {
           if (foundNames.length > 0) {
-            logs.push(`Joue ${def.name} ➔ pose ${foundNames.join(' + ')} sur le Banc (Deck -${foundNames.length})`)
+            logs.push(`Joue ${def.name} ➔ pose ${foundNames.join(' + ')} sur le Banc (Deck -${foundNames.length}, Prizes vérifiées)`)
           } else {
             logs.push(`Joue ${def.name} (aucune cible éligible restante dans le deck)`)
           }
@@ -684,9 +898,10 @@ function executeDeclarativeCardOrAbility(
         state.discard[state.discardLen++] = packCard(cid)
         state.supporterPlayedCount++
 
-        const tutoredNames: string[] = []
+        const tutoredNames: string[] | null = logs ? [] : null
+        let extractedCount = 0
 
-        // 1. Search best ITEM in deck
+        // 1. Search best ITEM in deck (with Counter Catcher check when behind on Prizes!)
         let bestItemIdx = -1
         let bestItemScore = -1
         const charLine = countLineOnBoard(state, lookup, 'CHARIZARD')
@@ -694,6 +909,17 @@ function executeDeclarativeCardOrAbility(
         const canEvolveAny =
           canLineEvolveThisTurn(state, lookup, 'CHARIZARD') ||
           canLineEvolveThisTurn(state, lookup, 'PIDGEOT')
+        const playerPrizes = state.prizesLen > 0 ? state.prizesLen : 6
+        const behindOnPrizes = playerPrizes > state.oppPrizesRemaining
+        const gustCheck =
+          smartTargeting && state.currentTurn >= 2 && state.gustUsedThisTurn === 0
+            ? findHighPriorityOpponentBenchTarget(state)
+            : null
+        const wantsCounterCatcher =
+          gustCheck !== null &&
+          gustCheck.diff >= 35 &&
+          behindOnPrizes &&
+          countCardIdInHand(state, CARD_IDS.COUNTER_CATCHER) === 0
 
         for (let d = 0; d < state.deckLen; d++) {
           const dCid = unpackCardId(state.deck[d])
@@ -707,6 +933,12 @@ function executeDeclarativeCardOrAbility(
             } else {
               if (dCid === CARD_IDS.RARE_CANDY && canEvolveAny && countCardIdInHand(state, CARD_IDS.RARE_CANDY) === 0) {
                 sc += 130
+              } else if (
+                wantsCounterCatcher &&
+                dCid === CARD_IDS.COUNTER_CATCHER &&
+                (hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX) || countCardIdInHand(state, CARD_IDS.RARE_CANDY) > 0)
+              ) {
+                sc += 145 // Arven + Counter Catcher combo when behind on Prizes!
               } else if (
                 dCid === CARD_IDS.ULTRA_BALL &&
                 countCardIdInHand(state, CARD_IDS.CHARIZARD_EX) === 0 &&
@@ -727,9 +959,12 @@ function executeDeclarativeCardOrAbility(
         if (bestItemIdx !== -1) {
           const itemCard = removeAtUint16(state.deck, state.deckLen, bestItemIdx)
           state.deckLen--
-          state.hand[state.handLen++] = packCard(unpackCardId(itemCard))
-          state.thinningCount++
-          tutoredNames.push(lookup[unpackCardId(itemCard)]?.name ?? 'Objet')
+          const itemCid = unpackCardId(itemCard)
+          state.hand[state.handLen++] = packCard(itemCid)
+          extractedCount++
+          if (tutoredNames) {
+            tutoredNames.push(lookup[itemCid]?.name ?? 'Objet')
+          }
         }
 
         // 2. Search best TOOL in deck
@@ -752,13 +987,17 @@ function executeDeclarativeCardOrAbility(
         if (bestToolIdx !== -1) {
           const toolCard = removeAtUint16(state.deck, state.deckLen, bestToolIdx)
           state.deckLen--
-          state.hand[state.handLen++] = packCard(unpackCardId(toolCard))
-          state.thinningCount++
-          tutoredNames.push(lookup[unpackCardId(toolCard)]?.name ?? 'Outil')
+          const toolCid = unpackCardId(toolCard)
+          state.hand[state.handLen++] = packCard(toolCid)
+          extractedCount++
+          if (tutoredNames) {
+            tutoredNames.push(lookup[toolCid]?.name ?? 'Outil')
+          }
         }
 
+        markDeckSearchedAndThinning(state, extractedCount)
         fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
-        if (logs) {
+        if (logs && tutoredNames) {
           logs.push(
             `Supporter ${def.name} ➔ tutorise ${tutoredNames.join(' + ') || 'aucune cible'} (Deck -${tutoredNames.length})`,
           )
@@ -821,7 +1060,7 @@ function executeDeclarativeCardOrAbility(
           const cId = unpackCardId(card)
           state.hand[state.handLen++] = packCard(cId)
           state.vstarUsedInGame = true
-          state.thinningCount++
+          markDeckSearchedAndThinning(state, 1)
           fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
           if (logs) {
             logs.push(
@@ -872,7 +1111,7 @@ function executeDeclarativeCardOrAbility(
         state.deckLen--
         const cId = unpackCardId(card)
         state.hand[state.handLen++] = packCard(cId)
-        state.thinningCount++
+        markDeckSearchedAndThinning(state, 1)
         fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
         if (logs) {
           logs.push(
@@ -910,6 +1149,7 @@ function executeDeclarativeCardOrAbility(
       if (slotIdx === 'ACTIVE') state.active |= PACK_ABILITY_USED_BIT
       else state.bench[slotIdx] |= PACK_ABILITY_USED_BIT
 
+      state.randomDrawExecutedThisTurn = true
       let drawnCount = 0
       for (let d = 0; d < 3 && state.deckLen > 0; d++) {
         drawCardFromDeck(state)
@@ -942,8 +1182,12 @@ function executeDeclarativeCardOrAbility(
       const targetDeckIdx = selectBestDeckTargetIndex(state, lookup, 'POKEMON_ANY', smartTargeting)
       if (targetDeckIdx === -1) return false
 
-      // Score hand cards to discard the 2 least needed cards in smart mode
-      const candidateIndices: { idx: number; keepScore: number }[] = []
+      // Zero-allocation selection of the 2 lowest-keepScore cards in hand
+      let candCount = 0
+      const candiesInHand = countCardIdInHand(state, CARD_IDS.RARE_CANDY)
+      const zardsInHand = countCardIdInHand(state, CARD_IDS.CHARIZARD_EX)
+      const pidgeotsInHand = countCardIdInHand(state, CARD_IDS.PIDGEOT_EX)
+
       for (let i = 0; i < state.handLen; i++) {
         if (i === ubIdx) continue
         const cid = unpackCardId(state.hand[i])
@@ -953,51 +1197,167 @@ function executeDeclarativeCardOrAbility(
           keepScore = i // Greedy/Naive discards first two cards
         } else {
           // Protect key combo pieces if we only have 1 copy in hand
-          if (cid === CARD_IDS.RARE_CANDY && countCardIdInHand(state, CARD_IDS.RARE_CANDY) === 1) {
-            keepScore += 100
-          }
-          if (cid === CARD_IDS.CHARIZARD_EX && countCardIdInHand(state, CARD_IDS.CHARIZARD_EX) === 1) {
-            keepScore += 95
-          }
-          if (cid === CARD_IDS.PIDGEOT_EX && countCardIdInHand(state, CARD_IDS.PIDGEOT_EX) === 1) {
-            keepScore += 90
-          }
+          if (cid === CARD_IDS.RARE_CANDY && candiesInHand === 1) keepScore += 100
+          if (cid === CARD_IDS.CHARIZARD_EX && zardsInHand === 1) keepScore += 95
+          if (cid === CARD_IDS.PIDGEOT_EX && pidgeotsInHand === 1) keepScore += 90
         }
-        candidateIndices.push({ idx: i, keepScore })
+        SCRATCH_HAND_INDICES[candCount] = i
+        SCRATCH_HAND_SCORES[candCount] = keepScore
+        candCount++
       }
-      candidateIndices.sort((a, b) => a.keepScore - b.keepScore)
+
+      // Find the two minimum keepScore entries in SCRATCH_HAND_SCORES
+      let min1 = 0
+      let min2 = 1
+      if (SCRATCH_HAND_SCORES[min2] < SCRATCH_HAND_SCORES[min1]) {
+        min1 = 1
+        min2 = 0
+      }
+      for (let c = 2; c < candCount; c++) {
+        const sc = SCRATCH_HAND_SCORES[c]
+        if (sc < SCRATCH_HAND_SCORES[min1]) {
+          min2 = min1
+          min1 = c
+        } else if (sc < SCRATCH_HAND_SCORES[min2]) {
+          min2 = c
+        }
+      }
 
       // In smart mode, don't burn Ultra Ball if it forces discarding our only Rare Candy on T2+ without backup
-      if (smartTargeting && candidateIndices[1].keepScore >= 180) {
+      if (smartTargeting && SCRATCH_HAND_SCORES[min2] >= 180) {
         return false
       }
 
-      const toRemove = [ubIdx, candidateIndices[0].idx, candidateIndices[1].idx].sort((a, b) => b - a)
-      const discardedNames: string[] = []
-      for (const rIdx of toRemove) {
-        const rem = removeAtUint16(state.hand, state.handLen, rIdx)
-        state.handLen--
-        const remId = unpackCardId(rem)
-        state.discard[state.discardLen++] = packCard(remId)
-        if (rIdx !== ubIdx) {
-          discardedNames.push(lookup[remId]?.name ?? 'Carte')
-        }
-      }
+      const dIdx1 = SCRATCH_HAND_INDICES[min1]
+      const dIdx2 = SCRATCH_HAND_INDICES[min2]
+      const dName1 = logs ? (lookup[unpackCardId(state.hand[dIdx1])]?.name ?? 'Carte') : ''
+      const dName2 = logs ? (lookup[unpackCardId(state.hand[dIdx2])]?.name ?? 'Carte') : ''
+
+      // Remove 3 indices (ubIdx, dIdx1, dIdx2) in descending order without allocating an array
+      let r1 = ubIdx
+      let r2 = dIdx1
+      let r3 = dIdx2
+      if (r1 < r2) { const t = r1; r1 = r2; r2 = t }
+      if (r2 < r3) { const t = r2; r2 = r3; r3 = t }
+      if (r1 < r2) { const t = r1; r1 = r2; r2 = t }
+
+      const remA = removeAtUint16(state.hand, state.handLen, r1)
+      state.handLen--
+      state.discard[state.discardLen++] = packCard(unpackCardId(remA))
+
+      const remB = removeAtUint16(state.hand, state.handLen, r2)
+      state.handLen--
+      state.discard[state.discardLen++] = packCard(unpackCardId(remB))
+
+      const remC = removeAtUint16(state.hand, state.handLen, r3)
+      state.handLen--
+      state.discard[state.discardLen++] = packCard(unpackCardId(remC))
 
       const tutored = removeAtUint16(state.deck, state.deckLen, targetDeckIdx)
       state.deckLen--
       const tutoredId = unpackCardId(tutored)
       state.hand[state.handLen++] = packCard(tutoredId)
-      state.thinningCount++
+      markDeckSearchedAndThinning(state, 1)
       fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
 
       if (logs) {
         logs.push(
-          `Joue Hyper Ball (défausse ${discardedNames.join(', ')}) ➔ cherche ${lookup[tutoredId]?.name}`,
+          `Joue Hyper Ball (défausse ${dName1}, ${dName2}) ➔ cherche ${lookup[tutoredId]?.name}`,
         )
       }
       verifyStateInvariants(state, invariants)
       return true
+    }
+
+    case 'PLAY_GUST_EFFECT': {
+      // Threat Scoring Gust: Use Counter Catcher (if behind on Prizes) or Boss's Orders to bring up a high-threat Bench target!
+      if (state.currentTurn <= 1 || state.gustUsedThisTurn > 0 || state.oppBenchLen <= 0) {
+        return false
+      }
+      // Only gust when we have a ready attacker on board
+      const hasReadyAttacker =
+        (unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX && unpackEnergies(state.active) >= 2) ||
+        (unpackCardId(state.active) === CARD_IDS.PIDGEOT_EX && unpackEnergies(state.active) >= 2)
+      if (!hasReadyAttacker) return false
+
+      const gustCheck = findHighPriorityOpponentBenchTarget(state)
+      if (gustCheck.bestBenchSlot === -1 || gustCheck.diff < 35) return false
+
+      const playerPrizes = state.prizesLen > 0 ? state.prizesLen : 6
+      const behindOnPrizes = playerPrizes > state.oppPrizesRemaining
+
+      // Priority 1: Counter Catcher (Attrape-Riposte) when behind on Prizes (Item — preserves Supporter for the turn!)
+      if (behindOnPrizes) {
+        const ccIdx = findHandIndexById(state, CARD_IDS.COUNTER_CATCHER)
+        if (ccIdx !== -1) {
+          removeAtUint16(state.hand, state.handLen, ccIdx)
+          state.handLen--
+          state.discard[state.discardLen++] = packCard(CARD_IDS.COUNTER_CATCHER)
+
+          const targetSlot = gustCheck.bestBenchSlot
+          const oldActiveId = state.oppIds[0]
+          const oldActiveEn = state.oppEnergies[0]
+          const newActiveId = state.oppIds[targetSlot]
+          const newActiveEn = state.oppEnergies[targetSlot]
+
+          state.oppIds[0] = newActiveId
+          state.oppEnergies[0] = newActiveEn
+          state.oppIds[targetSlot] = oldActiveId
+          state.oppEnergies[targetSlot] = oldActiveEn
+
+          state.gustUsedThisTurn = 2 // 2 = Counter Catcher
+          state.gustTargetSlot = targetSlot
+          state.gustThreatScoreEliminated = gustCheck.diff
+
+          if (logs) {
+            const targetTpl = OPPONENT_POKEMON_CATALOG[newActiveId]
+            const oldTpl = OPPONENT_POKEMON_CATALOG[oldActiveId]
+            logs.push(
+              `Joue Attrape-Riposte (Contre-Tempo ${playerPrizes} vs ${state.oppPrizesRemaining} Récompenses) ➔ cible ${targetTpl?.name ?? 'Banc'} (Menace ${gustCheck.bestBenchThreat} pts vs ${oldTpl?.name ?? 'Actif'} ${gustCheck.activeThreat} pts)`,
+            )
+          }
+          verifyStateInvariants(state, invariants)
+          return true
+        }
+      }
+
+      // Priority 2: Boss's Orders (Ordres du Boss) if Supporter has not been used this turn
+      if (state.supporterPlayedCount === 0) {
+        const bossIdx = findHandIndexById(state, CARD_IDS.BOSS_ORDERS)
+        if (bossIdx !== -1) {
+          removeAtUint16(state.hand, state.handLen, bossIdx)
+          state.handLen--
+          state.discard[state.discardLen++] = packCard(CARD_IDS.BOSS_ORDERS)
+          state.supporterPlayedCount++
+
+          const targetSlot = gustCheck.bestBenchSlot
+          const oldActiveId = state.oppIds[0]
+          const oldActiveEn = state.oppEnergies[0]
+          const newActiveId = state.oppIds[targetSlot]
+          const newActiveEn = state.oppEnergies[targetSlot]
+
+          state.oppIds[0] = newActiveId
+          state.oppEnergies[0] = newActiveEn
+          state.oppIds[targetSlot] = oldActiveId
+          state.oppEnergies[targetSlot] = oldActiveEn
+
+          state.gustUsedThisTurn = 1 // 1 = Boss's Orders
+          state.gustTargetSlot = targetSlot
+          state.gustThreatScoreEliminated = gustCheck.diff
+
+          if (logs) {
+            const targetTpl = OPPONENT_POKEMON_CATALOG[newActiveId]
+            const oldTpl = OPPONENT_POKEMON_CATALOG[oldActiveId]
+            logs.push(
+              `Supporter Ordres du Boss ➔ cible ${targetTpl?.name ?? 'Banc'} sur le Banc adverse (Menace ${gustCheck.bestBenchThreat} pts vs ${oldTpl?.name ?? 'Actif'} ${gustCheck.activeThreat} pts)`,
+            )
+          }
+          verifyStateInvariants(state, invariants)
+          return true
+        }
+      }
+
+      return false
     }
 
     case 'PLAY_RARE_CANDY': {
@@ -1152,16 +1512,17 @@ function executeDeclarativeCardOrAbility(
       state.energyAttachedCount++
 
       // Pick best Pokemon on board to receive 1 Fire Energy
+      // Energy Banking: if Active is already a loaded Charizard ex (2+ energies), pre-attach to a backup attacker on the Bench for T+1!
       let targetSlot: 'ACTIVE' | number = 'ACTIVE'
-      let targetName = lookup[unpackCardId(state.active)]?.name ?? 'Actif'
-
-      if (
+      let targetName = logs ? (lookup[unpackCardId(state.active)]?.name ?? 'Actif') : ''
+      const activeIsLoadedZard =
         unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX &&
-        unpackEnergies(state.active) < 2
-      ) {
+        unpackEnergies(state.active) >= 2
+
+      if (!activeIsLoadedZard && unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX) {
         targetSlot = 'ACTIVE'
       } else {
-        // Check if a Charizard ex or Charmander on bench needs energy
+        // Check if a Charizard ex, Charmeleon, Charmander or Pidgeot ex on bench needs energy (Energy Banking for T+1)
         let bestBench = -1
         let bestPrio = -1
         for (let b = 0; b < state.benchLen; b++) {
@@ -1169,17 +1530,22 @@ function executeDeclarativeCardOrAbility(
           const en = unpackEnergies(state.bench[b])
           let p = 0
           if (cid === CARD_IDS.CHARIZARD_EX && en < 2) p = 100
-          else if (cid === CARD_IDS.CHARMELEON && en < 2) p = 80
-          else if (cid === CARD_IDS.CHARMANDER && en < 2) p = 70
-          else if (cid === CARD_IDS.PIDGEOT_EX && en < 2) p = 50
+          else if (cid === CARD_IDS.CHARMELEON && en < 2) p = 85
+          else if (cid === CARD_IDS.CHARMANDER && en < 2) p = 75
+          else if (cid === CARD_IDS.PIDGEOT_EX && en < 2) p = 55
           if (p > bestPrio) {
             bestPrio = p
             bestBench = b
           }
         }
-        if (bestBench !== -1 && bestPrio > 60) {
+        if (bestBench !== -1 && (bestPrio > 60 || activeIsLoadedZard)) {
           targetSlot = bestBench
-          targetName = lookup[unpackCardId(state.bench[bestBench])]?.name ?? 'Banc'
+          if (activeIsLoadedZard) {
+            state.manualEnergyBankedOnBench = true
+          }
+          if (logs) {
+            targetName = lookup[unpackCardId(state.bench[bestBench])]?.name ?? 'Banc'
+          }
         }
       }
 
@@ -1190,7 +1556,8 @@ function executeDeclarativeCardOrAbility(
       }
 
       if (logs) {
-        logs.push(`Attache manuellement 1 Énergie Feu de Base sur ${targetName} (1/tour)`)
+        const bankingNote = state.manualEnergyBankedOnBench ? ' [Energy Banking T+1]' : ''
+        logs.push(`Attache manuellement 1 Énergie Feu de Base sur ${targetName} (1/tour)${bankingNote}`)
       }
       verifyStateInvariants(state, invariants)
       return true
@@ -1206,29 +1573,32 @@ function executeDeclarativeCardOrAbility(
         const recHand = def.primitives.find((p) => p.opcode === 'RECOVER_DISCARD_TO_HAND')
         if (!recDeck && !recHand) continue
 
-        // Check if discard contains any Pokemon or Fire Energy
-        const eligibleDiscardIndices: number[] = []
+        // Zero-allocation check if discard contains any Pokemon or Fire Energy
+        let eligibleLen = 0
         for (let d = 0; d < state.discardLen; d++) {
           const dCid = unpackCardId(state.discard[d])
           const dDef = lookup[dCid]
           if (dDef && (dDef.category === 'POKEMON' || dDef.category === 'ENERGY')) {
-            eligibleDiscardIndices.push(d)
+            SCRATCH_DISCARD_ELIGIBLE[eligibleLen++] = d
           }
         }
-        if (eligibleDiscardIndices.length === 0) continue
+        if (eligibleLen === 0) continue
 
         removeAtUint16(state.hand, state.handLen, i)
         state.handLen--
         state.discard[state.discardLen++] = packCard(cid)
 
         const maxRec = (recDeck ?? recHand)!.maxTargets || 1
-        const recoveredNames: string[] = []
-        for (let r = 0; r < maxRec && eligibleDiscardIndices.length > 0; r++) {
-          const dIdx = eligibleDiscardIndices.pop()!
+        const recoveredNames: string[] | null = logs ? [] : null
+        for (let r = 0; r < maxRec && eligibleLen > 0; r++) {
+          eligibleLen--
+          const dIdx = SCRATCH_DISCARD_ELIGIBLE[eligibleLen]
           const card = removeAtUint16(state.discard, state.discardLen, dIdx)
           state.discardLen--
           const rCid = unpackCardId(card)
-          recoveredNames.push(lookup[rCid]?.name ?? 'Carte')
+          if (recoveredNames) {
+            recoveredNames.push(lookup[rCid]?.name ?? 'Carte')
+          }
           if (recDeck) {
             state.deck[state.deckLen++] = packCard(rCid)
           } else {
@@ -1238,7 +1608,7 @@ function executeDeclarativeCardOrAbility(
         if (recDeck) {
           fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
         }
-        if (logs) {
+        if (logs && recoveredNames) {
           logs.push(
             `Joue ${def.name} ➔ récupère ${recoveredNames.join(', ')} depuis la Défausse`,
           )
@@ -1262,14 +1632,23 @@ function executeDeclarativeCardOrAbility(
         const ionoPrim = def.primitives.find((p) => p.opcode === 'SHUFFLE_HAND_BOTTOM_DRAW_N')
         if (!researchPrim && !ionoPrim) continue
 
-        // In smart mode, avoid Research if it would discard >=2 irreplaceable combo pieces (e.g. Rare Candy + Charizard ex) when Iono or another line is available
+        // Resource Conservation T+1: In smart mode, avoid Research if it would discard >=2 irreplaceable combo pieces
+        // OR if our board is already fully set up (Charizard ex Ready + Pidgeot ex in play) and we hold next-turn resources!
         if (smartTargeting && researchPrim) {
           const candies = countCardIdInHand(state, CARD_IDS.RARE_CANDY)
           const zards = countCardIdInHand(state, CARD_IDS.CHARIZARD_EX)
+          const activeIsReadyZard =
+            unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX &&
+            unpackEnergies(state.active) >= 2
+          const hasPidgeot = hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)
+
+          if (activeIsReadyZard && hasPidgeot && state.handLen >= 3) {
+            // Don't burn Professor's Research and deck ourselves out when board is already optimal!
+            return false
+          }
+
           if (candies >= 2 || (candies >= 1 && zards >= 1 && state.currentTurn === 1)) {
-            // Check if Iono is in hand instead
             if (countCardIdInHand(state, CARD_IDS.IONO) > 0) continue
-            // If hand already has combo for T2, don't throw it away on T1!
             if (state.currentTurn === 1 && candies >= 1 && zards >= 1 && state.benchLen >= 2) {
               return false
             }
@@ -1281,6 +1660,7 @@ function executeDeclarativeCardOrAbility(
         state.handLen--
         state.discard[state.discardLen++] = packCard(cid)
         state.supporterPlayedCount++
+        state.randomDrawExecutedThisTurn = true
 
         if (researchPrim) {
           // Discard remaining hand and draw 7
@@ -1364,6 +1744,7 @@ function executeDeclarativeCardOrAbility(
       if (rotomSlot === 'ACTIVE') state.active |= PACK_ABILITY_USED_BIT
       else state.bench[rotomSlot] |= PACK_ABILITY_USED_BIT
 
+      state.randomDrawExecutedThisTurn = true
       const toDraw = Math.min(3, state.deckLen)
       for (let d = 0; d < toDraw; d++) {
         drawCardFromDeck(state)
@@ -1452,7 +1833,7 @@ function tryRareCandyLine(
 
   if (targetBoardSlot === 'ACTIVE') {
     const prevTurn = unpackTurnPlayed(state.active)
-    const prevName = lookup[unpackCardId(state.active)]?.name ?? 'Base'
+    const prevName = logs ? (lookup[unpackCardId(state.active)]?.name ?? 'Base') : ''
     state.active = evolvePackedPokemon(state.active, stage2Cid, state.currentTurn)
     if (logs) {
       logs.push(
@@ -1462,7 +1843,7 @@ function tryRareCandyLine(
     triggerOnEvolveAbilities(state, lookup, stage2Def, 'ACTIVE', rng, logs)
   } else {
     const prevTurn = unpackTurnPlayed(state.bench[targetBoardSlot])
-    const prevName = lookup[unpackCardId(state.bench[targetBoardSlot])]?.name ?? 'Base'
+    const prevName = logs ? (lookup[unpackCardId(state.bench[targetBoardSlot])]?.name ?? 'Base') : ''
     state.bench[targetBoardSlot] = evolvePackedPokemon(
       state.bench[targetBoardSlot],
       stage2Cid,
@@ -1509,7 +1890,6 @@ function triggerOnEvolveAbilities(
 
         removeAtUint16(state.deck, state.deckLen, energyDeckIdx)
         state.deckLen--
-        state.thinningCount++
         attachedCount++
 
         if (slot === 'ACTIVE') {
@@ -1519,6 +1899,7 @@ function triggerOnEvolveAbilities(
         }
       }
 
+      markDeckSearchedAndThinning(state, attachedCount)
       fisherYatesShuffleUint16(state.deck, state.deckLen, rng)
       if (logs && attachedCount > 0) {
         logs.push(
@@ -1547,8 +1928,8 @@ function triggerOnEvolveAbilities(
 
 /**
  * Executes a full intra-turn policy sequence on a state copy:
- * - Branch Policy 'OPTIMAL_THINNING': Deck Thinning tutors FIRST -> Evolutions (Pidgeot priority) & Quick Search -> Draw Supporter -> Follow-up Evolutions/Attachments -> Rotom V
- * - Branch Policy 'ZARD_FIRST_AGGRO': Deck Thinning tutors FIRST -> Evolutions (Charizard ex offensive priority) -> Draw Supporter -> Follow-up
+ * - Branch Policy 'OPTIMAL_THINNING': Deck Thinning tutors FIRST -> Evolutions (Pidgeot priority) & Quick Search -> Gust Threat Check -> Draw Supporter -> Follow-up Evolutions/Attachments -> Rotom V
+ * - Branch Policy 'ZARD_FIRST_AGGRO': Deck Thinning tutors FIRST -> Evolutions (Charizard ex offensive priority) -> Gust Threat Check -> Draw Supporter -> Follow-up
  * - Branch Policy 'DRAW_FIRST': Draw Supporter FIRST -> Bench Tutors -> Evolutions
  * - Branch Policy 'CONSERVATIVE': Basic placement & manual energy attachment only
  * - Policy 'GREEDY': Left-to-right naive execution
@@ -1576,8 +1957,8 @@ function runIntraTurnPolicy(
 
   if (policy === 'OPTIMAL_THINNING' || policy === 'ZARD_FIRST_AGGRO') {
     const pigeotFirst = policy === 'OPTIMAL_THINNING'
-    // Phase 1: Pre-draw Deck Thinning (Bench tutors, Arven, Quick Search, VSTAR)
-    for (let step = 0; step < 8; step++) {
+    // Phase 1: Pre-draw Deck Thinning (Bench tutors, Arven, Quick Search, VSTAR, Evolutions, Counter Catcher / Boss)
+    for (let step = 0; step < 9; step++) {
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_FLIP_THE_SCRIPT', true, logs)) {
         actionsExecuted++
         continue
@@ -1614,15 +1995,19 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
+        actionsExecuted++
+        continue
+      }
       break
     }
 
-    // Phase 2: Draw Supporter (only if Supporter wasn't used on Arven)
+    // Phase 2: Draw Supporter (only if Supporter wasn't used on Arven or Boss's Orders)
     if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', true, logs)) {
       actionsExecuted++
     }
 
-    // Phase 3: Post-draw resolution (Play newly drawn Basics, Candies, Evolutions, Energy, Recovery)
+    // Phase 3: Post-draw resolution (Play newly drawn Basics, Candies, Evolutions, Gust, Energy, Recovery)
     for (let step = 0; step < 8; step++) {
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
         actionsExecuted++
@@ -1649,6 +2034,10 @@ function runIntraTurnPolicy(
         continue
       }
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ULTRA_BALL', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -1690,6 +2079,10 @@ function runIntraTurnPolicy(
         continue
       }
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -1785,19 +2178,9 @@ function runIntraTurnPolicy(
       actionsExecuted++
     }
   } else if (policy === 'NAIVE_RANDOM') {
-    // Naive Random: Shuffles candidate action types and executes a random subset
-    const candidateActions: Parameters<typeof executeDeclarativeCardOrAbility>[4][] = [
-      'PLAY_DRAW_SUPPORTER',
-      'ATTACH_MANUAL_ENERGY',
-      'PLAY_BASIC_FROM_HAND',
-      'PLAY_POFFIN_OR_NEST',
-      'PLAY_STAGE_EVOLUTION',
-      'PLAY_RARE_CANDY',
-      'PLAY_ULTRA_BALL',
-      'PLAY_ARVEN',
-    ]
+    // Naive Random: Shuffles candidate action types and executes a random subset without allocating an array
     for (let step = 0; step < 5; step++) {
-      const pick = candidateActions[rng.nextInt(candidateActions.length)]
+      const pick = NAIVE_RANDOM_CANDIDATE_ACTIONS[rng.nextInt(NAIVE_RANDOM_CANDIDATE_ACTIONS.length)]
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, pick, false, logs)) {
         actionsExecuted++
       }
@@ -2143,7 +2526,8 @@ export function simulateSingleGame(
     }
   }
 
-  // 3. Rule of 6 Prize Cards
+  // 3. Rule of 6 Prize Cards & Dual-Board Opponent Initialization
+  initOpponentBoardState(state, config.opponentArchetype || 'RAGING_BOLT_AGGRO')
   let rareCandyPrizedCount = 0
   let charizardPrizedCount = 0
   let prizeCardNames: string[] | null = null
@@ -2178,6 +2562,7 @@ export function simulateSingleGame(
   let totalActionsExecuted = 0
   let turnsPlayed = 0
   let attacksUsedToClaimPrizes = 0
+  let twoPrizeTargetsClaimed = 0
   let revengeKillOpportunity = false
   let revengeKillSucceeded = false
   let gustThreatNeutralized = false
@@ -2195,6 +2580,12 @@ export function simulateSingleGame(
     state.energyAttachedCount = 0
     state.stadiumPlayedThisTurn = false
     state.koOccurredLastTurn = false
+    state.manualEnergyBankedOnBench = false
+    state.gustUsedThisTurn = 0
+    state.gustTargetSlot = -1
+    state.gustThreatScoreEliminated = 0
+    state.thinningBeforeDrawCount = 0
+    state.randomDrawExecutedThisTurn = false
 
     // Reset once-per-turn ability flags on Active and Bench
     if (state.active !== 0) {
@@ -2204,15 +2595,43 @@ export function simulateSingleGame(
       state.bench[b] &= ~PACK_ABILITY_USED_BIT
     }
 
+    // Advance opponent board state (deployment, evolution, energy acceleration)
+    advanceOpponentBoardTurn(state, config.opponentArchetype || 'RAGING_BOLT_AGGRO', turn, rng)
+
     let disruptionMessage: string | null = null
     let attackMessage: string | null = null
     let terminalEventMessage: string | null = null
     let sufferedKoThisTurn = false
     let sufferedIonoThisTurn = false
 
-    // Apply Turn 3 Opponent Disruption if configured
-    if (turn === 3 && config.turn3Disruption !== 'NONE') {
-      if (config.turn3Disruption === 'IONO_HAND_TO_3') {
+    // On Turn 2, aggressive opponent archetypes take 1 Prize lead (5 opponent prizes vs our 6),
+    // opening the Counter Catcher (Attrape-Riposte) Contre-Tempo window!
+    if (turn === 2 && state.oppPrizesRemaining === 6) {
+      const oppActiveTpl = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]
+      if (oppActiveTpl && oppActiveTpl.role === 'LOADED_ATTACKER' && state.oppEnergies[0] >= 2) {
+        state.oppPrizesRemaining = 5
+      }
+    }
+
+    // Apply Turn 3 Opponent Disruption / Simulated Opponent Turn Attack
+    const oppActiveTplOnT3 = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]
+    const oppHasLoadedAttackerT3 =
+      turn === 3 &&
+      oppActiveTplOnT3 !== undefined &&
+      oppActiveTplOnT3.role === 'LOADED_ATTACKER' &&
+      state.oppEnergies[0] >= 2
+
+    if (turn === 3) {
+      const effectiveDisruption =
+        config.turn3Disruption !== 'NONE'
+          ? config.turn3Disruption
+          : config.opponentArchetype === 'GARDEVOIR_DISRUPTION'
+            ? 'IONO_HAND_TO_3'
+            : oppHasLoadedAttackerT3
+              ? 'KO_ACTIVE_POKEMON'
+              : 'NONE'
+
+      if (effectiveDisruption === 'IONO_HAND_TO_3') {
         sufferedIonoThisTurn = true
         ionoExperienced = true
         const oldHandCount = state.handLen
@@ -2234,11 +2653,19 @@ export function simulateSingleGame(
           drawCardFromDeck(state)
         }
         if (recordDetailedLog) {
-          disruptionMessage = `Perturbation T3 : Mashynn / Iono adverse (Main de ${oldHandCount} cartes mélangée sous le deck ➔ réduite à ${toDraw} cartes)`
+          disruptionMessage = `Tour Adverse T_adv : Mashynn / Iono adverse (Main de ${oldHandCount} cartes mélangée sous le deck ➔ réduite à ${toDraw} cartes)`
         }
-      } else if (config.turn3Disruption === 'KO_ACTIVE_POKEMON') {
+      } else if (effectiveDisruption === 'KO_ACTIVE_POKEMON') {
         sufferedKoThisTurn = true
         revengeKillOpportunity = true
+        const activeWasEx =
+          unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX ||
+          unpackCardId(state.active) === CARD_IDS.PIDGEOT_EX ||
+          unpackCardId(state.active) === CARD_IDS.ROTOM_V ||
+          unpackCardId(state.active) === CARD_IDS.LUMINEON_V ||
+          unpackCardId(state.active) === CARD_IDS.FEZANDIPITI_EX
+        state.oppPrizesRemaining = Math.max(0, state.oppPrizesRemaining - (activeWasEx ? 2 : 1))
+
         const koName = recordDetailedLog ? (lookup[unpackCardId(state.active)]?.name ?? 'Pokémon Actif') : ''
         state.discard[state.discardLen++] = packCard(unpackCardId(state.active))
         state.active = 0
@@ -2261,16 +2688,22 @@ export function simulateSingleGame(
           state.active = promoted
           if (recordDetailedLog) {
             const promotedName = lookup[unpackCardId(promoted)]?.name ?? 'Banc'
-            disruptionMessage = `Perturbation T3 : KO de ${koName} Actif ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
+            disruptionMessage = `Tour Adverse T_adv : KO de ${koName} Actif par ${oppActiveTplOnT3?.name ?? "l'adversaire"} ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
           }
         } else {
           // Early Game Over Condition #1: No Pokemon left on Bench after Active KO!
           endReason = 'DEFEAT_NO_POKEMON'
           boardScoreFinal = evaluateBoardState(state, lookup, false).score
           if (recordDetailedLog && turnsTimeline) {
-            disruptionMessage = `Perturbation T3 : KO de ${koName} Actif (Banc vide)`
+            disruptionMessage = `Tour Adverse T_adv : KO de ${koName} Actif (Banc vide)`
             endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par KO sans Pokémon de remplacement sur le Banc`
             terminalEventMessage = endReasonLabel
+            const playerPrizesNow = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
+            const oppBenchSnaps: OpponentPokemonSnapshot[] = []
+            for (let s = 1; s <= state.oppBenchLen; s++) {
+              const snap = createOpponentPokemonSnapshot(state, s, playerPrizesNow, false)
+              if (snap) oppBenchSnaps.push(snap)
+            }
             turnsTimeline.push({
               turnNumber: turn,
               drawnCardName: null,
@@ -2283,8 +2716,15 @@ export function simulateSingleGame(
               branches: [],
               activePokemon: null,
               benchPokemon: [],
+              opponentActivePokemon: createOpponentPokemonSnapshot(state, 0, playerPrizesNow, false),
+              opponentBenchPokemon: oppBenchSnaps,
+              opponentPrizesRemaining: state.oppPrizesRemaining,
+              prizesKnownByPlayer: state.prizesKnown,
+              prizeCheckDeductionNote: state.prizesKnown
+                ? `6 Récompenses déduites après inspection du deck (T${state.firstSearchTurn}) : ${(prizeCardNames ?? []).join(', ')}`
+                : 'Récompenses non encore inspectées (aucun SEARCH_DECK joué)',
               handCardNames: [],
-              prizesRemaining: config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining,
+              prizesRemaining: playerPrizesNow,
               supporterPlayedThisTurn: false,
               energyAttachedThisTurn: false,
               vstarUsedInGame: state.vstarUsedInGame,
@@ -2310,6 +2750,12 @@ export function simulateSingleGame(
         for (let h = 0; h < state.handLen; h++) {
           handNames.push(lookup[unpackCardId(state.hand[h])]?.name ?? 'Carte')
         }
+        const playerPrizesNow = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
+        const oppBenchSnaps: OpponentPokemonSnapshot[] = []
+        for (let s = 1; s <= state.oppBenchLen; s++) {
+          const snap = createOpponentPokemonSnapshot(state, s, playerPrizesNow, false)
+          if (snap) oppBenchSnaps.push(snap)
+        }
         turnsTimeline.push({
           turnNumber: turn,
           drawnCardName: null,
@@ -2323,8 +2769,15 @@ export function simulateSingleGame(
           activePokemon:
             state.active !== 0 ? createBoardPokemonSnapshot(state.active, lookup) : null,
           benchPokemon: benchSnapshots,
+          opponentActivePokemon: createOpponentPokemonSnapshot(state, 0, playerPrizesNow, false),
+          opponentBenchPokemon: oppBenchSnaps,
+          opponentPrizesRemaining: state.oppPrizesRemaining,
+          prizesKnownByPlayer: state.prizesKnown,
+          prizeCheckDeductionNote: state.prizesKnown
+            ? `6 Récompenses déduites après inspection du deck (T${state.firstSearchTurn}) : ${(prizeCardNames ?? []).join(', ')}`
+            : 'Récompenses non encore inspectées (aucun SEARCH_DECK joué)',
           handCardNames: handNames,
-          prizesRemaining: config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining,
+          prizesRemaining: playerPrizesNow,
           supporterPlayedThisTurn: false,
           energyAttachedThisTurn: false,
           vstarUsedInGame: state.vstarUsedInGame,
@@ -2392,6 +2845,29 @@ export function simulateSingleGame(
         }
 
         if (recordDetailedLog && recordedBranches) {
+          let attackTargetSummary: string | null = null
+          if (turn >= 2 && branchState.active !== 0) {
+            const bActiveId = unpackCardId(branchState.active)
+            const bActiveEn = unpackEnergies(branchState.active)
+            if ((bActiveId === CARD_IDS.CHARIZARD_EX || bActiveId === CARD_IDS.PIDGEOT_EX) && bActiveEn >= 2) {
+              const targetTpl = OPPONENT_POKEMON_CATALOG[branchState.oppIds[0]]
+              const pPrizes = config.prizesEnabled ? branchState.prizesLen : virtualPrizesRemaining
+              const tScore = evaluateTargetThreatScoreFast(
+                branchState,
+                0,
+                pPrizes,
+                countOpponentBasicEvolvers(branchState),
+              )
+              const gustPrefix =
+                branchState.gustUsedThisTurn === 2
+                  ? 'Ciblage Attrape-Riposte ➔ '
+                  : branchState.gustUsedThisTurn === 1
+                    ? 'Ciblage Ordres du Boss ➔ '
+                    : 'Cible Actif ➔ '
+              attackTargetSummary = `${gustPrefix}KO ${targetTpl?.name ?? 'Adversaire'} (${targetTpl?.prizeValue ?? 1} Récompense(s), Menace ${tScore} pts)`
+            }
+          }
+
           recordedBranches.push({
             branchId: candidate.branchId,
             label: candidate.label,
@@ -2400,6 +2876,7 @@ export function simulateSingleGame(
             scoreBreakdown: evalRes.breakdown,
             actions: branchLogs ?? [],
             thinningDelta: branchState.thinningCount - thinBefore,
+            attackTargetSummary,
           })
         }
       }
@@ -2451,15 +2928,24 @@ export function simulateSingleGame(
       }
     }
 
-    // Attack & Prize claim simulation on Turn 2+
+    if (state.gustUsedThisTurn > 0) {
+      gustThreatNeutralized = true
+    }
+
+    // Attack & Prize claim simulation on Turn 2+ against the Dual-Board Opponent Active (`state.oppIds[0]`)
     if (turn >= 2 && state.active !== 0) {
       const activeCid = unpackCardId(state.active)
       const activeEnergies = unpackEnergies(state.active)
+      const oppActiveId = state.oppIds[0]
+      const oppActiveTpl = OPPONENT_POKEMON_CATALOG[oppActiveId]
 
-      if (activeCid === CARD_IDS.CHARIZARD_EX && activeEnergies >= 2) {
-        // Charizard ex attacks with Combustion Obscure (180+ damage):
-        // Takes 1 Prize on Turn 2 against a single-prize lead, and 2 Prizes on Turn 3+ against opponent's ex/V
-        const prizesToClaim = turn >= 3 ? 2 : 1
+      if (activeCid === CARD_IDS.CHARIZARD_EX && activeEnergies >= 2 && oppActiveTpl) {
+        // Charizard ex attacks with Combustion Obscure (180+ damage, scaling with opponent prizes taken):
+        // Claims exact Prize value of the knocked-out opponent Pokemon (2 Prizes on ex/V or 1 Prize on Basic/Stage 1)
+        const prizesToClaim = oppActiveTpl.prizeValue
+        if (prizesToClaim === 2) {
+          twoPrizeTargetsClaimed++
+        }
         const claimedNames: string[] | null = recordDetailedLog ? [] : null
         let claimedCount = 0
 
@@ -2481,6 +2967,9 @@ export function simulateSingleGame(
           virtualPrizesRemaining -= claimedCount
         }
 
+        const koEnemyName = oppActiveTpl.name
+        removeKnockedOutOpponentSlot(state, 0)
+
         if (claimedCount > 0) {
           attacksUsedToClaimPrizes++
           if (sufferedKoThisTurn) revengeKillSucceeded = true
@@ -2488,33 +2977,53 @@ export function simulateSingleGame(
         }
 
         if (recordDetailedLog && claimedCount > 0) {
+          const gustTag =
+            state.gustUsedThisTurn === 2
+              ? ' [Cible Attrape-Riposte]'
+              : state.gustUsedThisTurn === 1
+                ? ' [Cible Ordres du Boss]'
+                : ''
           attackMessage =
             claimedNames && claimedNames.length > 0
-              ? `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse : récupère ${claimedCount} Récompense(s) (${claimedNames.join(', ')})`
-              : `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse (${claimedCount} Récompense(s) théorique(s), reste ${virtualPrizesRemaining})`
+              ? `Attaque Combustion Obscure (Dracaufeu ex)${gustTag} ➔ KO de ${koEnemyName} : récupère ${claimedCount} Récompense(s) (${claimedNames.join(', ')})`
+              : `Attaque Combustion Obscure (Dracaufeu ex)${gustTag} ➔ KO de ${koEnemyName} (${claimedCount} Récompense(s) théorique(s), reste ${virtualPrizesRemaining})`
         }
-      } else if (activeCid === CARD_IDS.PIDGEOT_EX && activeEnergies >= 2) {
-        // Pidgeot ex attacks with Bourrasque Tournoyante (120 damage): takes 1 Prize
+      } else if (activeCid === CARD_IDS.PIDGEOT_EX && activeEnergies >= 2 && oppActiveTpl) {
+        // Pidgeot ex attacks with Bourrasque Tournoyante (120 damage)
+        const prizesToClaim = oppActiveTpl.hp <= 120 ? oppActiveTpl.prizeValue : 1
+        const koEnemyName = oppActiveTpl.name
+        if (oppActiveTpl.hp <= 120) {
+          removeKnockedOutOpponentSlot(state, 0)
+        }
         if (config.prizesEnabled && state.prizesLen > 0) {
-          state.prizesLen--
-          const claimedPrize = state.prizes[state.prizesLen]
-          state.prizes[state.prizesLen] = 0
-          const pCid = unpackCardId(claimedPrize)
-          state.hand[state.handLen++] = packCard(pCid)
+          let claimedCount = 0
+          const claimedNames: string[] | null = recordDetailedLog ? [] : null
+          for (let c = 0; c < prizesToClaim && state.prizesLen > 0; c++) {
+            state.prizesLen--
+            const claimedPrize = state.prizes[state.prizesLen]
+            state.prizes[state.prizesLen] = 0
+            const pCid = unpackCardId(claimedPrize)
+            state.hand[state.handLen++] = packCard(pCid)
+            claimedCount++
+            if (recordDetailedLog && claimedNames) {
+              claimedNames.push(lookup[pCid]?.name ?? 'Carte')
+            }
+          }
           virtualPrizesRemaining = state.prizesLen
           attacksUsedToClaimPrizes++
           if (sufferedKoThisTurn) revengeKillSucceeded = true
           if (sufferedIonoThisTurn) postIonoSurvived = true
-          if (recordDetailedLog) {
-            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ récupère 1 Récompense (${lookup[pCid]?.name ?? 'Carte'})`
+          if (recordDetailedLog && claimedNames) {
+            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ KO de ${koEnemyName} : récupère ${claimedCount} Récompense(s) (${claimedNames.join(', ')})`
           }
         } else if (!config.prizesEnabled && virtualPrizesRemaining > 0) {
-          virtualPrizesRemaining--
+          const claimedCount = Math.min(prizesToClaim, virtualPrizesRemaining)
+          virtualPrizesRemaining -= claimedCount
           attacksUsedToClaimPrizes++
           if (sufferedKoThisTurn) revengeKillSucceeded = true
           if (sufferedIonoThisTurn) postIonoSurvived = true
           if (recordDetailedLog) {
-            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ 1 Récompense théorique prise (reste ${virtualPrizesRemaining})`
+            attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ KO de ${koEnemyName} (${claimedCount} Récompense(s) théorique(s), reste ${virtualPrizesRemaining})`
           }
         }
       }
@@ -2563,6 +3072,11 @@ export function simulateSingleGame(
       for (let h = 0; h < state.handLen; h++) {
         handNames.push(lookup[unpackCardId(state.hand[h])]?.name ?? 'Carte')
       }
+      const oppBenchSnaps: OpponentPokemonSnapshot[] = []
+      for (let s = 1; s <= state.oppBenchLen; s++) {
+        const snap = createOpponentPokemonSnapshot(state, s, remainingPrizesNow, false)
+        if (snap) oppBenchSnaps.push(snap)
+      }
 
       turnsTimeline.push({
         turnNumber: turn,
@@ -2577,6 +3091,18 @@ export function simulateSingleGame(
         activePokemon:
           state.active !== 0 ? createBoardPokemonSnapshot(state.active, lookup) : null,
         benchPokemon: benchSnapshots,
+        opponentActivePokemon: createOpponentPokemonSnapshot(
+          state,
+          0,
+          remainingPrizesNow,
+          attackMessage !== null,
+        ),
+        opponentBenchPokemon: oppBenchSnaps,
+        opponentPrizesRemaining: state.oppPrizesRemaining,
+        prizesKnownByPlayer: state.prizesKnown,
+        prizeCheckDeductionNote: state.prizesKnown
+          ? `6 Récompenses déduites après inspection du deck (T${state.firstSearchTurn}) : ${(prizeCardNames ?? []).join(', ')}`
+          : 'Récompenses non encore inspectées (aucun SEARCH_DECK joué)',
         handCardNames: handNames,
         prizesRemaining: remainingPrizesNow,
         supporterPlayedThisTurn: state.supporterPlayedCount > 0,
@@ -2601,7 +3127,8 @@ export function simulateSingleGame(
   const remainingPrizesFinal = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
   const optimalPrizeMapping =
     (remainingPrizesFinal === 0 && attacksUsedToClaimPrizes <= 3) ||
-    (maxTurns <= 4 && remainingPrizesFinal <= 3 && turn2CharizardReady)
+    twoPrizeTargetsClaimed >= 2 ||
+    (maxTurns <= 4 && remainingPrizesFinal <= 2 && turn2CharizardReady)
 
   let sampledRecord: SampledGameRecord | null = null
   if (recordDetailedLog && turnsTimeline && initialHandNames && prizeCardNames) {
@@ -2627,6 +3154,7 @@ export function simulateSingleGame(
       criticalPrizesCount: rareCandyPrizedCount + charizardPrizedCount,
       rareCandyPrizedCount,
       charizardPrizedCount,
+      firstSearchTurn: state.firstSearchTurn > 0 ? state.firstSearchTurn : null,
       turn1SetupSuccess,
       turn2CharizardReady,
       pidgeotInPlayByT2,
