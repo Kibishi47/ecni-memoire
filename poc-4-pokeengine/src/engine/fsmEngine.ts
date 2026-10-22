@@ -133,6 +133,34 @@ export function copyIntoLowLevelState(src: LowLevelGameState, dst: LowLevelGameS
   dst.koOccurredLastTurn = src.koOccurredLastTurn
 }
 
+export function resetLowLevelState(dst: LowLevelGameState, goingFirst: boolean): void {
+  dst.active = 0
+  dst.deckLen = 0
+  dst.handLen = 0
+  dst.prizesLen = 0
+  dst.discardLen = 0
+  dst.benchLen = 0
+  dst.currentTurn = 1
+  dst.goingFirst = goingFirst
+  dst.supporterPlayedCount = 0
+  dst.energyAttachedCount = 0
+  dst.stadiumPlayedThisTurn = false
+  dst.vstarUsedInGame = false
+  dst.mulliganCount = 0
+  dst.thinningCount = 0
+  dst.koOccurredLastTurn = false
+}
+
+// Pre-allocated arena buffers to eliminate GC pressure during 100,000-game runs (especially on mobile CPUs)
+const POOL_MAIN_STATE = createEmptyGameState(false)
+const POOL_BRANCH_STATES: LowLevelGameState[] = [
+  createEmptyGameState(false),
+  createEmptyGameState(false),
+  createEmptyGameState(false),
+  createEmptyGameState(false),
+]
+const SCRATCH_IONO_BUFFER = new Uint16Array(60)
+
 interface InvariantTrackerCounters {
   inv1Checked: number
   inv1Passed: number
@@ -962,13 +990,12 @@ function executeDeclarativeCardOrAbility(
       const candyIdx = findHandIndexById(state, CARD_IDS.RARE_CANDY)
       if (candyIdx === -1) return false
 
-      // In Optimal mode, evolve Pidgeot ex FIRST if both Pidgeot ex and Charizard ex are available,
-      // OR evolve Pidgeot ex so Quick Search can immediately fetch the missing piece!
+      // In Optimal mode (smartTargeting === true), evolve Pidgeot ex FIRST if not yet on board
+      // so Quick Search can immediately fetch the missing piece; in Zard-First Aggro (smartTargeting === false), evolve Charizard ex FIRST!
       const pidgeotHandIdx = findHandIndexById(state, CARD_IDS.PIDGEOT_EX)
       const zardHandIdx = findHandIndexById(state, CARD_IDS.CHARIZARD_EX)
 
-      // Try Pidgeot ex first if Pidgeot ex is not yet on board
-      if (pidgeotHandIdx !== -1 && !hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)) {
+      if (smartTargeting && pidgeotHandIdx !== -1 && !hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)) {
         const evolvedPidgeot = tryRareCandyLine(
           state,
           lookup,
@@ -982,7 +1009,7 @@ function executeDeclarativeCardOrAbility(
         if (evolvedPidgeot) return true
       }
 
-      // Next try Charizard ex
+      // Next try Charizard ex (or first if smartTargeting === false)
       if (zardHandIdx !== -1) {
         const evolvedZard = tryRareCandyLine(
           state,
@@ -1259,20 +1286,19 @@ function executeDeclarativeCardOrAbility(
         } else if (ionoPrim) {
           // Shuffle hand to bottom of deck and draw N (prizes remaining, default 6)
           const returnedCount = state.handLen
-          const tempBottom = new Uint16Array(returnedCount)
           for (let h = 0; h < returnedCount; h++) {
-            tempBottom[h] = packCard(unpackCardId(state.hand[h]))
+            SCRATCH_IONO_BUFFER[h] = packCard(unpackCardId(state.hand[h]))
             state.hand[h] = 0
           }
           state.handLen = 0
-          fisherYatesShuffleUint16(tempBottom, returnedCount, rng)
+          fisherYatesShuffleUint16(SCRATCH_IONO_BUFFER, returnedCount, rng)
 
-          // Shift existing deck up by returnedCount so tempBottom goes to bottom (index 0..returnedCount-1)
+          // Shift existing deck up by returnedCount so SCRATCH_IONO_BUFFER goes to bottom (index 0..returnedCount-1)
           for (let d = state.deckLen - 1; d >= 0; d--) {
             state.deck[d + returnedCount] = state.deck[d]
           }
           for (let h = 0; h < returnedCount; h++) {
-            state.deck[h] = tempBottom[h]
+            state.deck[h] = SCRATCH_IONO_BUFFER[h]
           }
           state.deckLen += returnedCount
 
@@ -1505,23 +1531,33 @@ function triggerOnEvolveAbilities(
 
 /**
  * Executes a full intra-turn policy sequence on a state copy:
- * - Branch Policy 'OPTIMAL_THINNING': Deck Thinning tutors FIRST -> Evolutions & Quick Search -> Draw Supporter -> Follow-up Evolutions/Attachments -> Rotom V
+ * - Branch Policy 'OPTIMAL_THINNING': Deck Thinning tutors FIRST -> Evolutions (Pidgeot priority) & Quick Search -> Draw Supporter -> Follow-up Evolutions/Attachments -> Rotom V
+ * - Branch Policy 'ZARD_FIRST_AGGRO': Deck Thinning tutors FIRST -> Evolutions (Charizard ex offensive priority) -> Draw Supporter -> Follow-up
  * - Branch Policy 'DRAW_FIRST': Draw Supporter FIRST -> Bench Tutors -> Evolutions
  * - Branch Policy 'CONSERVATIVE': Basic placement & manual energy attachment only
  * - Policy 'GREEDY': Left-to-right naive execution
  * - Policy 'NAIVE_RANDOM': Random action ordering
  */
+type IntraTurnPolicyType =
+  | 'OPTIMAL_THINNING'
+  | 'ZARD_FIRST_AGGRO'
+  | 'DRAW_FIRST'
+  | 'CONSERVATIVE'
+  | 'GREEDY'
+  | 'NAIVE_RANDOM'
+
 function runIntraTurnPolicy(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
   rng: Mulberry32,
   invariants: InvariantTrackerCounters,
-  policy: 'OPTIMAL_THINNING' | 'DRAW_FIRST' | 'CONSERVATIVE' | 'GREEDY' | 'NAIVE_RANDOM',
+  policy: IntraTurnPolicyType,
   logs: string[] | null,
 ): number {
   let actionsExecuted = 0
 
-  if (policy === 'OPTIMAL_THINNING') {
+  if (policy === 'OPTIMAL_THINNING' || policy === 'ZARD_FIRST_AGGRO') {
+    const pigeotFirst = policy === 'OPTIMAL_THINNING'
     // Phase 1: Pre-draw Deck Thinning (Bench tutors, Arven, Quick Search, VSTAR)
     for (let step = 0; step < 8; step++) {
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_FLIP_THE_SCRIPT', true, logs)) {
@@ -1548,7 +1584,7 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', pigeotFirst, logs)) {
         actionsExecuted++
         continue
       }
@@ -1578,7 +1614,7 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', pigeotFirst, logs)) {
         actionsExecuted++
         continue
       }
@@ -1688,6 +1724,110 @@ function runIntraTurnPolicy(
   return actionsExecuted
 }
 
+interface CandidateBeamBranch {
+  branchId: string
+  label: string
+  policy: IntraTurnPolicyType
+}
+
+/**
+ * Dynamically discovers between 1 and 4 distinct Beam Search candidate branches for the current turn
+ * depending on the actual playable cards in hand and the current board state:
+ * - 1 branch if the hand is restricted/bricked (no tutors, no draw supporters, no abilities).
+ * - 2 to 4 branches depending on whether a Draw Supporter can be sequenced before Tutors ('DRAW_FIRST'),
+ *   and whether both Charizard and Pidgeot lines can evolve on Turn 2+ ('ZARD_FIRST_AGGRO' vs 'OPTIMAL_THINNING').
+ */
+function discoverCandidateBeamBranches(
+  state: LowLevelGameState,
+  lookup: DeclarativeCardDefinition[],
+): CandidateBeamBranch[] {
+  const canPlaySupporter = !(state.currentTurn === 1 && state.goingFirst) && state.supporterPlayedCount === 0
+  let hasTutorOrItem = false
+  let hasDrawSupporter = false
+  let hasRareCandyOrEvo = false
+
+  for (let i = 0; i < state.handLen; i++) {
+    const cid = unpackCardId(state.hand[i])
+    if (
+      cid === CARD_IDS.BUDDY_POFFIN ||
+      cid === CARD_IDS.NEST_BALL ||
+      cid === CARD_IDS.ULTRA_BALL ||
+      cid === CARD_IDS.FOREST_SEAL_STONE ||
+      cid === CARD_IDS.SUPER_ROD ||
+      cid === CARD_IDS.NIGHT_STRETCHER ||
+      cid === CARD_IDS.LUMINEON_V
+    ) {
+      hasTutorOrItem = true
+    } else if (cid === CARD_IDS.ARVEN && canPlaySupporter) {
+      hasTutorOrItem = true
+    } else if ((cid === CARD_IDS.PROFESSORS_RESEARCH || cid === CARD_IDS.IONO) && canPlaySupporter) {
+      hasDrawSupporter = true
+    } else if (
+      cid === CARD_IDS.RARE_CANDY ||
+      cid === CARD_IDS.CHARIZARD_EX ||
+      cid === CARD_IDS.PIDGEOT_EX ||
+      cid === CARD_IDS.CHARMELEON ||
+      cid === CARD_IDS.PIDGEOTTO
+    ) {
+      hasRareCandyOrEvo = true
+    }
+  }
+
+  const hasQuickSearchReady = hasCardIdOnBoard(state, CARD_IDS.PIDGEOT_EX)
+  const hasFezReady = state.koOccurredLastTurn && hasCardIdOnBoard(state, CARD_IDS.FEZANDIPITI_EX)
+
+  // Case 1: Restricted / Brick hand (no tutor, no draw supporter, no active search ability) -> Only 1 branch needed
+  if (!hasTutorOrItem && !hasDrawSupporter && !hasQuickSearchReady && !hasFezReady && !hasRareCandyOrEvo) {
+    return [
+      {
+        branchId: 'A',
+        label: 'Branche A — Action Unique Disponible (Main Restreinte / Attachement Simple)',
+        policy: 'CONSERVATIVE',
+      },
+    ]
+  }
+
+  const branches: CandidateBeamBranch[] = [
+    {
+      branchId: 'A',
+      label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
+      policy: 'OPTIMAL_THINNING',
+    },
+  ]
+
+  // Branch B is only added if a random-draw Supporter (Research / Iono) is legally playable from hand
+  if (hasDrawSupporter) {
+    branches.push({
+      branchId: 'B',
+      label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
+      policy: 'DRAW_FIRST',
+    })
+  }
+
+  // Branch C: Resource conservation / Hold hand against disruption
+  branches.push({
+    branchId: 'C',
+    label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
+    policy: 'CONSERVATIVE',
+  })
+
+  // Branch D is dynamically added on Turn 2+ when both Charizard and Pidgeot lines are eligible to evolve on board
+  if (
+    state.currentTurn >= 2 &&
+    canLineEvolveThisTurn(state, lookup, 'CHARIZARD') &&
+    canLineEvolveThisTurn(state, lookup, 'PIDGEOT') &&
+    (hasTutorOrItem || hasRareCandyOrEvo || hasQuickSearchReady)
+  ) {
+    branches.push({
+      branchId: 'D',
+      label: 'Branche D — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
+      policy: 'ZARD_FIRST_AGGRO',
+    })
+  }
+
+  return branches
+}
+
 function createBoardPokemonSnapshot(
   packed: number,
   lookup: DeclarativeCardDefinition[],
@@ -1744,7 +1884,8 @@ export function simulateSingleGame(
   const maxTurns = Math.max(1, Math.min(10, config.maxTurns || 4))
   const gameSeed = deriveGameSeed(config.seed, gameIndex)
   const rng = new Mulberry32(gameSeed)
-  const state = createEmptyGameState(config.goingFirst)
+  const state = POOL_MAIN_STATE
+  resetLowLevelState(state, config.goingFirst)
 
   let initialDrawHadZeroBasics = false
   let initialDrawHadPoffin = false
@@ -1878,18 +2019,17 @@ export function simulateSingleGame(
     if (turn === 3 && config.turn3Disruption !== 'NONE') {
       if (config.turn3Disruption === 'IONO_HAND_TO_3') {
         const oldHandCount = state.handLen
-        const tempBottom = new Uint16Array(oldHandCount)
         for (let h = 0; h < oldHandCount; h++) {
-          tempBottom[h] = packCard(unpackCardId(state.hand[h]))
+          SCRATCH_IONO_BUFFER[h] = packCard(unpackCardId(state.hand[h]))
           state.hand[h] = 0
         }
         state.handLen = 0
-        fisherYatesShuffleUint16(tempBottom, oldHandCount, rng)
+        fisherYatesShuffleUint16(SCRATCH_IONO_BUFFER, oldHandCount, rng)
         for (let d = state.deckLen - 1; d >= 0; d--) {
           state.deck[d + oldHandCount] = state.deck[d]
         }
         for (let h = 0; h < oldHandCount; h++) {
-          state.deck[h] = tempBottom[h]
+          state.deck[h] = SCRATCH_IONO_BUFFER[h]
         }
         state.deckLen += oldHandCount
         const toDraw = Math.min(3, state.deckLen)
@@ -1995,90 +2135,62 @@ export function simulateSingleGame(
     const drawnCardName = drawnCard !== 0 ? (lookup[unpackCardId(drawnCard)]?.name ?? null) : null
 
     const recordedBranches: DecisionBranchRecord[] = []
+    let branchesEvaluatedThisTurn = 1
 
     if (config.aiMode === 'OPTIMAL_BEAM') {
-      // Beam Search: Evaluate 3 distinct intra-turn action branches (Branch A: Deck Thinning + Combo, Branch B: Draw-First / Aggressive, Branch C: Conservative)
-      totalBranchesEvaluated += 3
+      // Dynamic Beam Search: Discovers between 1 and 4 distinct intra-turn action branches
+      // based on the actual playable cards in hand and current board state
+      const candidateBranches = discoverCandidateBeamBranches(state, lookup)
+      branchesEvaluatedThisTurn = candidateBranches.length
+      totalBranchesEvaluated += branchesEvaluatedThisTurn
       const thinBefore = state.thinningCount
 
-      // Branch A: Optimal Deck Thinning + Combo Sequencing
-      const stateA = cloneLowLevelState(state)
-      const rngA = rng.clone()
-      const logsA: string[] | null = recordDetailedLog ? [] : null
-      const actA = runIntraTurnPolicy(stateA, lookup, rngA, invariants, 'OPTIMAL_THINNING', logsA)
-      const evalA = evaluateBoardState(stateA, lookup, recordDetailedLog)
+      let bestIdx = 0
+      let bestScore = -999999
+      let bestActions = 0
 
-      // Branch B: Draw-First / Greedy Sequencing
-      const stateB = cloneLowLevelState(state)
-      const rngB = rng.clone()
-      const logsB: string[] | null = recordDetailedLog ? [] : null
-      const actB = runIntraTurnPolicy(stateB, lookup, rngB, invariants, 'DRAW_FIRST', logsB)
-      const evalB = evaluateBoardState(stateB, lookup, recordDetailedLog)
-
-      // Branch C: Conservative / Resource Hold
-      const stateC = cloneLowLevelState(state)
-      const rngC = rng.clone()
-      const logsC: string[] | null = recordDetailedLog ? [] : null
-      const actC = runIntraTurnPolicy(stateC, lookup, rngC, invariants, 'CONSERVATIVE', logsC)
-      const evalC = evaluateBoardState(stateC, lookup, recordDetailedLog)
-
-      // Pick winning branch
-      let winner: 'A' | 'B' | 'C' = 'A'
-      let bestScore = evalA.score
-      if (evalB.score > bestScore) {
-        winner = 'B'
-        bestScore = evalB.score
-      }
-      if (evalC.score > bestScore) {
-        winner = 'C'
-        bestScore = evalC.score
-      }
-
-      if (winner === 'A') {
-        copyIntoLowLevelState(stateA, state)
-        totalActionsExecuted += actA
-        rng.nextUint32()
-      } else if (winner === 'B') {
-        copyIntoLowLevelState(stateB, state)
-        totalActionsExecuted += actB
-        rng.nextUint32()
-      } else {
-        copyIntoLowLevelState(stateC, state)
-        totalActionsExecuted += actC
-        rng.nextUint32()
-      }
-
-      if (recordDetailedLog) {
-        recordedBranches.push(
-          {
-            branchId: 'A',
-            label: 'Branche A — Épuration (Deck Thinning) & Séquence Combo Optimale',
-            selected: winner === 'A',
-            boardScore: evalA.score,
-            scoreBreakdown: evalA.breakdown,
-            actions: logsA ?? [],
-            thinningDelta: stateA.thinningCount - thinBefore,
-          },
-          {
-            branchId: 'B',
-            label: 'Branche B — Pioche Aléatoire Prioritaire (Glouton)',
-            selected: winner === 'B',
-            boardScore: evalB.score,
-            scoreBreakdown: evalB.breakdown,
-            actions: logsB ?? [],
-            thinningDelta: stateB.thinningCount - thinBefore,
-          },
-          {
-            branchId: 'C',
-            label: 'Branche C — Ligne Conservatrice (Rétention de Main)',
-            selected: winner === 'C',
-            boardScore: evalC.score,
-            scoreBreakdown: evalC.breakdown,
-            actions: logsC ?? [],
-            thinningDelta: stateC.thinningCount - thinBefore,
-          },
+      for (let bIdx = 0; bIdx < candidateBranches.length; bIdx++) {
+        const candidate = candidateBranches[bIdx]
+        const branchState = POOL_BRANCH_STATES[bIdx]
+        copyIntoLowLevelState(state, branchState)
+        const branchRng = rng.clone()
+        const branchLogs: string[] | null = recordDetailedLog ? [] : null
+        const actCount = runIntraTurnPolicy(
+          branchState,
+          lookup,
+          branchRng,
+          invariants,
+          candidate.policy,
+          branchLogs,
         )
+        const evalRes = evaluateBoardState(branchState, lookup, recordDetailedLog)
+
+        if (evalRes.score > bestScore) {
+          bestScore = evalRes.score
+          bestIdx = bIdx
+          bestActions = actCount
+        }
+
+        if (recordDetailedLog) {
+          recordedBranches.push({
+            branchId: candidate.branchId,
+            label: candidate.label,
+            selected: false,
+            boardScore: evalRes.score,
+            scoreBreakdown: evalRes.breakdown,
+            actions: branchLogs ?? [],
+            thinningDelta: branchState.thinningCount - thinBefore,
+          })
+        }
       }
+
+      if (recordDetailedLog && recordedBranches[bestIdx]) {
+        recordedBranches[bestIdx].selected = true
+      }
+
+      copyIntoLowLevelState(POOL_BRANCH_STATES[bestIdx], state)
+      totalActionsExecuted += bestActions
+      rng.nextUint32()
     } else if (config.aiMode === 'GREEDY') {
       totalBranchesEvaluated += 1
       const thinBefore = state.thinningCount
@@ -2224,7 +2336,7 @@ export function simulateSingleGame(
         terminalEvent: terminalEventMessage,
         deckCountStart,
         deckCountEnd: state.deckLen,
-        branchesEvaluated: config.aiMode === 'OPTIMAL_BEAM' ? 3 : 1,
+        branchesEvaluated: branchesEvaluatedThisTurn,
         branches: recordedBranches,
         activePokemon:
           state.active !== 0 ? createBoardPokemonSnapshot(state.active, lookup) : null,
