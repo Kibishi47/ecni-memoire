@@ -158,6 +158,10 @@ const POOL_BRANCH_STATES: LowLevelGameState[] = [
   createEmptyGameState(false),
   createEmptyGameState(false),
   createEmptyGameState(false),
+  createEmptyGameState(false),
+  createEmptyGameState(false),
+  createEmptyGameState(false),
+  createEmptyGameState(false),
 ]
 const SCRATCH_IONO_BUFFER = new Uint16Array(60)
 
@@ -1543,6 +1547,8 @@ type IntraTurnPolicyType =
   | 'ZARD_FIRST_AGGRO'
   | 'DRAW_FIRST'
   | 'CONSERVATIVE'
+  | 'TURBO_VSTAR_THINNING'
+  | 'BENCH_SATURATION'
   | 'GREEDY'
   | 'NAIVE_RANDOM'
 
@@ -1648,6 +1654,75 @@ function runIntraTurnPolicy(
     if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_ROTOM_INSTANT_CHARGE', true, logs)) {
       actionsExecuted++
     }
+  } else if (policy === 'TURBO_VSTAR_THINNING') {
+    // Turbo VSTAR & Ultra Ball aggressive digging before bench tutors
+    for (let step = 0; step < 7; step++) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SEAL_STONE_AND_VSTAR', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ULTRA_BALL', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_QUICK_SEARCH', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ARVEN', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      break
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', true, logs)) {
+      actionsExecuted++
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+      actionsExecuted++
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'ATTACH_MANUAL_ENERGY', true, logs)) {
+      actionsExecuted++
+    }
+  } else if (policy === 'BENCH_SATURATION') {
+    // Bench Saturation & Rotom V setup priority
+    for (let step = 0; step < 6; step++) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_BASIC_FROM_HAND', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ARVEN', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      break
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'ATTACH_MANUAL_ENERGY', true, logs)) {
+      actionsExecuted++
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_ROTOM_INSTANT_CHARGE', true, logs)) {
+      actionsExecuted++
+    }
   } else if (policy === 'DRAW_FIRST' || policy === 'GREEDY') {
     // Greedy / Draw-First: Plays Draw Supporter and manual energy BEFORE thinning tutors!
     if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', false, logs)) {
@@ -1729,6 +1804,52 @@ interface CandidateBeamBranch {
   label: string
   policy: IntraTurnPolicyType
 }
+
+/**
+ * Full 8-branch catalog used when `aiMode === 'FIXED_BEAM'` (user-defined fixed number of branches K = 1..8 tested every turn).
+ */
+const FIXED_BEAM_BRANCH_CATALOG: CandidateBeamBranch[] = [
+  {
+    branchId: 'A',
+    label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
+    policy: 'OPTIMAL_THINNING',
+  },
+  {
+    branchId: 'B',
+    label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
+    policy: 'DRAW_FIRST',
+  },
+  {
+    branchId: 'C',
+    label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
+    policy: 'CONSERVATIVE',
+  },
+  {
+    branchId: 'D',
+    label: 'Branche D — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
+    policy: 'ZARD_FIRST_AGGRO',
+  },
+  {
+    branchId: 'E',
+    label: 'Branche E — Séquence Turbo VSTAR & Hyper Ball Prioritaire',
+    policy: 'TURBO_VSTAR_THINNING',
+  },
+  {
+    branchId: 'F',
+    label: 'Branche F — Saturation Maximale du Banc & Charge Motisma V',
+    policy: 'BENCH_SATURATION',
+  },
+  {
+    branchId: 'G',
+    label: 'Branche G — Exécution Séquentielle Gauche-Droite Directe',
+    policy: 'GREEDY',
+  },
+  {
+    branchId: 'H',
+    label: 'Branche H — Exploration Stochastique Monte-Carlo (Rollout Aléatoire)',
+    policy: 'NAIVE_RANDOM',
+  },
+]
 
 /**
  * Dynamically discovers between 1 and 4 distinct Beam Search candidate branches for the current turn
@@ -2137,10 +2258,15 @@ export function simulateSingleGame(
     const recordedBranches: DecisionBranchRecord[] = []
     let branchesEvaluatedThisTurn = 1
 
-    if (config.aiMode === 'OPTIMAL_BEAM') {
-      // Dynamic Beam Search: Discovers between 1 and 4 distinct intra-turn action branches
-      // based on the actual playable cards in hand and current board state
-      const candidateBranches = discoverCandidateBeamBranches(state, lookup)
+    if (config.aiMode === 'OPTIMAL_BEAM' || config.aiMode === 'FIXED_BEAM') {
+      // If OPTIMAL_BEAM: dynamically discovers 1..4 branches depending on the current hand & board state.
+      // If FIXED_BEAM: evaluates the exact user-selected number of branches K (1..8) every turn.
+      const clampedFixedWidth = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
+      const candidateBranches =
+        config.aiMode === 'OPTIMAL_BEAM'
+          ? discoverCandidateBeamBranches(state, lookup)
+          : FIXED_BEAM_BRANCH_CATALOG.slice(0, clampedFixedWidth)
+
       branchesEvaluatedThisTurn = candidateBranches.length
       totalBranchesEvaluated += branchesEvaluatedThisTurn
       const thinBefore = state.thinningCount
@@ -2154,6 +2280,9 @@ export function simulateSingleGame(
         const branchState = POOL_BRANCH_STATES[bIdx]
         copyIntoLowLevelState(state, branchState)
         const branchRng = rng.clone()
+        if (candidate.policy === 'NAIVE_RANDOM') {
+          branchRng.nextInt(bIdx + 2)
+        }
         const branchLogs: string[] | null = recordDetailedLog ? [] : null
         const actCount = runIntraTurnPolicy(
           branchState,
@@ -2587,10 +2716,12 @@ export function runMonteCarloSimulation(
     onProgress,
   )
 
-  // Also compute comparison metrics for the other two AI modes (using up to 1,000 iterations for instant responsiveness)
+  // Also compute comparison metrics for the other AI modes (using up to 1,000 iterations for instant responsiveness)
   const compareN = Math.min(N, 1000)
+  const fixedK = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
   const modes: { mode: AIStrategyMode; label: string }[] = [
-    { mode: 'OPTIMAL_BEAM', label: 'Optimal (Arbre Beam Search + Deck Thinning)' },
+    { mode: 'OPTIMAL_BEAM', label: 'Optimal Auto (Arbre Dynamique 1 à 4 branches/tour)' },
+    { mode: 'FIXED_BEAM', label: `Beam Search Fixe (${fixedK} branche(s) testée(s) / tour)` },
     { mode: 'GREEDY', label: 'Glouton (Premier trouvé de gauche à droite)' },
     { mode: 'NAIVE_RANDOM', label: 'Naïf (Ordre aléatoire sans épuration)' },
   ]

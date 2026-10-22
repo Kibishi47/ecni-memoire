@@ -13,6 +13,7 @@ export function useSimulationWorker() {
     iterations: 10000,
     maxTurns: 4,
     aiMode: 'OPTIMAL_BEAM',
+    fixedBeamWidth: 3,
     goingFirst: false, // 2nd player allows T1 Arven/Supporter by default, toggleable in 1 click
     prizesEnabled: true,
     turn3Disruption: 'NONE',
@@ -162,6 +163,7 @@ export function useSimulationWorker() {
     config.iterations = 10000
     config.maxTurns = 4
     config.aiMode = 'OPTIMAL_BEAM'
+    config.fixedBeamWidth = 3
     config.goingFirst = false
     config.prizesEnabled = true
     config.turn3Disruption = 'NONE'

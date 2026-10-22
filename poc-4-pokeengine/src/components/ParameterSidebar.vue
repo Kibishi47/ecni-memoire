@@ -30,8 +30,13 @@ const iterationOptions: SimulationConfig['iterations'][] = [100, 1000, 10000, 10
 const aiOptions: { value: AIStrategyMode; label: string; sub: string }[] = [
   {
     value: 'OPTIMAL_BEAM',
-    label: 'Optimal (Arbre Beam Search)',
-    sub: 'Épuration du deck avant pioche + Score de plateau',
+    label: 'Optimal Auto (Arbre Dynamique)',
+    sub: 'Détermine tout seul le nombre de branches à tester à chaque tour (1 à 4)',
+  },
+  {
+    value: 'FIXED_BEAM',
+    label: 'Beam Search Fixe (K Branches / Tour)',
+    sub: 'Teste exactement le nombre choisi de branches tous les tours (1 à 8)',
   },
   {
     value: 'GREEDY',
@@ -44,6 +49,8 @@ const aiOptions: { value: AIStrategyMode; label: string; sub: string }[] = [
     sub: 'Séquence d’actions aléatoire sans heuristique',
   },
 ]
+
+const beamWidthOptions = [1, 2, 3, 4, 5, 6, 7, 8]
 
 const disruptionOptions: { value: Turn3DisruptionMode; label: string }[] = [
   { value: 'NONE', label: 'Aucune perturbation' },
@@ -68,6 +75,13 @@ function setMaxTurns(turns: number) {
 
 function setAiMode(val: AIStrategyMode) {
   props.config.aiMode = val
+  emit('run')
+}
+
+function setFixedBeamWidth(width: number) {
+  const clamped = Math.max(1, Math.min(8, width))
+  props.config.fixedBeamWidth = clamped
+  props.config.aiMode = 'FIXED_BEAM'
   emit('run')
 }
 
@@ -200,8 +214,8 @@ function onSeedInputChange(event: Event) {
         </div>
       </section>
 
-      <!-- 2. Algorithme d'exploration (IA) -->
-      <section class="space-y-2">
+      <!-- 2. Algorithme d'exploration (IA) & Nombre de Branches par Tour -->
+      <section class="space-y-2.5">
         <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
           <span
             class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
@@ -225,7 +239,7 @@ function onSeedInputChange(event: Event) {
             <div>
               <div class="text-xs font-semibold flex items-center gap-1.5">
                 <Sparkles
-                  v-if="opt.value === 'OPTIMAL_BEAM'"
+                  v-if="opt.value === 'OPTIMAL_BEAM' || opt.value === 'FIXED_BEAM'"
                   class="w-3.5 h-3.5 text-blue-600 shrink-0"
                 />
                 <Cpu v-else class="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -242,6 +256,68 @@ function onSeedInputChange(event: Event) {
               "
             />
           </button>
+        </div>
+
+        <!-- Sélecteur direct du nombre de branches à tester tous les tours (1 à 8) -->
+        <div
+          class="p-2.5 rounded-lg border transition-colors space-y-2"
+          :class="
+            config.aiMode === 'FIXED_BEAM'
+              ? 'border-blue-300 bg-blue-50/40'
+              : 'border-slate-200 bg-slate-50/70'
+          "
+        >
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-800">
+              Branches à tester / tour (Fixe)
+            </span>
+            <span
+              class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
+              :class="
+                config.aiMode === 'FIXED_BEAM'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-slate-600 border-slate-300'
+              "
+            >
+              {{
+                config.aiMode === 'OPTIMAL_BEAM'
+                  ? 'Auto (1..4 / tour)'
+                  : config.aiMode === 'FIXED_BEAM'
+                    ? `${config.fixedBeamWidth} / tour`
+                    : '1 / tour'
+              }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-8 gap-1">
+            <button
+              v-for="k in beamWidthOptions"
+              :key="k"
+              type="button"
+              class="py-1 rounded border text-xs font-mono font-semibold transition-all"
+              :class="
+                config.aiMode === 'FIXED_BEAM' && config.fixedBeamWidth === k
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              "
+              :title="`Tester exactement ${k} branche(s) à chaque tour`"
+              @click="setFixedBeamWidth(k)"
+            >
+              {{ k }}
+            </button>
+          </div>
+
+          <p class="text-[10px] text-slate-500 leading-snug font-mono">
+            <template v-if="config.aiMode === 'OPTIMAL_BEAM'">
+              Mode <strong>Optimal Auto</strong> actif : détermine seul 1 à 4 branches pertinentes selon la main. Cliquez sur 1..8 pour forcer un nombre fixe.
+            </template>
+            <template v-else-if="config.aiMode === 'FIXED_BEAM'">
+              Mode <strong>Fixe ({{ config.fixedBeamWidth }} br./tour)</strong> actif : teste systématiquement les {{ config.fixedBeamWidth }} premières stratégies (A➔{{ String.fromCharCode(64 + config.fixedBeamWidth) }}) à chaque tour.
+            </template>
+            <template v-else>
+              Cliquez sur un chiffre (1 à 8) pour forcer l’évaluation de K branches à chaque tour.
+            </template>
+          </p>
         </div>
       </section>
 

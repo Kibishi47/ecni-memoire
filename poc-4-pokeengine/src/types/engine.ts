@@ -82,7 +82,7 @@ export interface DeclarativeCardDefinition {
   primitives: AtomicEffectPrimitive[]
 }
 
-export type AIStrategyMode = 'OPTIMAL_BEAM' | 'GREEDY' | 'NAIVE_RANDOM'
+export type AIStrategyMode = 'OPTIMAL_BEAM' | 'FIXED_BEAM' | 'GREEDY' | 'NAIVE_RANDOM'
 
 export type Turn3DisruptionMode = 'NONE' | 'IONO_HAND_TO_3' | 'KO_ACTIVE_POKEMON'
 
@@ -96,6 +96,7 @@ export interface SimulationConfig {
   iterations: 100 | 1000 | 10000 | 100000
   maxTurns: number // 1..10 turns (early stop if game ends before maxTurns)
   aiMode: AIStrategyMode
+  fixedBeamWidth: number // 1..8 branches tested every turn when aiMode === 'FIXED_BEAM'
   goingFirst: boolean
   prizesEnabled: boolean
   turn3Disruption: Turn3DisruptionMode
