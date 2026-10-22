@@ -10,9 +10,16 @@ import {
   ShieldAlert,
   Sliders,
   Sparkles,
+  Swords,
   Zap,
 } from 'lucide-vue-next'
-import type { AIStrategyMode, SimulationConfig, Turn3DisruptionMode } from '@/types/engine'
+import type {
+  AIStrategyMode,
+  OpponentArchetype,
+  SimulationConfig,
+  Turn3DisruptionMode,
+  WorkerExecutionMode,
+} from '@/types/engine'
 
 const props = defineProps<{
   config: SimulationConfig
@@ -29,39 +36,80 @@ const iterationOptions: SimulationConfig['iterations'][] = [100, 1000, 10000, 10
 
 const aiOptions: { value: AIStrategyMode; label: string; sub: string }[] = [
   {
-    value: 'OPTIMAL_BEAM',
-    label: 'Optimal Auto (Arbre Dynamique)',
-    sub: 'Détermine tout seul le nombre de branches à tester à chaque tour (1 à 4)',
+    value: 'EXPECTIMINIMAX_T1',
+    label: 'IA Optimale (Expectiminimax T+1 + Threat Scoring)',
+    sub: 'Anticipation T ➔ T_adv ➔ T+1, Ciblage Boss/Attrape-Riposte & Energy Banking',
   },
   {
-    value: 'FIXED_BEAM',
-    label: 'Beam Search Fixe (K Branches / Tour)',
-    sub: 'Teste exactement le nombre choisi de branches tous les tours (1 à 8)',
+    value: 'OPTIMAL_BEAM',
+    label: 'IA Beam Search 1-Tour (Épuration sans Anticipation T+1)',
+    sub: 'Épuration déterministe avant pioche mais évaluation arrêtée à la fin du Tour T',
   },
   {
     value: 'GREEDY',
-    label: 'Glouton (Premier trouvé)',
-    sub: 'Joue la 1re carte jouable de gauche à droite',
+    label: 'IA Gloutonne (Premier Jouable Gauche-Droite)',
+    sub: 'Joue la 1re carte jouable de gauche à droite sans épuration préalable',
   },
   {
     value: 'NAIVE_RANDOM',
-    label: 'Naïf (Aléatoire)',
-    sub: 'Séquence d’actions aléatoire sans heuristique',
+    label: 'IA Naïve (Ordre Aléatoire)',
+    sub: 'Séquence d’actions aléatoire sans heuristique ni Prize Checking',
+  },
+]
+
+const workerModeOptions: { value: WorkerExecutionMode; label: string; sub: string }[] = [
+  {
+    value: 'MULTI_WORKER',
+    label: 'Multi-Workers Parallèles (Optimisé Mobile/PC)',
+    sub: 'Sharding 4..8 threads + Memory Pooling 0-GC (Gain vitesse ×4)',
+  },
+  {
+    value: 'SINGLE_WORKER',
+    label: '1 Worker (Standard)',
+    sub: 'Exécution séquentielle sur un seul thread Web Worker',
+  },
+]
+
+const opponentArchetypeOptions: { value: OpponentArchetype; label: string; sub: string }[] = [
+  {
+    value: 'RAGING_BOLT_AGGRO',
+    label: 'Ire-Foudre ex Aggro (Menace KO T2)',
+    sub: 'Ogerpon ex (Moteur) + Ire-Foudre ex (Attaquant Chargé 240 PV)',
+  },
+  {
+    value: 'CHARIZARD_DRAGAPULT_SETUP',
+    label: 'Dracaufeu / Lanssorien Setup (Course aux Prizes)',
+    sub: 'Dispareptil / Roucarnage ex (Moteur) + Lanssorien ex (320 PV)',
+  },
+  {
+    value: 'GARDEVOIR_DISRUPTION',
+    label: 'Gardevoir Disruption (Mashynn + Ciblage Banc)',
+    sub: 'Kirlia Raffinement (Moteur) + Gardevoir ex / Baudrive + Mashynn',
   },
 ]
 
 const beamWidthOptions = [1, 2, 3, 4, 5, 6, 7, 8]
 
 const disruptionOptions: { value: Turn3DisruptionMode; label: string }[] = [
-  { value: 'NONE', label: 'Aucune perturbation' },
-  { value: 'IONO_HAND_TO_3', label: 'Mashynn / Iono (Main réduite à 3 cartes)' },
-  { value: 'KO_ACTIVE_POKEMON', label: 'KO du Pokémon Actif au Tour 3' },
+  { value: 'NONE', label: 'Dynamique selon Archétype Adverse (T_adv)' },
+  { value: 'IONO_HAND_TO_3', label: 'Forcer Mashynn / Iono au T3 (Main à 3 cartes)' },
+  { value: 'KO_ACTIVE_POKEMON', label: 'Forcer KO du Pokémon Actif au Tour 3' },
 ]
 
 const turnOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 function setIterations(val: SimulationConfig['iterations']) {
   props.config.iterations = val
+  emit('run')
+}
+
+function setWorkerMode(mode: WorkerExecutionMode) {
+  props.config.workerMode = mode
+  emit('run')
+}
+
+function setOpponentArchetype(arch: OpponentArchetype) {
+  props.config.opponentArchetype = arch
   emit('run')
 }
 
@@ -147,7 +195,7 @@ function onSeedInputChange(event: Event) {
     </div>
 
     <div class="p-4 space-y-5">
-      <!-- 1. Volume de simulations (N) & Horizon de Tours (1 à 10) -->
+      <!-- 1. Volume de simulations (N), Mode Multi-Workers & Horizon de Tours (1 à 10) -->
       <section class="space-y-3">
         <div class="space-y-2">
           <div class="flex items-center justify-between">
@@ -156,9 +204,9 @@ function onSeedInputChange(event: Event) {
                 class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
                 >1</span
               >
-              Volume Monte-Carlo (N)
+              Volume Monte-Carlo (N) & Workers
             </label>
-            <span class="text-[11px] font-mono text-slate-500">Web Worker</span>
+            <span class="text-[11px] font-mono text-emerald-700 font-semibold">0-Allocation GC</span>
           </div>
           <div class="grid grid-cols-4 gap-1.5">
             <button
@@ -176,6 +224,42 @@ function onSeedInputChange(event: Event) {
               {{ n.toLocaleString('fr-FR') }}
             </button>
           </div>
+        </div>
+
+        <!-- Sélecteur d'Exécution Matérielle (Multi-Workers vs 1 Worker) -->
+        <div class="space-y-1.5">
+          <button
+            v-for="wOpt in workerModeOptions"
+            :key="wOpt.value"
+            type="button"
+            class="w-full text-left p-2 rounded border transition-all flex items-start justify-between gap-2"
+            :class="
+              config.workerMode === wOpt.value
+                ? 'bg-emerald-50/70 border-emerald-600 text-slate-900 ring-1 ring-emerald-600/20'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            "
+            @click="setWorkerMode(wOpt.value)"
+          >
+            <div>
+              <div class="text-xs font-semibold flex items-center gap-1.5">
+                <Zap
+                  v-if="wOpt.value === 'MULTI_WORKER'"
+                  class="w-3.5 h-3.5 text-emerald-600 shrink-0"
+                />
+                <Cpu v-else class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                {{ wOpt.label }}
+              </div>
+              <p class="text-[10px] text-slate-500 mt-0.5 leading-tight font-mono">{{ wOpt.sub }}</p>
+            </div>
+            <span
+              class="w-2.5 h-2.5 rounded-full mt-1 shrink-0 border"
+              :class="
+                config.workerMode === wOpt.value
+                  ? 'bg-emerald-600 border-emerald-600'
+                  : 'bg-white border-slate-300'
+              "
+            />
+          </button>
         </div>
 
         <!-- Sélecteur du Nombre de Tours (1 à 10 tours max avec arrêt anticipé) -->
@@ -221,7 +305,7 @@ function onSeedInputChange(event: Event) {
             class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
             >2</span
           >
-          Algorithme d’Exploration (IA)
+          Niveau d’IA & Anticipation (4 Modes)
         </label>
         <div class="space-y-1.5">
           <button
@@ -239,7 +323,11 @@ function onSeedInputChange(event: Event) {
             <div>
               <div class="text-xs font-semibold flex items-center gap-1.5">
                 <Sparkles
-                  v-if="opt.value === 'OPTIMAL_BEAM' || opt.value === 'FIXED_BEAM'"
+                  v-if="
+                    opt.value === 'EXPECTIMINIMAX_T1' ||
+                    opt.value === 'OPTIMAL_BEAM' ||
+                    opt.value === 'FIXED_BEAM'
+                  "
                   class="w-3.5 h-3.5 text-blue-600 shrink-0"
                 />
                 <Cpu v-else class="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -280,7 +368,7 @@ function onSeedInputChange(event: Event) {
               "
             >
               {{
-                config.aiMode === 'OPTIMAL_BEAM'
+                config.aiMode === 'EXPECTIMINIMAX_T1' || config.aiMode === 'OPTIMAL_BEAM'
                   ? 'Auto (1..4 / tour)'
                   : config.aiMode === 'FIXED_BEAM'
                     ? `${config.fixedBeamWidth} / tour`
@@ -308,16 +396,60 @@ function onSeedInputChange(event: Event) {
           </div>
 
           <p class="text-[10px] text-slate-500 leading-snug font-mono">
-            <template v-if="config.aiMode === 'OPTIMAL_BEAM'">
-              Mode <strong>Optimal Auto</strong> actif : détermine seul 1 à 4 branches pertinentes selon la main. Cliquez sur 1..8 pour forcer un nombre fixe.
+            <template v-if="config.aiMode === 'EXPECTIMINIMAX_T1' || config.aiMode === 'OPTIMAL_BEAM'">
+              Mode <strong>Auto (1 à 4 br./tour)</strong> actif selon l’état de la main. Cliquez sur 1..8 pour forcer un nombre fixe de branches.
             </template>
             <template v-else-if="config.aiMode === 'FIXED_BEAM'">
-              Mode <strong>Fixe ({{ config.fixedBeamWidth }} br./tour)</strong> actif : teste systématiquement les {{ config.fixedBeamWidth }} premières stratégies (A➔{{ String.fromCharCode(64 + config.fixedBeamWidth) }}) à chaque tour.
+              Mode <strong>Fixe ({{ config.fixedBeamWidth }} br./tour)</strong> actif : teste systématiquement les {{ config.fixedBeamWidth }} premières stratégies (A➔{{ String.fromCharCode(64 + config.fixedBeamWidth) }}) avec Expectiminimax T+1.
             </template>
             <template v-else>
               Cliquez sur un chiffre (1 à 8) pour forcer l’évaluation de K branches à chaque tour.
             </template>
           </p>
+        </div>
+      </section>
+
+      <!-- 3. Sélecteur d'Archétype Adverse (Double Plateau) -->
+      <section class="space-y-2">
+        <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+          <span
+            class="w-4 h-4 rounded bg-slate-100 border border-slate-300 text-[10px] font-mono font-bold flex items-center justify-center text-slate-700"
+            >3</span
+          >
+          Archétype Adverse (Double Plateau)
+        </label>
+        <div class="space-y-1.5">
+          <button
+            v-for="arch in opponentArchetypeOptions"
+            :key="arch.value"
+            type="button"
+            class="w-full text-left p-2 rounded border transition-all flex items-start justify-between gap-2"
+            :class="
+              config.opponentArchetype === arch.value
+                ? 'bg-amber-50/80 border-amber-500 text-slate-900 ring-1 ring-amber-500/20'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            "
+            @click="setOpponentArchetype(arch.value)"
+          >
+            <div>
+              <div class="text-xs font-semibold flex items-center gap-1.5">
+                <Swords
+                  class="w-3.5 h-3.5 shrink-0"
+                  :class="config.opponentArchetype === arch.value ? 'text-amber-600' : 'text-slate-400'"
+                />
+                {{ arch.label }}
+              </div>
+              <p class="text-[10px] text-slate-500 mt-0.5 leading-tight font-mono">{{ arch.sub }}</p>
+            </div>
+            <span
+              class="w-2.5 h-2.5 rounded-full mt-1 shrink-0 border"
+              :class="
+                config.opponentArchetype === arch.value
+                  ? 'bg-amber-600 border-amber-600'
+                  : 'bg-white border-slate-300'
+              "
+            />
+          </button>
         </div>
       </section>
 

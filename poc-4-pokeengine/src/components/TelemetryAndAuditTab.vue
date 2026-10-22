@@ -41,10 +41,15 @@ const emit = defineEmits<{
         </div>
         <div class="flex items-center gap-2">
           <span
+            class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-blue-50 text-blue-700 border-blue-200"
+          >
+            0 Allocation GC • Memory Pool
+          </span>
+          <span
             class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200"
           >
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-            Worker Thread Actif • Uint16Array(60)
+            {{ result.telemetry.activeWorkersCount }} Web Worker(s) Actif(s) • Uint16Array(60)
           </span>
         </div>
       </div>
@@ -53,7 +58,7 @@ const emit = defineEmits<{
         <!-- Execution time (ms) -->
         <div class="p-4">
           <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
-            <span>Temps d’Exécution Réel</span>
+            <span>Temps d’Exécution ({{ result.telemetry.activeWorkersCount }} Worker{{ result.telemetry.activeWorkersCount > 1 ? 's' : '' }})</span>
             <Cpu class="w-3.5 h-3.5 text-slate-400" />
           </div>
           <div class="mt-1.5 flex items-baseline gap-2">
@@ -63,7 +68,7 @@ const emit = defineEmits<{
             </span>
           </div>
           <div class="mt-1 text-[11px] font-mono text-slate-500">
-            Mesuré via <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">performance.now()</code>
+            Mesuré via <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">performance.now()</code> ({{ result.config.workerMode === 'MULTI_WORKER' ? 'Sharding Parallèle' : '1 Thread' }})
           </div>
         </div>
 
@@ -84,20 +89,20 @@ const emit = defineEmits<{
           </div>
         </div>
 
-        <!-- Branches & Actions evaluated -->
+        <!-- Branches & Expectiminimax Nodes evaluated -->
         <div class="p-4">
           <div class="text-xs font-medium text-slate-500 flex items-center justify-between">
-            <span>États & Branches Évalués</span>
+            <span>Nœuds Expectiminimax & Branches</span>
             <GitBranch class="w-3.5 h-3.5 text-slate-400" />
           </div>
           <div class="mt-1.5 flex items-baseline gap-2">
             <span class="text-2xl font-mono font-bold text-slate-900">
-              {{ result.telemetry.totalBranchesEvaluated.toLocaleString('fr-FR') }}
+              {{ result.telemetry.expectiminimaxNodesEvaluated.toLocaleString('fr-FR') }}
             </span>
-            <span class="text-xs font-mono text-slate-500">branches</span>
+            <span class="text-xs font-mono text-slate-500">nœuds (T➔T+1)</span>
           </div>
           <div class="mt-1 text-[11px] font-mono text-slate-500">
-            {{ result.telemetry.totalActionsExecuted.toLocaleString('fr-FR') }} primitives atomiques exécutées
+            {{ result.telemetry.totalBranchesEvaluated.toLocaleString('fr-FR') }} branches • {{ result.telemetry.totalActionsExecuted.toLocaleString('fr-FR') }} actions
           </div>
         </div>
 
@@ -108,7 +113,7 @@ const emit = defineEmits<{
             <span
               class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
             >
-              NON-BLOQUANT
+              0 PAUSE GC
             </span>
           </div>
           <div class="mt-1.5 flex items-baseline gap-2">
@@ -124,7 +129,7 @@ const emit = defineEmits<{
       </div>
     </section>
 
-    <!-- 2. Résultats Stratégiques Clés (KPIs Deck Dracaufeu ex / Roucarnage ex) -->
+    <!-- 2. Résultats Stratégiques Clés & Nouveaux KPIs Tactiques Avancés -->
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
       <div
         class="px-5 py-3 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-2"
@@ -132,7 +137,7 @@ const emit = defineEmits<{
         <div class="flex items-center gap-2">
           <Flame class="w-4 h-4 text-slate-700" />
           <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800">
-            2. Résultats Stratégiques Temps Réel ({{ result.config.iterations.toLocaleString('fr-FR') }} Parties • Horizon Max {{ result.config.maxTurns }} Tour(s) • Seed #{{ result.config.seed }})
+            2. KPIs Stratégiques & Tactiques Avancés ({{ result.config.iterations.toLocaleString('fr-FR') }} Parties • Horizon Max {{ result.config.maxTurns }} Tour(s) • Seed #{{ result.config.seed }})
           </h3>
         </div>
         <button
@@ -140,153 +145,231 @@ const emit = defineEmits<{
           class="text-xs font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
           @click="emit('open-inspector')"
         >
-          Inspecter les parties pas-à-pas
+          Inspecter le Double Plateau & l’Arbre Expectiminimax T+1
           <ArrowRight class="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <!-- KPI 1: Setup T1 réussi -->
-        <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-slate-700">Taux de Setup T1 Réussi</span>
-              <span
-                class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-emerald-50 text-emerald-700 border-emerald-200"
-              >
-                TOUR 1
-              </span>
-            </div>
-            <div class="mt-2 text-3xl font-mono font-bold text-slate-900">
-              {{ result.strategicMetrics.turn1SetupSuccessPct.toFixed(1) }} %
-            </div>
-            <p class="mt-1 text-xs text-slate-500 leading-relaxed">
-              Au moins 2 Pokémon de lignée Salamèche + 1 Roucool établis sur le plateau dès la fin du Tour 1.
-            </p>
-          </div>
-          <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
-            <span title="Au JCC Pokémon, le Mulligan est strictement obligatoire et intervient uniquement si la main de 7 cartes contient 0 Pokémon de Base.">Mulligans forcés (0 Base) / partie :</span>
-            <strong class="text-slate-800">{{ result.strategicMetrics.avgMulligansPerGame }}</strong>
-          </div>
-        </div>
-
-        <!-- KPI 2: Dracaufeu ex prêt à attaquer au Tour 2 -->
-        <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-slate-700">Dracaufeu ex Prêt au Tour 2</span>
-              <span
-                class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-emerald-50 text-emerald-700 border-emerald-200"
-              >
-                ATTAQUE T2
-              </span>
-            </div>
-            <div class="mt-2 text-3xl font-mono font-bold text-emerald-700">
-              {{ result.strategicMetrics.turn2CharizardReadyPct.toFixed(1) }} %
-            </div>
-            <p class="mt-1 text-xs text-slate-500 leading-relaxed">
-              Dracaufeu ex évolué sur le Poste Actif avec 2+ Énergies Feu attachées (Règne Infernal) dès le Tour 2.
-            </p>
-          </div>
-          <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
-            <span class="text-[11px] font-mono text-slate-500">
-              Score moyen T2 : <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT2 }} pts</strong>
-            </span>
-            <button
-              type="button"
-              class="text-[11px] font-semibold text-blue-600 hover:underline"
-              @click="emit('open-inspector', 'PERFECT_T2')"
-            >
-              Voir exemple →
-            </button>
-          </div>
-        </div>
-
-        <!-- KPI 3: Roucarnage ex en jeu -->
-        <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-slate-700">Roucarnage ex Établi</span>
-              <span
-                class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-blue-50 text-blue-700 border-blue-200"
-              >
-                MOTEUR
-              </span>
-            </div>
-            <div class="mt-2 text-3xl font-mono font-bold text-slate-900">
-              {{ result.strategicMetrics.pidgeotInPlayPct.toFixed(1) }} %
-            </div>
-            <p class="mt-1 text-xs text-slate-500 leading-relaxed">
-              Roucarnage ex en jeu sur le Banc activant le talent Recherche Rapide (1 carte quelconque/tour).
-            </p>
-          </div>
-          <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
-            <span>Score final (T{{ result.config.maxTurns }}) : <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT4 }} pts</strong></span>
-            <span>Arrêt anticipé : <strong class="text-emerald-700">{{ result.strategicMetrics.earlyTerminationRatePct }} %</strong></span>
-          </div>
-        </div>
-
-        <!-- KPI 4: Taux de Brick & Blocage Récompenses -->
-        <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-slate-700">Brick (Main Morte) & Prized</span>
-              <span
-                class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border"
-                :class="
-                  result.strategicMetrics.brickRatePct > 18
-                    ? 'bg-red-50 text-red-700 border-red-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                "
-              >
-                RISQUE
-              </span>
-            </div>
-            <div class="mt-2 flex items-baseline gap-3">
-              <div>
-                <span class="text-3xl font-mono font-bold text-red-700">
-                  {{ result.strategicMetrics.brickRatePct.toFixed(1) }} %
+      <div class="p-5 space-y-4">
+        <!-- Row 1: Core Setup & Consistency KPIs -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <!-- KPI 1: Setup T1 réussi -->
+          <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-700">Taux de Setup T1 Réussi</span>
+                <span
+                  class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-emerald-50 text-emerald-700 border-emerald-200"
+                >
+                  TOUR 1
                 </span>
-                <span class="block text-[10px] font-mono text-slate-500">Taux de Brick</span>
               </div>
-              <div class="pl-3 border-l border-slate-200">
-                <span class="text-xl font-mono font-bold text-amber-700">
-                  {{ result.strategicMetrics.rareCandyPrizedWarningPct.toFixed(1) }} %
-                </span>
-                <span class="block text-[10px] font-mono text-slate-500">Bonbons Prized (2+)</span>
+              <div class="mt-2 text-3xl font-mono font-bold text-slate-900">
+                {{ result.strategicMetrics.turn1SetupSuccessPct.toFixed(1) }} %
               </div>
+              <p class="mt-1 text-xs text-slate-500 leading-relaxed">
+                Au moins 2 Pokémon de lignée Salamèche + 1 Roucool établis sur le plateau dès la fin du Tour 1.
+              </p>
             </div>
-            <p class="mt-1.5 text-xs text-slate-500 leading-relaxed">
-              Parties sans aucun Niveau 2 établi ou avec plusieurs Super Bonbon / Dracaufeu ex bloqués en Récompenses.
-            </p>
+            <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
+              <span title="Au JCC Pokémon, le Mulligan est strictement obligatoire et intervient uniquement si la main de 7 cartes contient 0 Pokémon de Base.">Mulligans forcés (0 Base) / partie :</span>
+              <strong class="text-slate-800">{{ result.strategicMetrics.avgMulligansPerGame }}</strong>
+            </div>
           </div>
-          <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              class="text-[11px] font-semibold text-red-700 hover:underline"
-              @click="emit('open-inspector', 'BRICK')"
-            >
-              Cas de Brick →
-            </button>
-            <button
-              type="button"
-              class="text-[11px] font-semibold text-amber-700 hover:underline"
-              @click="emit('open-inspector', 'CANDY_PRIZED')"
-            >
-              Cas Bonbons Prized →
-            </button>
+
+          <!-- KPI 2: Dracaufeu ex prêt à attaquer au Tour 2 -->
+          <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-700">Dracaufeu ex Prêt au Tour 2</span>
+                <span
+                  class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-emerald-50 text-emerald-700 border-emerald-200"
+                >
+                  ATTAQUE T2
+                </span>
+              </div>
+              <div class="mt-2 text-3xl font-mono font-bold text-emerald-700">
+                {{ result.strategicMetrics.turn2CharizardReadyPct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-500 leading-relaxed">
+                Dracaufeu ex évolué sur le Poste Actif avec 2+ Énergies Feu attachées (Règne Infernal) dès le Tour 2.
+              </p>
+            </div>
+            <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
+              <span class="text-[11px] font-mono text-slate-500">
+                Score moyen T2 : <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT2 }} pts</strong>
+              </span>
+              <button
+                type="button"
+                class="text-[11px] font-semibold text-blue-600 hover:underline"
+                @click="emit('open-inspector', 'PERFECT_T2')"
+              >
+                Voir exemple →
+              </button>
+            </div>
+          </div>
+
+          <!-- KPI 3: Roucarnage ex en jeu -->
+          <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-700">Roucarnage ex Établi</span>
+                <span
+                  class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-blue-50 text-blue-700 border-blue-200"
+                >
+                  MOTEUR
+                </span>
+              </div>
+              <div class="mt-2 text-3xl font-mono font-bold text-slate-900">
+                {{ result.strategicMetrics.pidgeotInPlayPct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-500 leading-relaxed">
+                Roucarnage ex en jeu sur le Banc activant le talent Recherche Rapide (1 carte quelconque/tour).
+              </p>
+            </div>
+            <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono text-slate-500">
+              <span>Score final (T{{ result.config.maxTurns }}) : <strong class="text-slate-800">{{ result.strategicMetrics.avgBoardScoreT4 }} pts</strong></span>
+              <span>Arrêt anticipé : <strong class="text-emerald-700">{{ result.strategicMetrics.earlyTerminationRatePct }} %</strong></span>
+            </div>
+          </div>
+
+          <!-- KPI 4: Taux de Brick & Blocage Récompenses -->
+          <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-700">Brick (Main Morte) & Prized</span>
+                <span
+                  class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border"
+                  :class="
+                    result.strategicMetrics.brickRatePct > 18
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  "
+                >
+                  RISQUE
+                </span>
+              </div>
+              <div class="mt-2 flex items-baseline gap-3">
+                <div>
+                  <span class="text-3xl font-mono font-bold text-red-700">
+                    {{ result.strategicMetrics.brickRatePct.toFixed(1) }} %
+                  </span>
+                  <span class="block text-[10px] font-mono text-slate-500">Taux de Brick</span>
+                </div>
+                <div class="pl-3 border-l border-slate-200">
+                  <span class="text-xl font-mono font-bold text-amber-700">
+                    {{ result.strategicMetrics.rareCandyPrizedWarningPct.toFixed(1) }} %
+                  </span>
+                  <span class="block text-[10px] font-mono text-slate-500">Bonbons Prized (2+)</span>
+                </div>
+              </div>
+              <p class="mt-1.5 text-xs text-slate-500 leading-relaxed">
+                Parties sans aucun Niveau 2 établi ou avec plusieurs Super Bonbon / Dracaufeu ex bloqués en Récompenses.
+              </p>
+            </div>
+            <div class="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                class="text-[11px] font-semibold text-red-700 hover:underline"
+                @click="emit('open-inspector', 'BRICK')"
+              >
+                Cas de Brick →
+              </button>
+              <button
+                type="button"
+                class="text-[11px] font-semibold text-amber-700 hover:underline"
+                @click="emit('open-inspector', 'CANDY_PRIZED')"
+              >
+                Cas Bonbons Prized →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: 4 Nouveaux KPIs Tactiques Avancés (Revenge Kill T3, Boss/Counter Catcher, Survie Post-Mashynn, Prize Mapping 2-2-2) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <!-- Tactical KPI 1: Revenge Kill T3 -->
+          <div class="p-4 rounded-lg border border-blue-200 bg-blue-50/30 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-800">Contre-Attaque (Revenge Kill T3)</span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-blue-100 text-blue-800 border-blue-300">
+                  T+1 REBOND
+                </span>
+              </div>
+              <div class="mt-2 text-2xl font-mono font-bold text-blue-700">
+                {{ result.strategicMetrics.revengeKillT3RatePct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-600 leading-relaxed">
+                Réponse immédiate par un nouveau KO au T3 après la perte de notre attaquant actif (2e Salamèche + Energy Banking + Fezandipiti ex).
+              </p>
+            </div>
+          </div>
+
+          <!-- Tactical KPI 2: Neutralisation de Menace (Boss / Counter Catcher) -->
+          <div class="p-4 rounded-lg border border-amber-200 bg-amber-50/30 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-800">Neutralisation Menace (Gust)</span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-amber-100 text-amber-800 border-amber-300">
+                  BOSS / RIP.
+                </span>
+              </div>
+              <div class="mt-2 text-2xl font-mono font-bold text-amber-800">
+                {{ result.strategicMetrics.threatNeutralizationRatePct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-600 leading-relaxed">
+                Élimination préventive du Pokémon le plus menaçant du Banc adverse via Attrape-Riposte (+ Supporter) ou Ordres du Boss.
+              </p>
+            </div>
+          </div>
+
+          <!-- Tactical KPI 3: Taux de Survie Post-Mashynn -->
+          <div class="p-4 rounded-lg border border-emerald-200 bg-emerald-50/30 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-800">Taux de Survie Post-Mashynn</span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-emerald-100 text-emerald-800 border-emerald-300">
+                  ANTI-IONO
+                </span>
+              </div>
+              <div class="mt-2 text-2xl font-mono font-bold text-emerald-700">
+                {{ result.strategicMetrics.postIonoSurvivalRatePct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-600 leading-relaxed">
+                Maintien d’une attaque active malgré une Mashynn adverse réduisant la main à 3 cartes (relance via Roucarnage ex / Fezandipiti ex).
+              </p>
+            </div>
+          </div>
+
+          <!-- Tactical KPI 4: Précision du Prize Mapping (2-2-2) -->
+          <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/60 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-slate-800">Précision Prize Mapping (2-2-2)</span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded border bg-slate-200 text-slate-800 border-slate-300">
+                  2-2-2
+                </span>
+              </div>
+              <div class="mt-2 text-2xl font-mono font-bold text-slate-900">
+                {{ result.strategicMetrics.prizeMappingPrecisionPct.toFixed(1) }} %
+              </div>
+              <p class="mt-1 text-xs text-slate-600 leading-relaxed">
+                Séquence de Récompenses optimale ciblant les Pokémon à 2 Récompenses sans gaspiller d’attaque sur une cible mineure.
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Comparaison en direct des 3 Modes d'IA -->
+      <!-- Comparaison en direct des 4 Modes d'IA -->
       <div class="px-5 pb-5">
         <div class="border border-slate-200 rounded-lg overflow-hidden">
           <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
             <div class="flex items-center gap-2">
               <Sparkles class="w-3.5 h-3.5 text-blue-600" />
               <span class="text-xs font-bold text-slate-800">
-                Benchmark Comparatif des 3 Stratégies d’IA (Impact de l’Arbre de Décision & Deck Thinning)
+                Benchmark Comparatif des 4 Niveaux d’IA (Impact de l’Anticipation Expectiminimax T+1 & Threat Scoring)
               </span>
             </div>
             <span class="text-[11px] font-mono text-slate-500">Même Seed #{{ result.config.seed }}</span>
@@ -295,13 +378,15 @@ const emit = defineEmits<{
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-200 text-[11px] font-mono uppercase text-slate-500 bg-slate-50/50">
-                  <th class="py-2.5 px-4">Algorithme d’Exploration</th>
-                  <th class="py-2.5 px-4 text-right">Setup T1 (%)</th>
-                  <th class="py-2.5 px-4 text-right">Dracaufeu Prêt T2 (%)</th>
-                  <th class="py-2.5 px-4 text-right">Roucarnage en Jeu (%)</th>
-                  <th class="py-2.5 px-4 text-right">Taux de Brick (%)</th>
-                  <th class="py-2.5 px-4 text-right">Épuration Deck (cartes/partie)</th>
-                  <th class="py-2.5 px-4 text-right">Score Plateau Moyen</th>
+                  <th class="py-2.5 px-3">Niveau d’IA</th>
+                  <th class="py-2.5 px-3 text-right">Setup T1</th>
+                  <th class="py-2.5 px-3 text-right">Dracaufeu T2</th>
+                  <th class="py-2.5 px-3 text-right">Roucarnage ex</th>
+                  <th class="py-2.5 px-3 text-right">Revenge Kill T3</th>
+                  <th class="py-2.5 px-3 text-right">Ciblage Menace</th>
+                  <th class="py-2.5 px-3 text-right">Survie Mashynn</th>
+                  <th class="py-2.5 px-3 text-right">Brick (%)</th>
+                  <th class="py-2.5 px-3 text-right">Score Moyen</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 text-xs">
@@ -314,7 +399,7 @@ const emit = defineEmits<{
                       : 'text-slate-600 hover:bg-slate-50/60'
                   "
                 >
-                  <td class="py-2.5 px-4 flex items-center gap-2">
+                  <td class="py-2.5 px-3 flex items-center gap-2">
                     <span
                       v-if="row.aiMode === result.config.aiMode"
                       class="px-1.5 py-0.5 text-[10px] font-mono rounded bg-blue-600 text-white"
@@ -323,14 +408,24 @@ const emit = defineEmits<{
                     </span>
                     <span>{{ row.label }}</span>
                   </td>
-                  <td class="py-2.5 px-4 text-right font-mono">{{ row.turn1SetupRatePct.toFixed(1) }} %</td>
-                  <td class="py-2.5 px-4 text-right font-mono font-bold text-emerald-700">
+                  <td class="py-2.5 px-3 text-right font-mono">{{ row.turn1SetupRatePct.toFixed(1) }} %</td>
+                  <td class="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
                     {{ row.turn2CharizardAttachRatePct.toFixed(1) }} %
                   </td>
-                  <td class="py-2.5 px-4 text-right font-mono">{{ row.pidgeotEstablishedRatePct.toFixed(1) }} %</td>
-                  <td class="py-2.5 px-4 text-right font-mono text-red-700">{{ row.brickRatePct.toFixed(1) }} %</td>
-                  <td class="py-2.5 px-4 text-right font-mono">{{ row.avgDeckThinningCards.toFixed(1) }}</td>
-                  <td class="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
+                  <td class="py-2.5 px-3 text-right font-mono">
+                    {{ row.pidgeotEstablishedRatePct.toFixed(1) }} %
+                  </td>
+                  <td class="py-2.5 px-3 text-right font-mono font-semibold text-blue-700">
+                    {{ (row.revengeKillT3RatePct ?? 0).toFixed(1) }} %
+                  </td>
+                  <td class="py-2.5 px-3 text-right font-mono font-semibold text-amber-800">
+                    {{ (row.threatNeutralizationRatePct ?? 0).toFixed(1) }} %
+                  </td>
+                  <td class="py-2.5 px-3 text-right font-mono text-emerald-700">
+                    {{ (row.postIonoSurvivalRatePct ?? 0).toFixed(1) }} %
+                  </td>
+                  <td class="py-2.5 px-3 text-right font-mono text-red-700">{{ row.brickRatePct.toFixed(1) }} %</td>
+                  <td class="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
                     {{ row.avgBoardScore.toFixed(1) }} pts
                   </td>
                 </tr>

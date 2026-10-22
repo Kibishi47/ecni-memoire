@@ -71,11 +71,11 @@ function resetRegistryOnly() {
               <span
                 class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200"
               >
-                POC 4 • CORE ENGINE BENCHMARK
+                POC 4 • EXPECTIMINIMAX T+1 & MULTI-WORKERS
               </span>
             </div>
             <p class="text-xs text-slate-500">
-              Simulateur Monte-Carlo Déterministe (Web Worker <code class="font-mono">Uint16Array</code>) • Validation Hypergéométrique & Arbre Beam Search
+              Moteur Combinatoire Séquentiel (Double Plateau • Threat Scoring • Prize Checking • Horizon T ➔ T_adv ➔ T+1 • Zero-Allocation <code class="font-mono">Uint16Array</code>)
             </p>
           </div>
         </div>
@@ -97,6 +97,8 @@ function resetRegistryOnly() {
             </span>
             <template v-else>
               <span>{{ result.telemetry.executionTimeMs.toFixed(1) }} ms</span>
+              <span class="text-slate-300">|</span>
+              <span class="text-blue-700 font-semibold">{{ result.telemetry.activeWorkersCount }}W</span>
               <span class="text-slate-300">|</span>
               <strong class="text-slate-900"
                 >{{ result.telemetry.gamesPerSecond.toLocaleString('fr-FR') }} parties/s</strong

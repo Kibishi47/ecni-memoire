@@ -40,6 +40,7 @@ import {
   countOpponentBasicEvolvers,
   createOpponentPokemonSnapshot,
   evaluateTargetThreatScoreFast,
+  hasOpponentLoadedAttackerReady,
   initOpponentBoardState,
   OPPONENT_POKEMON_CATALOG,
   removeKnockedOutOpponentSlot,
@@ -654,9 +655,12 @@ export function evaluateExpectiminimaxState(
     countCardIdInHand(state, CARD_IDS.ARVEN) > 0
 
   const revengeKillReadyAtTPlus1 =
-    benchHasCharizardEx ||
-    (benchHasCharmanderOrCharmeleon &&
-      (hasQuickSearchEngine || hasFezEngine || hasCandyOrZardInHand || state.manualEnergyBankedOnBench))
+    state.currentTurn === 1
+      ? countLineOnBoard(state, lookup, 'CHARIZARD') >= 2 &&
+        countLineOnBoard(state, lookup, 'PIDGEOT') >= 1
+      : benchHasCharizardEx ||
+        (benchHasCharmanderOrCharmeleon &&
+          (hasQuickSearchEngine || hasFezEngine || hasCandyOrZardInHand || state.manualEnergyBankedOnBench))
 
   const koReboundScore = revengeKillReadyAtTPlus1
     ? 110 + (benchHasFezandipitiEx ? 15 : 0) + (state.manualEnergyBankedOnBench ? 15 : 0)
@@ -832,7 +836,7 @@ function selectBestDeckTargetIndex(
           wantsGustTarget &&
           behindOnPrizes &&
           cid === CARD_IDS.COUNTER_CATCHER &&
-          (hasZardOnBoard || (hasEvolveReadyCharmander && hasCandyInHand && hasZardInHand))
+          hasZardOnBoard
         ) {
           candidateScore += 182
         } else if (
@@ -1154,9 +1158,9 @@ function executeDeclarativeCardOrAbility(
               } else if (
                 wantsCounterCatcher &&
                 dCid === CARD_IDS.COUNTER_CATCHER &&
-                (hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX) || countCardIdInHand(state, CARD_IDS.RARE_CANDY) > 0)
+                hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX)
               ) {
-                sc += 145 // Arven + Counter Catcher combo when behind on Prizes!
+                sc += 145 // Arven + Counter Catcher combo when Charizard ex is already on board and behind on Prizes!
               } else if (
                 dCid === CARD_IDS.ULTRA_BALL &&
                 countCardIdInHand(state, CARD_IDS.CHARIZARD_EX) === 0 &&
@@ -1739,7 +1743,7 @@ function executeDeclarativeCardOrAbility(
 
       if (!activeIsLoadedZard && unpackCardId(state.active) === CARD_IDS.CHARIZARD_EX) {
         targetSlot = 'ACTIVE'
-      } else {
+      } else if (smartTargeting) {
         // Check if a Charizard ex, Charmeleon, Charmander or Pidgeot ex on bench needs energy (Energy Banking for T+1)
         let bestBench = -1
         let bestPrio = -1
@@ -2176,7 +2180,7 @@ function runIntraTurnPolicy(
 
   if (policy === 'EXPECTIMINIMAX_HORIZON') {
     // Horizon T -> T_adv -> T+1 Policy:
-    // 1. Ensure 2nd Charmander & Fezandipiti ex on Bench for T+1 Revenge Kill & Post-Mashynn recovery
+    // 1. Pre-draw Deck Thinning & Setup (2nd Charmander, Pidgeot ex, Fezandipiti ex)
     // 2. Evolve Pidgeot ex & Charizard ex (Infernal Reign)
     // 3. Use Quick Search / VSTAR / Arven + Counter Catcher / Boss's Orders to eliminate top opponent Bench threat
     // 4. Bank manual energy on Bench relay attacker & conserve T+1 Supporter/Rare Candy in hand
@@ -2193,11 +2197,7 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
-        actionsExecuted++
-        continue
-      }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_QUICK_SEARCH', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -2205,11 +2205,15 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_QUICK_SEARCH', true, logs)) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SEAL_STONE_AND_VSTAR', true, logs)) {
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SEAL_STONE_AND_VSTAR', true, logs)) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -2247,6 +2251,14 @@ function runIntraTurnPolicy(
         continue
       }
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SEAL_STONE_AND_VSTAR', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ULTRA_BALL', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -2310,8 +2322,8 @@ function runIntraTurnPolicy(
       break
     }
 
-    // Phase 2: Draw Supporter (only if Supporter wasn't used on Arven)
-    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', true, logs)) {
+    // Phase 2: Draw Supporter (1-Turn Beam Search plays Draw Supporter aggressively for immediate Turn T cards, without T+1 conservation)
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', false, logs)) {
       actionsExecuted++
     }
 
@@ -2352,8 +2364,8 @@ function runIntraTurnPolicy(
       break
     }
 
-    // Phase 4: Manual Energy Attachment & End-of-turn Rotom V Instant Charge
-    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'ATTACH_MANUAL_ENERGY', true, logs)) {
+    // Phase 4: Manual Energy Attachment (1-Turn Beam Search attaches to Active without T+1 Energy Banking) & End-of-turn Rotom V Instant Charge
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'ATTACH_MANUAL_ENERGY', false, logs)) {
       actionsExecuted++
     }
     if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_ROTOM_INSTANT_CHARGE', true, logs)) {
@@ -2609,6 +2621,7 @@ function discoverCandidateBeamBranches(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
   useExpectiminimaxPolicy: boolean,
+  includeAllForInspector = false,
 ): CandidateBeamBranch[] {
   POOL_CANDIDATE_BRANCHES.length = 0
   const canPlaySupporter = !(state.currentTurn === 1 && state.goingFirst) && state.supporterPlayedCount === 0
@@ -2653,33 +2666,49 @@ function discoverCandidateBeamBranches(
     return POOL_CANDIDATE_BRANCHES
   }
 
+  const bothLinesCanEvolve =
+    state.currentTurn >= 2 &&
+    canLineEvolveThisTurn(state, lookup, 'CHARIZARD') &&
+    canLineEvolveThisTurn(state, lookup, 'PIDGEOT') &&
+    (hasTutorOrItem || hasRareCandyOrEvo || hasQuickSearchReady)
+
   if (useExpectiminimaxPolicy && state.currentTurn >= 2) {
     POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_EXPECTIMINIMAX)
-    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_A_ALT)
-    if (hasDrawSupporter) {
-      POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B_ALT)
+    if (bothLinesCanEvolve) {
+      POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_D)
     }
-    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C_ALT)
+    if (includeAllForInspector) {
+      POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_A_ALT)
+      if (hasDrawSupporter) {
+        POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B_ALT)
+      }
+      POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C_ALT)
+    } else {
+      const alreadySetUp =
+        hasCardIdOnBoard(state, CARD_IDS.CHARIZARD_EX) && hasQuickSearchReady && !hasFezReady
+      if (!alreadySetUp && hasDrawSupporter && !hasTutorOrItem) {
+        POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B_ALT)
+      } else if (alreadySetUp) {
+        POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C_ALT)
+      }
+    }
     return POOL_CANDIDATE_BRANCHES
   }
 
   POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_A)
 
-  // Branch B is only added if a random-draw Supporter (Research / Iono) is legally playable from hand
-  if (hasDrawSupporter) {
+  // Branch B is added if a random-draw Supporter (Research / Iono) is legally playable from hand
+  if (hasDrawSupporter && (includeAllForInspector || !hasTutorOrItem)) {
     POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B)
   }
 
   // Branch C: Resource conservation / Hold hand against disruption
-  POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C)
+  if (includeAllForInspector || state.currentTurn >= 3) {
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C)
+  }
 
   // Branch D is dynamically added on Turn 2+ when both Charizard and Pidgeot lines are eligible to evolve on board
-  if (
-    state.currentTurn >= 2 &&
-    canLineEvolveThisTurn(state, lookup, 'CHARIZARD') &&
-    canLineEvolveThisTurn(state, lookup, 'PIDGEOT') &&
-    (hasTutorOrItem || hasRareCandyOrEvo || hasQuickSearchReady)
-  ) {
+  if (bothLinesCanEvolve) {
     POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_D)
   }
 
@@ -2931,6 +2960,9 @@ export function simulateSingleGame(
       state.bench[b] &= ~PACK_ABILITY_USED_BIT
     }
 
+    // Check if an opponent LOADED_ATTACKER survived our previous turn BEFORE advancing opponent board energy
+    const oppLoadedAttackerSurvivedPrevTurn = hasOpponentLoadedAttackerReady(state)
+
     // Advance opponent board state (deployment, evolution, energy acceleration)
     advanceOpponentBoardTurn(state, config.opponentArchetype || 'RAGING_BOLT_AGGRO', turn, rng)
 
@@ -2943,31 +2975,23 @@ export function simulateSingleGame(
     // On Turn 2, aggressive opponent archetypes take 1 Prize lead (5 opponent prizes vs our 6),
     // opening the Counter Catcher (Attrape-Riposte) Contre-Tempo window!
     if (turn === 2 && state.oppPrizesRemaining === 6) {
-      const oppActiveTpl = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]
-      if (oppActiveTpl && oppActiveTpl.role === 'LOADED_ATTACKER' && state.oppEnergies[0] >= 2) {
+      if (hasOpponentLoadedAttackerReady(state)) {
         state.oppPrizesRemaining = 5
       }
     }
 
-    // Apply Turn 3 Opponent Disruption / Simulated Opponent Turn Attack
-    const oppActiveTplOnT3 = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]
-    const oppHasLoadedAttackerT3 =
-      turn === 3 &&
-      oppActiveTplOnT3 !== undefined &&
-      oppActiveTplOnT3.role === 'LOADED_ATTACKER' &&
-      state.oppEnergies[0] >= 2
+    // Apply Turn 3+ Opponent Disruption / Simulated Opponent Turn Attack (KO + Mashynn/Iono)
+    if (turn === 3 || turn === 4) {
+      const shouldApplyKo =
+        (turn === 3 && config.turn3Disruption === 'KO_ACTIVE_POKEMON') ||
+        (config.turn3Disruption === 'NONE' && oppLoadedAttackerSurvivedPrevTurn)
+      const shouldApplyIono =
+        (turn === 3 && config.turn3Disruption === 'IONO_HAND_TO_3') ||
+        (config.turn3Disruption === 'NONE' &&
+          !ionoExperienced &&
+          (turn === 4 || config.opponentArchetype === 'GARDEVOIR_DISRUPTION'))
 
-    if (turn === 3) {
-      const effectiveDisruption =
-        config.turn3Disruption !== 'NONE'
-          ? config.turn3Disruption
-          : config.opponentArchetype === 'GARDEVOIR_DISRUPTION'
-            ? 'IONO_HAND_TO_3'
-            : oppHasLoadedAttackerT3
-              ? 'KO_ACTIVE_POKEMON'
-              : 'NONE'
-
-      if (effectiveDisruption === 'IONO_HAND_TO_3') {
+      if (shouldApplyIono && state.handLen > 0) {
         sufferedIonoThisTurn = true
         ionoExperienced = true
         const oldHandCount = state.handLen
@@ -2991,7 +3015,9 @@ export function simulateSingleGame(
         if (recordDetailedLog) {
           disruptionMessage = `Tour Adverse T_adv : Mashynn / Iono adverse (Main de ${oldHandCount} cartes mélangée sous le deck ➔ réduite à ${toDraw} cartes)`
         }
-      } else if (effectiveDisruption === 'KO_ACTIVE_POKEMON') {
+      }
+
+      if (shouldApplyKo) {
         sufferedKoThisTurn = true
         revengeKillOpportunity = true
         const activeWasEx =
@@ -3024,7 +3050,10 @@ export function simulateSingleGame(
           state.active = promoted
           if (recordDetailedLog) {
             const promotedName = lookup[unpackCardId(promoted)]?.name ?? 'Banc'
-            disruptionMessage = `Tour Adverse T_adv : KO de ${koName} Actif par ${oppActiveTplOnT3?.name ?? "l'adversaire"} ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
+            const koMsg = `KO de ${koName} Actif par l'attaquant adverse ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
+            disruptionMessage = disruptionMessage
+              ? `${disruptionMessage} + ${koMsg}`
+              : `Tour Adverse T_adv : ${koMsg}`
           }
         } else {
           // Early Game Over Condition #1: No Pokemon left on Bench after Active KO!
@@ -3141,7 +3170,7 @@ export function simulateSingleGame(
       const candidateBranches =
         config.aiMode === 'FIXED_BEAM'
           ? FIXED_BEAM_BRANCH_CATALOG.slice(0, clampedFixedWidth)
-          : discoverCandidateBeamBranches(state, lookup, useExpectiminimax)
+          : discoverCandidateBeamBranches(state, lookup, useExpectiminimax, recordDetailedLog)
 
       branchesEvaluatedThisTurn = candidateBranches.length
       totalBranchesEvaluated += branchesEvaluatedThisTurn
@@ -4002,7 +4031,7 @@ export function runMonteCarloSimulation(
   const N = config.iterations
   const mainShard = runMonteCarloShard(config, config.aiMode, 0, N, true, onProgress)
 
-  const compareN = Math.min(N, 600)
+  const compareN = Math.min(N, 400)
   const modes = getComparisonModesList(config)
   const aiComparison: AIModeComparisonMetric[] = modes.map(({ mode, label }) => {
     if (mode === config.aiMode) {

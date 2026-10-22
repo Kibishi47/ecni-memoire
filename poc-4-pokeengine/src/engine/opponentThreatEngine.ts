@@ -291,33 +291,34 @@ export function initOpponentBoardState(
   board.oppPrizesRemaining = 6
 
   if (archetype === 'RAGING_BOLT_AGGRO') {
-    // Active: Raging Bolt ex (1 energy on T1), Bench: Ogerpon ex (1 energy), Radiant Greninja, Squawkabilly ex
-    board.oppIds[0] = OPP_IDS.RAGING_BOLT_EX
-    board.oppEnergies[0] = 1
-    board.oppIds[1] = OPP_IDS.OGERPON_EX
-    board.oppEnergies[1] = 1
-    board.oppIds[2] = OPP_IDS.RADIANT_GRENINJA
-    board.oppEnergies[2] = 0
+    // Active: Radiant Greninja (1-Prize pivot, 75 pts), Bench: Raging Bolt ex (Loaded 2-Prize Attacker, 170 pts), Ogerpon ex (Engine, 155 pts), Squawkabilly ex (2-Prize liability)
+    // Creates a realistic tactical trap: attacking Active takes only 1 Prize and leaves Raging Bolt ex on Bench ready to KO us on T_adv!
+    board.oppIds[0] = OPP_IDS.RADIANT_GRENINJA
+    board.oppEnergies[0] = 0
+    board.oppIds[1] = OPP_IDS.RAGING_BOLT_EX
+    board.oppEnergies[1] = 2
+    board.oppIds[2] = OPP_IDS.OGERPON_EX
+    board.oppEnergies[2] = 1
     board.oppIds[3] = OPP_IDS.SQUAWKABILLY_EX
     board.oppEnergies[3] = 0
     board.oppBenchLen = 3
   } else if (archetype === 'CHARIZARD_DRAGAPULT_SETUP') {
-    // Active: Drakloak (1 energy), Bench: Pidgeot ex (0 energy), Dreepy (sole Basic evolver!), Lumineon V
+    // Active: Drakloak (1-Prize, 90 pts), Bench: Pidgeot ex (2-Prize Engine, 125 pts), Dreepy (sole Basic evolver, 85 pts), Lumineon V (2-Prize liability)
     board.oppIds[0] = OPP_IDS.DRAKLOAK
-    board.oppEnergies[0] = 1
+    board.oppEnergies[0] = 0
     board.oppIds[1] = OPP_IDS.OPP_PIDGEOT_EX
-    board.oppEnergies[1] = 0
+    board.oppEnergies[1] = 1
     board.oppIds[2] = OPP_IDS.DREEPY
     board.oppEnergies[2] = 1
     board.oppIds[3] = OPP_IDS.OPP_LUMINEON_V
     board.oppEnergies[3] = 0
     board.oppBenchLen = 3
   } else {
-    // GARDEVOIR_DISRUPTION: Active: Drifloon (1-prize attacker), Bench: Gardevoir ex (engine), Kirlia, Fezandipiti ex
+    // GARDEVOIR_DISRUPTION: Active: Drifloon (1-prize attacker), Bench: Gardevoir ex (2-Prize Engine, 155 pts), Kirlia, Fezandipiti ex
     board.oppIds[0] = OPP_IDS.DRIFLOON
-    board.oppEnergies[0] = 2
+    board.oppEnergies[0] = 1
     board.oppIds[1] = OPP_IDS.GARDEVOIR_EX
-    board.oppEnergies[1] = 1
+    board.oppEnergies[1] = 2
     board.oppIds[2] = OPP_IDS.KIRLIA
     board.oppEnergies[2] = 0
     board.oppIds[3] = OPP_IDS.OPP_FEZANDIPITI_EX
@@ -420,10 +421,24 @@ export function hasOpponentEngineInPlay(board: OpponentBoardView): boolean {
 export function removeKnockedOutOpponentSlot(board: OpponentBoardView, slotIndex: number): void {
   if (slotIndex === 0) {
     if (board.oppBenchLen > 0) {
-      // Promote Bench slot 1 to Active
-      board.oppIds[0] = board.oppIds[1]
-      board.oppEnergies[0] = board.oppEnergies[1]
-      for (let i = 1; i < board.oppBenchLen; i++) {
+      // Promote the highest-priority attacker from Bench (preferring loaded 2-Prize attackers/engines)
+      let bestBenchSlot = 1
+      let bestPromoScore = -1
+      for (let i = 1; i <= board.oppBenchLen; i++) {
+        const cid = board.oppIds[i]
+        const tpl = OPPONENT_POKEMON_CATALOG[cid]
+        const score =
+          (tpl?.prizeValue === 2 ? 40 : 10) +
+          (tpl?.role === 'LOADED_ATTACKER' ? 50 : 0) +
+          board.oppEnergies[i] * 20
+        if (score > bestPromoScore) {
+          bestPromoScore = score
+          bestBenchSlot = i
+        }
+      }
+      board.oppIds[0] = board.oppIds[bestBenchSlot]
+      board.oppEnergies[0] = board.oppEnergies[bestBenchSlot]
+      for (let i = bestBenchSlot; i < board.oppBenchLen; i++) {
         board.oppIds[i] = board.oppIds[i + 1]
         board.oppEnergies[i] = board.oppEnergies[i + 1]
       }

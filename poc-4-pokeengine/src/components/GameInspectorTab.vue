@@ -6,11 +6,15 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Crosshair,
+  Eye,
+  EyeOff,
   Flame,
   GitBranch,
   Hand,
   Layers,
   Lock,
+  ShieldAlert,
   Sparkles,
   Swords,
   XCircle,
@@ -87,14 +91,14 @@ function nextGame() {
         <div>
           <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
             <GitBranch class="w-4 h-4 text-blue-600" />
-            Inspecteur de Partie Pas-à-Pas & Visualiseur d’Arbre de Décision
+            Inspecteur Double Plateau, Prize Checking & Anticipation Expectiminimax (T ➔ T_adv ➔ T+1)
           </h3>
           <p class="text-xs text-slate-500 mt-0.5">
-            Explorez les états mémoire réels, les 6 cartes Récompenses isolées et les branches Beam Search comparées à chaque tour.
+            Inspectez tour par tour la déduction des 6 Récompenses, le Threat Scoring du plateau adverse et l'arbitrage Expectiminimax à horizon T+1.
           </p>
         </div>
 
-        <!-- Sélecteur Partie #1 à #100 -->
+        <!-- Sélecteur Partie #1 à #50 -->
         <div class="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
           <button
             type="button"
@@ -178,7 +182,7 @@ function nextGame() {
       </div>
     </section>
 
-    <!-- 2. État Initial de la Partie Sélectionnée (Main 7 cartes + Mulligans + 6 Récompenses) -->
+    <!-- 2. État Initial & Bandeau Prize Checking (Connaissance des 6 Récompenses) -->
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
       <div
         class="px-5 py-3 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-2"
@@ -254,25 +258,36 @@ function nextGame() {
           </div>
         </div>
 
-        <!-- Les 6 Cartes Récompenses (Prize Cards) -->
+        <!-- Bandeau Prize Checking (Connaissance des 6 Récompenses) -->
         <div class="p-4 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2.5">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
               <Award class="w-3.5 h-3.5 text-slate-500" />
-              Les 6 Cartes Récompenses Isolées (Prize Cards)
+              Prize Checking (Connaissance des 6 Récompenses)
             </h4>
-            <span
-              v-if="currentGame.criticalPrizesCount > 0"
-              class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-red-50 text-red-700 border border-red-200"
-            >
-              {{ currentGame.criticalPrizesCount }} pièce(s) maîtresse(s) bloquée(s) !
-            </span>
-            <span
-              v-else
-              class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
-            >
-              Aucune pièce critique bloquée
-            </span>
+            <div class="flex items-center gap-1.5">
+              <span
+                v-if="currentGame.firstSearchTurn !== null"
+                class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1"
+              >
+                <Eye class="w-3 h-3" />
+                Déduit par inspection du deck au T{{ currentGame.firstSearchTurn }}
+              </span>
+              <span
+                v-else
+                class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-100 text-slate-600 border border-slate-200 inline-flex items-center gap-1"
+              >
+                <EyeOff class="w-3 h-3" />
+                Inconnues du joueur (?) — Aucune recherche deck
+              </span>
+
+              <span
+                v-if="currentGame.criticalPrizesCount > 0"
+                class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-red-50 text-red-700 border border-red-200"
+              >
+                {{ currentGame.criticalPrizesCount }} pièce(s) maîtresse(s) Prized
+              </span>
+            </div>
           </div>
 
           <div v-if="currentGame.prizeCardNames.length > 0" class="flex flex-wrap gap-1.5">
@@ -297,7 +312,7 @@ function nextGame() {
       </div>
     </section>
 
-    <!-- 3. Chronologie Pas-à-Pas : Tour 1, Tour 2, Tour 3, Tour 4 -->
+    <!-- 3. Chronologie Pas-à-Pas : Tour 1 ➔ Tour N -->
     <div class="space-y-5">
       <section
         v-for="turn in currentGame.turns"
@@ -326,6 +341,24 @@ function nextGame() {
           </div>
 
           <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+            <!-- Statut Prize Checking sur ce tour -->
+            <span
+              class="px-2 py-0.5 rounded border inline-flex items-center gap-1 font-semibold"
+              :class="
+                turn.prizesKnownByPlayer
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : 'bg-slate-100 text-slate-500 border-slate-200'
+              "
+            >
+              <Eye v-if="turn.prizesKnownByPlayer" class="w-3 h-3" />
+              <EyeOff v-else class="w-3 h-3" />
+              {{
+                turn.prizesKnownByPlayer
+                  ? `Prizes déduites (T${currentGame.firstSearchTurn ?? turn.turnNumber})`
+                  : 'Prizes inconnues (?)'
+              }}
+            </span>
+
             <span
               class="px-2 py-0.5 rounded border"
               :class="
@@ -357,6 +390,15 @@ function nextGame() {
               Puissance VSTAR : {{ turn.vstarUsedInGame ? 'Utilisée' : 'Disponible' }}
             </span>
           </div>
+        </div>
+
+        <!-- Bandeau Déduction Prize Checking lors du 1er SEARCH_DECK -->
+        <div
+          v-if="turn.prizeCheckDeductionNote"
+          class="px-5 py-2 bg-indigo-50/80 border-b border-indigo-200 text-indigo-900 text-xs font-mono flex items-center gap-2"
+        >
+          <Eye class="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>{{ turn.prizeCheckDeductionNote }}</span>
         </div>
 
         <!-- Alerte Perturbation Adverse T3 si présente -->
@@ -396,17 +438,19 @@ function nextGame() {
         </div>
 
         <div class="p-5 grid grid-cols-1 xl:grid-cols-12 gap-5">
-          <!-- Colonne Gauche (7 cols) : Arbre de Décision Intra-Tour (Branches comparées) -->
+          <!-- Colonne Gauche (7 cols) : Comparateur de Branches Expectiminimax (T ➔ T_adv ➔ T+1) -->
           <div class="xl:col-span-7 space-y-3">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                 <GitBranch class="w-3.5 h-3.5 text-blue-600" />
-                Arbre de Décision du Tour {{ turn.turnNumber }} ({{ turn.branches.length }} branche(s) évaluée(s))
+                Comparateur de Branches Expectiminimax ({{ turn.branches.length }} branche(s) évaluée(s))
               </h4>
-              <span class="text-[11px] font-mono text-slate-500">Fonction evaluateBoardState()</span>
+              <span class="text-[11px] font-mono text-slate-500">
+                U(S_T) = V_immédiat(S_T) + 0.75 × E[V_rebond(S_T+1)]
+              </span>
             </div>
 
-            <div class="space-y-2.5">
+            <div class="space-y-3">
               <div
                 v-for="branch in turn.branches"
                 :key="branch.branchId"
@@ -414,11 +458,11 @@ function nextGame() {
                 :class="
                   branch.selected
                     ? 'bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-500/20'
-                    : 'bg-slate-50/60 border-slate-200 opacity-85'
+                    : 'bg-slate-50/60 border-slate-200 opacity-90'
                 "
               >
                 <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/80">
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2">
                     <span
                       class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
                       :class="
@@ -432,6 +476,14 @@ function nextGame() {
                       {{ branch.selected ? 'RETENUE' : 'ÉCARTÉE' }}
                     </span>
                     <span class="text-xs font-bold text-slate-900">{{ branch.label }}</span>
+
+                    <span
+                      v-if="branch.attackTargetSummary"
+                      class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1"
+                    >
+                      <Crosshair class="w-3 h-3 text-amber-600" />
+                      {{ branch.attackTargetSummary }}
+                    </span>
                   </div>
 
                   <div class="flex items-center gap-2">
@@ -439,7 +491,7 @@ function nextGame() {
                       v-if="branch.thinningDelta > 0"
                       class="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200"
                     >
-                      Deck Thinning : -{{ branch.thinningDelta }} cartes
+                      Thinning : -{{ branch.thinningDelta }} cartes
                     </span>
                     <span
                       class="px-2.5 py-0.5 rounded font-mono text-xs font-bold border"
@@ -449,7 +501,7 @@ function nextGame() {
                           : 'bg-white text-slate-700 border-slate-200'
                       "
                     >
-                      Score : {{ branch.boardScore }} pts
+                      U(S_T) : {{ branch.boardScore }} pts
                     </span>
                   </div>
                 </div>
@@ -463,6 +515,75 @@ function nextGame() {
                   >
                     <span class="text-slate-400 select-none">{{ aIdx + 1 }}.</span>
                     <span>{{ act }}</span>
+                  </div>
+                </div>
+
+                <!-- Encart Projection Expectiminimax (T -> T_adv -> T+1) -->
+                <div
+                  v-if="branch.expectiminimax"
+                  class="mt-3 p-2.5 rounded-md bg-white border border-slate-200 space-y-2"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                    <span class="font-bold text-slate-800">
+                      {{ branch.expectiminimax.summaryLine }}
+                    </span>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span
+                        v-if="branch.expectiminimax.energyBankingBonus > 0"
+                        class="px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-semibold"
+                      >
+                        Energy Banking : +{{ branch.expectiminimax.energyBankingBonus }} pts
+                      </span>
+                      <span
+                        v-if="branch.expectiminimax.resourceConservationBonus > 0"
+                        class="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-800 border border-blue-200 font-semibold"
+                      >
+                        Conservation T+1 : +{{ branch.expectiminimax.resourceConservationBonus }} pts
+                      </span>
+                      <span
+                        v-if="branch.expectiminimax.threatReductionBonus > 0"
+                        class="px-1.5 py-0.5 rounded text-[10px] bg-purple-50 text-purple-800 border border-purple-200 font-semibold"
+                      >
+                        Menace éliminée : +{{ branch.expectiminimax.threatReductionBonus }} pts
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1.5 border-t border-slate-100 text-[10px] font-mono">
+                    <div class="p-1.5 rounded bg-slate-50 border border-slate-200/70">
+                      <div class="text-slate-500 uppercase">1. Tour T (Immédiat)</div>
+                      <div class="font-bold text-slate-900 mt-0.5">
+                        V_immédiat = {{ branch.expectiminimax.immediateScore }} pts
+                      </div>
+                    </div>
+
+                    <div class="p-1.5 rounded bg-slate-50 border border-slate-200/70">
+                      <div class="text-slate-500 uppercase">2. Scénario Adverse T_adv</div>
+                      <div class="font-semibold text-slate-800 mt-0.5">
+                        KO: {{ branch.expectiminimax.opponentKoProbPct }}% • Mashynn: {{ branch.expectiminimax.opponentIonoProbPct }}% • Boss: {{ branch.expectiminimax.opponentGustProbPct }}%
+                      </div>
+                    </div>
+
+                    <div class="p-1.5 rounded bg-slate-50 border border-slate-200/70">
+                      <div class="text-slate-500 uppercase">3. Rebond T+1 (0.75×E)</div>
+                      <div class="font-bold mt-0.5 flex items-center justify-between">
+                        <span
+                          :class="
+                            branch.expectiminimax.reboundExpectedScore >= 0
+                              ? 'text-emerald-700'
+                              : 'text-red-700'
+                          "
+                        >
+                          E[V_rebond] = {{ branch.expectiminimax.reboundExpectedScore >= 0 ? '+' : '' }}{{ branch.expectiminimax.reboundExpectedScore }} pts
+                        </span>
+                        <span
+                          v-if="branch.expectiminimax.revengeKillReadyAtTPlus1"
+                          class="px-1 rounded bg-emerald-100 text-emerald-800 text-[9px]"
+                        >
+                          Revenge T+1 ✓
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -483,95 +604,217 @@ function nextGame() {
             </div>
           </div>
 
-          <!-- Colonne Droite (5 cols) : État du Plateau en Fin de Tour -->
+          <!-- Colonne Droite (5 cols) : Vue "Double Plateau Face-à-Face" (Adversaire vs Joueur) -->
           <div class="xl:col-span-5 space-y-3">
             <div class="flex items-center justify-between">
               <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                 <Layers class="w-3.5 h-3.5 text-slate-600" />
-                État du Plateau en Fin de Tour {{ turn.turnNumber }}
+                Double Plateau Face-à-Face (Fin T{{ turn.turnNumber }})
               </h4>
               <span class="text-[11px] font-mono text-slate-500">
-                Récompenses : {{ turn.prizesRemaining }} • Deck : {{ turn.deckCountEnd }}
+                Prizes : Joueur {{ turn.prizesRemaining }} vs Adv {{ turn.opponentPrizesRemaining }}
               </span>
             </div>
 
-            <!-- Poste Actif -->
-            <div class="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-1.5">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] font-mono font-bold uppercase text-slate-500 flex items-center gap-1">
-                  <Swords class="w-3 h-3 text-slate-700" />
-                  Poste Actif
+            <!-- PLATEAU ADVERSE (Haut du Face-à-Face) -->
+            <div class="p-3.5 rounded-lg border border-red-200 bg-red-50/30 space-y-2.5">
+              <div class="flex items-center justify-between border-b border-red-200/70 pb-1.5">
+                <span class="text-[11px] font-mono font-bold uppercase text-red-900 flex items-center gap-1.5">
+                  <ShieldAlert class="w-3.5 h-3.5 text-red-600" />
+                  Plateau Adverse & Threat Scoring
                 </span>
-                <span
-                  v-if="turn.activePokemon"
-                  class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600"
-                >
-                  Posé au T{{ turn.activePokemon.turnPlayed }} • {{ turn.activePokemon.hp }} PV
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white text-red-700 border border-red-200">
+                  Récompenses Adv : {{ turn.opponentPrizesRemaining }} / 6
                 </span>
               </div>
 
-              <div v-if="turn.activePokemon" class="flex flex-wrap items-center justify-between gap-2">
-                <div class="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                  <span>{{ turn.activePokemon.name }}</span>
+              <!-- Poste Actif Adverse -->
+              <div
+                v-if="turn.opponentActivePokemon"
+                class="p-2.5 rounded bg-white border border-red-200 space-y-1.5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-1.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-red-100 text-red-800">
+                      Actif Adv
+                    </span>
+                    <span class="text-xs font-bold text-slate-900">
+                      {{ turn.opponentActivePokemon.name }}
+                    </span>
+                    <span class="text-[10px] font-mono text-slate-500">
+                      ({{ turn.opponentActivePokemon.hp }} PV • {{ turn.opponentActivePokemon.prizeValue }}P)
+                    </span>
+                  </div>
+
                   <span
-                    v-if="turn.activePokemon.attachedToolName"
-                    class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200"
-                  >
-                    {{ turn.activePokemon.attachedToolName }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-1">
-                  <span
-                    class="px-2 py-0.5 rounded text-xs font-mono font-semibold inline-flex items-center gap-1 border"
+                    class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
                     :class="
-                      turn.activePokemon.attachedEnergies >= 2
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : 'bg-white text-slate-700 border-slate-200'
+                      turn.opponentActivePokemon.threatScore >= 130
+                        ? 'bg-red-600 text-white border-red-600'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
                     "
                   >
-                    <Flame class="w-3 h-3 text-red-500" />
-                    {{ turn.activePokemon.attachedEnergies }} Énergie(s) Feu
+                    Menace : {{ turn.opponentActivePokemon.threatScore }} pts
                   </span>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
+                  <span class="text-slate-600">{{ turn.opponentActivePokemon.roleLabel }}</span>
+                  <span class="text-amber-700 font-semibold">
+                    ⚡ {{ turn.opponentActivePokemon.attachedEnergies }} Énergie(s)
+                  </span>
+                </div>
+
+                <div
+                  v-if="turn.opponentActivePokemon.threatBreakdown.length > 0"
+                  class="flex flex-wrap gap-1 pt-1 border-t border-slate-100"
+                >
+                  <span
+                    v-for="(tb, tIdx) in turn.opponentActivePokemon.threatBreakdown"
+                    :key="tIdx"
+                    class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-slate-50 text-slate-600 border border-slate-200"
+                  >
+                    {{ tb }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Banc Adverse (avec Threat Score sur chaque cible) -->
+              <div class="space-y-1.5">
+                <div class="text-[10px] font-mono font-bold uppercase text-red-800/80">
+                  Banc Adverse ({{ turn.opponentBenchPokemon?.length ?? 0 }} Pokémon — Cibles Boss / Attrape-Riposte)
+                </div>
+
+                <div
+                  v-if="turn.opponentBenchPokemon && turn.opponentBenchPokemon.length > 0"
+                  class="grid grid-cols-1 gap-1.5"
+                >
+                  <div
+                    v-for="(oppBench, obIdx) in turn.opponentBenchPokemon"
+                    :key="obIdx"
+                    class="p-2 rounded bg-white border border-slate-200 flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs font-semibold text-slate-900">
+                          {{ oppBench.name }}
+                        </span>
+                        <span class="text-[10px] font-mono text-slate-500">
+                          {{ oppBench.hp }} PV • {{ oppBench.prizeValue }}P • {{ oppBench.attachedEnergies }}⚡
+                        </span>
+                      </div>
+                      <div class="text-[10px] font-mono text-slate-500">
+                        {{ oppBench.roleLabel }}
+                      </div>
+                    </div>
+
+                    <span
+                      class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border shrink-0"
+                      :class="
+                        oppBench.threatScore >= 130
+                          ? 'bg-red-50 text-red-700 border-red-300'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      "
+                    >
+                      Menace : {{ oppBench.threatScore }} pts
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="text-xs font-mono text-slate-400 italic">
+                  Banc adverse vide.
                 </div>
               </div>
             </div>
 
-            <!-- Banc (Max 5 Pokémon) -->
-            <div class="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] font-mono font-bold uppercase text-slate-500">
-                  Banc ({{ turn.benchPokemon.length }} / 5 emplacements)
+            <!-- NOTRE PLATEAU JOUEUR (Bas du Face-à-Face) -->
+            <div class="p-3.5 rounded-lg border border-emerald-200 bg-emerald-50/20 space-y-2.5">
+              <div class="flex items-center justify-between border-b border-emerald-200/70 pb-1.5">
+                <span class="text-[11px] font-mono font-bold uppercase text-emerald-950 flex items-center gap-1.5">
+                  <Swords class="w-3.5 h-3.5 text-emerald-600" />
+                  Notre Plateau (Dracaufeu ex / Roucarnage ex)
                 </span>
-                <span class="text-[10px] font-mono text-emerald-700">Invariant ≤ 5 respecté</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white text-emerald-700 border border-emerald-200">
+                  Nos Récompenses : {{ turn.prizesRemaining }} / 6
+                </span>
               </div>
 
-              <div v-if="turn.benchPokemon.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                <div
-                  v-for="(bPoke, bIdx) in turn.benchPokemon"
-                  :key="bIdx"
-                  class="p-2 rounded bg-white border border-slate-200 flex items-center justify-between gap-2"
-                >
-                  <div class="min-w-0">
-                    <div class="text-xs font-semibold text-slate-900 truncate">
-                      {{ bPoke.name }}
-                    </div>
-                    <div class="text-[10px] font-mono text-slate-500 flex items-center gap-1.5">
-                      <span>Posé au T{{ bPoke.turnPlayed }}</span>
-                      <span v-if="bPoke.attachedToolName" class="text-blue-600 truncate">
-                        • {{ bPoke.attachedToolName }}
-                      </span>
-                    </div>
-                  </div>
+              <!-- Notre Poste Actif -->
+              <div class="p-2.5 rounded border border-slate-200 bg-white space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-mono font-bold uppercase text-slate-500">
+                    Notre Poste Actif
+                  </span>
                   <span
-                    v-if="bPoke.attachedEnergies > 0"
-                    class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"
+                    v-if="turn.activePokemon"
+                    class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-slate-600"
                   >
-                    {{ bPoke.attachedEnergies }}🔥
+                    Posé au T{{ turn.activePokemon.turnPlayed }} • {{ turn.activePokemon.hp }} PV
                   </span>
                 </div>
+
+                <div v-if="turn.activePokemon" class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>{{ turn.activePokemon.name }}</span>
+                    <span
+                      v-if="turn.activePokemon.attachedToolName"
+                      class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200"
+                    >
+                      {{ turn.activePokemon.attachedToolName }}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <span
+                      class="px-2 py-0.5 rounded text-xs font-mono font-semibold inline-flex items-center gap-1 border"
+                      :class="
+                        turn.activePokemon.attachedEnergies >= 2
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-white text-slate-700 border-slate-200'
+                      "
+                    >
+                      <Flame class="w-3 h-3 text-red-500" />
+                      {{ turn.activePokemon.attachedEnergies }} Énergie(s) Feu
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div v-else class="text-xs font-mono text-slate-400 italic">
-                Aucun Pokémon sur le Banc.
+
+              <!-- Notre Banc (Max 5 Pokémon) -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-mono font-bold uppercase text-slate-600">
+                    Notre Banc ({{ turn.benchPokemon.length }} / 5 emplacements)
+                  </span>
+                  <span class="text-[10px] font-mono text-emerald-700">Invariant ≤ 5 respecté</span>
+                </div>
+
+                <div v-if="turn.benchPokemon.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  <div
+                    v-for="(bPoke, bIdx) in turn.benchPokemon"
+                    :key="bIdx"
+                    class="p-2 rounded bg-white border border-slate-200 flex items-center justify-between gap-2"
+                  >
+                    <div class="min-w-0">
+                      <div class="text-xs font-semibold text-slate-900 truncate">
+                        {{ bPoke.name }}
+                      </div>
+                      <div class="text-[10px] font-mono text-slate-500 flex items-center gap-1.5">
+                        <span>Posé au T{{ bPoke.turnPlayed }}</span>
+                        <span v-if="bPoke.attachedToolName" class="text-blue-600 truncate">
+                          • {{ bPoke.attachedToolName }}
+                        </span>
+                      </div>
+                    </div>
+                    <span
+                      v-if="bPoke.attachedEnergies > 0"
+                      class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"
+                    >
+                      {{ bPoke.attachedEnergies }}🔥
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="text-xs font-mono text-slate-400 italic">
+                  Aucun Pokémon sur le Banc.
+                </div>
               </div>
             </div>
 
@@ -579,7 +822,7 @@ function nextGame() {
             <div class="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-1.5">
               <div class="flex items-center justify-between">
                 <span class="text-[10px] font-mono font-bold uppercase text-slate-500">
-                  Main en Fin de Tour ({{ turn.handCardNames.length }} cartes)
+                  Main en Fin de Tour ({{ turn.handCardNames.length }} cartes — Conservation T+1)
                 </span>
               </div>
               <div v-if="turn.handCardNames.length > 0" class="flex flex-wrap gap-1">
