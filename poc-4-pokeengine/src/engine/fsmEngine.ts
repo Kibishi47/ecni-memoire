@@ -10,6 +10,7 @@ import type {
   SimulationConfig,
   SimulationResultPayload,
   TurnTimelineRecord,
+  WorkerShardRawResult,
 } from '@/types/engine'
 import {
   addPackedEnergies,
@@ -164,6 +165,13 @@ const POOL_BRANCH_STATES: LowLevelGameState[] = [
   createEmptyGameState(false),
 ]
 const SCRATCH_IONO_BUFFER = new Uint16Array(60)
+const POOL_MAIN_RNG = new Mulberry32(1)
+const POOL_BRANCH_RNG = new Mulberry32(1)
+const EMPTY_STRING_ARRAY: string[] = []
+const POOL_EVAL_RESULT: { score: number; breakdown: string[] } = {
+  score: 0,
+  breakdown: EMPTY_STRING_ARRAY,
+}
 
 interface InvariantTrackerCounters {
   inv1Checked: number
@@ -273,7 +281,7 @@ export function evaluateBoardState(
   recordBreakdown = false,
 ): { score: number; breakdown: string[] } {
   let score = 0
-  const breakdown: string[] = []
+  const breakdown: string[] = recordBreakdown ? [] : EMPTY_STRING_ARRAY
 
   const activeId = state.active !== 0 ? unpackCardId(state.active) : 0
   const activeEnergies = state.active !== 0 ? unpackEnergies(state.active) : 0
@@ -351,6 +359,10 @@ export function evaluateBoardState(
     }
   }
 
+  if (!recordBreakdown) {
+    POOL_EVAL_RESULT.score = score
+    return POOL_EVAL_RESULT
+  }
   return { score, breakdown }
 }
 
@@ -1851,17 +1863,46 @@ const FIXED_BEAM_BRANCH_CATALOG: CandidateBeamBranch[] = [
   },
 ]
 
+const STATIC_BRANCH_RESTRICTED: CandidateBeamBranch = {
+  branchId: 'A',
+  label: 'Branche A — Action Unique Disponible (Main Restreinte / Attachement Simple)',
+  policy: 'CONSERVATIVE',
+}
+const STATIC_BRANCH_A: CandidateBeamBranch = {
+  branchId: 'A',
+  label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
+  policy: 'OPTIMAL_THINNING',
+}
+const STATIC_BRANCH_B: CandidateBeamBranch = {
+  branchId: 'B',
+  label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
+  policy: 'DRAW_FIRST',
+}
+const STATIC_BRANCH_C: CandidateBeamBranch = {
+  branchId: 'C',
+  label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
+  policy: 'CONSERVATIVE',
+}
+const STATIC_BRANCH_D: CandidateBeamBranch = {
+  branchId: 'D',
+  label: 'Branche D — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
+  policy: 'ZARD_FIRST_AGGRO',
+}
+const POOL_CANDIDATE_BRANCHES: CandidateBeamBranch[] = []
+
 /**
  * Dynamically discovers between 1 and 4 distinct Beam Search candidate branches for the current turn
  * depending on the actual playable cards in hand and the current board state:
  * - 1 branch if the hand is restricted/bricked (no tutors, no draw supporters, no abilities).
  * - 2 to 4 branches depending on whether a Draw Supporter can be sequenced before Tutors ('DRAW_FIRST'),
  *   and whether both Charizard and Pidgeot lines can evolve on Turn 2+ ('ZARD_FIRST_AGGRO' vs 'OPTIMAL_THINNING').
+ * Reuses `POOL_CANDIDATE_BRANCHES` for zero heap allocation in the hot loop.
  */
 function discoverCandidateBeamBranches(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
 ): CandidateBeamBranch[] {
+  POOL_CANDIDATE_BRANCHES.length = 0
   const canPlaySupporter = !(state.currentTurn === 1 && state.goingFirst) && state.supporterPlayedCount === 0
   let hasTutorOrItem = false
   let hasDrawSupporter = false
@@ -1899,38 +1940,19 @@ function discoverCandidateBeamBranches(
 
   // Case 1: Restricted / Brick hand (no tutor, no draw supporter, no active search ability) -> Only 1 branch needed
   if (!hasTutorOrItem && !hasDrawSupporter && !hasQuickSearchReady && !hasFezReady && !hasRareCandyOrEvo) {
-    return [
-      {
-        branchId: 'A',
-        label: 'Branche A — Action Unique Disponible (Main Restreinte / Attachement Simple)',
-        policy: 'CONSERVATIVE',
-      },
-    ]
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_RESTRICTED)
+    return POOL_CANDIDATE_BRANCHES
   }
 
-  const branches: CandidateBeamBranch[] = [
-    {
-      branchId: 'A',
-      label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
-      policy: 'OPTIMAL_THINNING',
-    },
-  ]
+  POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_A)
 
   // Branch B is only added if a random-draw Supporter (Research / Iono) is legally playable from hand
   if (hasDrawSupporter) {
-    branches.push({
-      branchId: 'B',
-      label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
-      policy: 'DRAW_FIRST',
-    })
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B)
   }
 
   // Branch C: Resource conservation / Hold hand against disruption
-  branches.push({
-    branchId: 'C',
-    label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
-    policy: 'CONSERVATIVE',
-  })
+  POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C)
 
   // Branch D is dynamically added on Turn 2+ when both Charizard and Pidgeot lines are eligible to evolve on board
   if (
@@ -1939,14 +1961,10 @@ function discoverCandidateBeamBranches(
     canLineEvolveThisTurn(state, lookup, 'PIDGEOT') &&
     (hasTutorOrItem || hasRareCandyOrEvo || hasQuickSearchReady)
   ) {
-    branches.push({
-      branchId: 'D',
-      label: 'Branche D — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
-      policy: 'ZARD_FIRST_AGGRO',
-    })
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_D)
   }
 
-  return branches
+  return POOL_CANDIDATE_BRANCHES
 }
 
 function createBoardPokemonSnapshot(
@@ -1975,20 +1993,19 @@ function createBoardPokemonSnapshot(
  * Runs a single complete game from Setup through `config.maxTurns` (1..10 turns),
  * stopping early if a terminal condition (6 Prizes claimed, Deck-Out, or KO with empty Bench) occurs.
  */
-export function simulateSingleGame(
-  gameIndex: number,
-  config: SimulationConfig,
-  templateDeck: Uint16Array,
-  lookup: DeclarativeCardDefinition[],
-  invariants: InvariantTrackerCounters,
-  recordDetailedLog: boolean,
-): {
+interface SingleGameSimulationResult {
   initialDrawHadZeroBasics: boolean
   initialDrawHadPoffin: boolean
   mulliganCount: number
   turn1SetupSuccess: boolean
   turn2CharizardReady: boolean
   pidgeotInPlay: boolean
+  revengeKillOpportunity: boolean
+  revengeKillSucceeded: boolean
+  gustThreatNeutralized: boolean
+  ionoExperienced: boolean
+  postIonoSurvived: boolean
+  optimalPrizeMapping: boolean
   bricked: boolean
   rareCandyPrizedCount: number
   charizardPrizedCount: number
@@ -1999,12 +2016,56 @@ export function simulateSingleGame(
   endReason: GameEndReason
   thinningTotal: number
   branchesEvaluated: number
+  expectiminimaxNodes: number
   actionsExecuted: number
   sampledRecord: SampledGameRecord | null
-} {
+}
+
+const POOL_SINGLE_GAME_RESULT: SingleGameSimulationResult = {
+  initialDrawHadZeroBasics: false,
+  initialDrawHadPoffin: false,
+  mulliganCount: 0,
+  turn1SetupSuccess: false,
+  turn2CharizardReady: false,
+  pidgeotInPlay: false,
+  revengeKillOpportunity: false,
+  revengeKillSucceeded: false,
+  gustThreatNeutralized: false,
+  ionoExperienced: false,
+  postIonoSurvived: false,
+  optimalPrizeMapping: false,
+  bricked: false,
+  rareCandyPrizedCount: 0,
+  charizardPrizedCount: 0,
+  boardScoreT2: 0,
+  boardScoreT4: 0,
+  turnsPlayed: 0,
+  endedEarly: false,
+  endReason: 'MAX_TURNS_REACHED',
+  thinningTotal: 0,
+  branchesEvaluated: 0,
+  expectiminimaxNodes: 0,
+  actionsExecuted: 0,
+  sampledRecord: null,
+}
+
+/**
+ * Runs a single complete game from Setup through `config.maxTurns` (1..10 turns),
+ * stopping early if a terminal condition (6 Prizes claimed, Deck-Out, or KO with empty Bench) occurs.
+ * When `recordDetailedLog === false` (99.5% of games), executes in Zero-Allocation mode (0 strings, 0 arrays, 0 heap objects).
+ */
+export function simulateSingleGame(
+  gameIndex: number,
+  config: SimulationConfig,
+  templateDeck: Uint16Array,
+  lookup: DeclarativeCardDefinition[],
+  invariants: InvariantTrackerCounters,
+  recordDetailedLog: boolean,
+): SingleGameSimulationResult {
   const maxTurns = Math.max(1, Math.min(10, config.maxTurns || 4))
   const gameSeed = deriveGameSeed(config.seed, gameIndex)
-  const rng = new Mulberry32(gameSeed)
+  const rng = POOL_MAIN_RNG
+  rng.reseed(gameSeed)
   const state = POOL_MAIN_STATE
   resetLowLevelState(state, config.goingFirst)
 
@@ -2045,8 +2106,9 @@ export function simulateSingleGame(
     state.mulliganCount++
   }
 
-  const initialHandNames: string[] = []
+  let initialHandNames: string[] | null = null
   if (recordDetailedLog) {
+    initialHandNames = []
     for (let i = 0; i < state.handLen; i++) {
       initialHandNames.push(lookup[unpackCardId(state.hand[i])]?.name ?? 'Carte')
     }
@@ -2084,7 +2146,10 @@ export function simulateSingleGame(
   // 3. Rule of 6 Prize Cards
   let rareCandyPrizedCount = 0
   let charizardPrizedCount = 0
-  const prizeCardNames: string[] = []
+  let prizeCardNames: string[] | null = null
+  if (recordDetailedLog) {
+    prizeCardNames = []
+  }
   let virtualPrizesRemaining = 6
 
   if (config.prizesEnabled) {
@@ -2097,7 +2162,7 @@ export function simulateSingleGame(
       const pCid = unpackCardId(pCard)
       if (pCid === CARD_IDS.RARE_CANDY) rareCandyPrizedCount++
       if (pCid === CARD_IDS.CHARIZARD_EX) charizardPrizedCount++
-      if (recordDetailedLog) {
+      if (recordDetailedLog && prizeCardNames) {
         prizeCardNames.push(lookup[pCid]?.name ?? 'Carte')
       }
     }
@@ -2109,11 +2174,18 @@ export function simulateSingleGame(
   let boardScoreT2 = 0
   let boardScoreFinal = 0
   let totalBranchesEvaluated = 0
+  let totalExpectiminimaxNodes = 0
   let totalActionsExecuted = 0
   let turnsPlayed = 0
+  let attacksUsedToClaimPrizes = 0
+  let revengeKillOpportunity = false
+  let revengeKillSucceeded = false
+  let gustThreatNeutralized = false
+  let ionoExperienced = false
+  let postIonoSurvived = false
   let endReason: GameEndReason = 'MAX_TURNS_REACHED'
-  let endReasonLabel = `Horizon de ${maxTurns} tour(s) atteint`
-  const turnsTimeline: TurnTimelineRecord[] = []
+  let endReasonLabel = ''
+  const turnsTimeline: TurnTimelineRecord[] | null = recordDetailedLog ? [] : null
 
   // 4. Main Simulation Loop: Turns 1 to maxTurns (with early termination if game ends)
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -2135,10 +2207,14 @@ export function simulateSingleGame(
     let disruptionMessage: string | null = null
     let attackMessage: string | null = null
     let terminalEventMessage: string | null = null
+    let sufferedKoThisTurn = false
+    let sufferedIonoThisTurn = false
 
     // Apply Turn 3 Opponent Disruption if configured
     if (turn === 3 && config.turn3Disruption !== 'NONE') {
       if (config.turn3Disruption === 'IONO_HAND_TO_3') {
+        sufferedIonoThisTurn = true
+        ionoExperienced = true
         const oldHandCount = state.handLen
         for (let h = 0; h < oldHandCount; h++) {
           SCRATCH_IONO_BUFFER[h] = packCard(unpackCardId(state.hand[h]))
@@ -2157,9 +2233,13 @@ export function simulateSingleGame(
         for (let d = 0; d < toDraw; d++) {
           drawCardFromDeck(state)
         }
-        disruptionMessage = `Perturbation T3 : Mashynn / Iono adverse (Main de ${oldHandCount} cartes mélangée sous le deck ➔ réduite à ${toDraw} cartes)`
+        if (recordDetailedLog) {
+          disruptionMessage = `Perturbation T3 : Mashynn / Iono adverse (Main de ${oldHandCount} cartes mélangée sous le deck ➔ réduite à ${toDraw} cartes)`
+        }
       } else if (config.turn3Disruption === 'KO_ACTIVE_POKEMON') {
-        const koName = lookup[unpackCardId(state.active)]?.name ?? 'Pokémon Actif'
+        sufferedKoThisTurn = true
+        revengeKillOpportunity = true
+        const koName = recordDetailedLog ? (lookup[unpackCardId(state.active)]?.name ?? 'Pokémon Actif') : ''
         state.discard[state.discardLen++] = packCard(unpackCardId(state.active))
         state.active = 0
         state.koOccurredLastTurn = true
@@ -2179,16 +2259,18 @@ export function simulateSingleGame(
           const promoted = removeAtUint16(state.bench, state.benchLen, bestBenchIdx)
           state.benchLen--
           state.active = promoted
-          const promotedName = lookup[unpackCardId(promoted)]?.name ?? 'Banc'
-          disruptionMessage = `Perturbation T3 : KO de ${koName} Actif ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
+          if (recordDetailedLog) {
+            const promotedName = lookup[unpackCardId(promoted)]?.name ?? 'Banc'
+            disruptionMessage = `Perturbation T3 : KO de ${koName} Actif ➔ Promotion de ${promotedName} (débloque Fezandipiti ex)`
+          }
         } else {
           // Early Game Over Condition #1: No Pokemon left on Bench after Active KO!
-          disruptionMessage = `Perturbation T3 : KO de ${koName} Actif (Banc vide)`
           endReason = 'DEFEAT_NO_POKEMON'
-          endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par KO sans Pokémon de remplacement sur le Banc`
-          terminalEventMessage = endReasonLabel
           boardScoreFinal = evaluateBoardState(state, lookup, false).score
-          if (recordDetailedLog) {
+          if (recordDetailedLog && turnsTimeline) {
+            disruptionMessage = `Perturbation T3 : KO de ${koName} Actif (Banc vide)`
+            endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par KO sans Pokémon de remplacement sur le Banc`
+            terminalEventMessage = endReasonLabel
             turnsTimeline.push({
               turnNumber: turn,
               drawnCardName: null,
@@ -2216,10 +2298,10 @@ export function simulateSingleGame(
     // Early Game Over Condition #2: Start-of-turn Deck-Out (0 cards in deck before mandatory draw)
     if (state.deckLen <= 0) {
       endReason = 'DEFEAT_DECK_OUT'
-      endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par Deck-Out (0 carte dans le deck à la pioche du tour)`
-      terminalEventMessage = endReasonLabel
       boardScoreFinal = evaluateBoardState(state, lookup, false).score
-      if (recordDetailedLog) {
+      if (recordDetailedLog && turnsTimeline) {
+        endReasonLabel = `Partie arrêtée au T${turn}/${maxTurns} : Défaite par Deck-Out (0 carte dans le deck à la pioche du tour)`
+        terminalEventMessage = endReasonLabel
         const benchSnapshots: BoardPokemonSnapshot[] = []
         for (let b = 0; b < state.benchLen; b++) {
           benchSnapshots.push(createBoardPokemonSnapshot(state.bench[b], lookup))
@@ -2253,23 +2335,31 @@ export function simulateSingleGame(
 
     const deckCountStart = state.deckLen
     const drawnCard = drawCardFromDeck(state)
-    const drawnCardName = drawnCard !== 0 ? (lookup[unpackCardId(drawnCard)]?.name ?? null) : null
+    const drawnCardName =
+      recordDetailedLog && drawnCard !== 0 ? (lookup[unpackCardId(drawnCard)]?.name ?? null) : null
 
-    const recordedBranches: DecisionBranchRecord[] = []
+    const recordedBranches: DecisionBranchRecord[] | null = recordDetailedLog ? [] : null
     let branchesEvaluatedThisTurn = 1
 
-    if (config.aiMode === 'OPTIMAL_BEAM' || config.aiMode === 'FIXED_BEAM') {
-      // If OPTIMAL_BEAM: dynamically discovers 1..4 branches depending on the current hand & board state.
-      // If FIXED_BEAM: evaluates the exact user-selected number of branches K (1..8) every turn.
+    if (
+      config.aiMode === 'EXPECTIMINIMAX_T1' ||
+      config.aiMode === 'OPTIMAL_BEAM' ||
+      config.aiMode === 'FIXED_BEAM'
+    ) {
       const clampedFixedWidth = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
       const candidateBranches =
-        config.aiMode === 'OPTIMAL_BEAM'
-          ? discoverCandidateBeamBranches(state, lookup)
-          : FIXED_BEAM_BRANCH_CATALOG.slice(0, clampedFixedWidth)
+        config.aiMode === 'FIXED_BEAM'
+          ? FIXED_BEAM_BRANCH_CATALOG.slice(0, clampedFixedWidth)
+          : discoverCandidateBeamBranches(state, lookup)
 
       branchesEvaluatedThisTurn = candidateBranches.length
       totalBranchesEvaluated += branchesEvaluatedThisTurn
+      totalExpectiminimaxNodes +=
+        config.aiMode === 'EXPECTIMINIMAX_T1'
+          ? branchesEvaluatedThisTurn * 4
+          : branchesEvaluatedThisTurn
       const thinBefore = state.thinningCount
+      const savedRngState = rng.getState()
 
       let bestIdx = 0
       let bestScore = -999999
@@ -2279,7 +2369,8 @@ export function simulateSingleGame(
         const candidate = candidateBranches[bIdx]
         const branchState = POOL_BRANCH_STATES[bIdx]
         copyIntoLowLevelState(state, branchState)
-        const branchRng = rng.clone()
+        const branchRng = POOL_BRANCH_RNG
+        branchRng.setState(savedRngState)
         if (candidate.policy === 'NAIVE_RANDOM') {
           branchRng.nextInt(bIdx + 2)
         }
@@ -2300,7 +2391,7 @@ export function simulateSingleGame(
           bestActions = actCount
         }
 
-        if (recordDetailedLog) {
+        if (recordDetailedLog && recordedBranches) {
           recordedBranches.push({
             branchId: candidate.branchId,
             label: candidate.label,
@@ -2313,7 +2404,7 @@ export function simulateSingleGame(
         }
       }
 
-      if (recordDetailedLog && recordedBranches[bestIdx]) {
+      if (recordDetailedLog && recordedBranches && recordedBranches[bestIdx]) {
         recordedBranches[bestIdx].selected = true
       }
 
@@ -2322,11 +2413,12 @@ export function simulateSingleGame(
       rng.nextUint32()
     } else if (config.aiMode === 'GREEDY') {
       totalBranchesEvaluated += 1
+      totalExpectiminimaxNodes += 1
       const thinBefore = state.thinningCount
       const logsG: string[] | null = recordDetailedLog ? [] : null
       const actG = runIntraTurnPolicy(state, lookup, rng, invariants, 'GREEDY', logsG)
       totalActionsExecuted += actG
-      if (recordDetailedLog) {
+      if (recordDetailedLog && recordedBranches) {
         const evalG = evaluateBoardState(state, lookup, true)
         recordedBranches.push({
           branchId: 'G',
@@ -2340,11 +2432,12 @@ export function simulateSingleGame(
       }
     } else {
       totalBranchesEvaluated += 1
+      totalExpectiminimaxNodes += 1
       const thinBefore = state.thinningCount
       const logsN: string[] | null = recordDetailedLog ? [] : null
       const actN = runIntraTurnPolicy(state, lookup, rng, invariants, 'NAIVE_RANDOM', logsN)
       totalActionsExecuted += actN
-      if (recordDetailedLog) {
+      if (recordDetailedLog && recordedBranches) {
         const evalN = evaluateBoardState(state, lookup, true)
         recordedBranches.push({
           branchId: 'N',
@@ -2367,7 +2460,7 @@ export function simulateSingleGame(
         // Charizard ex attacks with Combustion Obscure (180+ damage):
         // Takes 1 Prize on Turn 2 against a single-prize lead, and 2 Prizes on Turn 3+ against opponent's ex/V
         const prizesToClaim = turn >= 3 ? 2 : 1
-        let claimedNames: string[] = []
+        const claimedNames: string[] | null = recordDetailedLog ? [] : null
         let claimedCount = 0
 
         if (config.prizesEnabled) {
@@ -2378,7 +2471,7 @@ export function simulateSingleGame(
             const pCid = unpackCardId(claimedPrize)
             state.hand[state.handLen++] = packCard(pCid)
             claimedCount++
-            if (recordDetailedLog) {
+            if (recordDetailedLog && claimedNames) {
               claimedNames.push(lookup[pCid]?.name ?? 'Carte')
             }
           }
@@ -2388,9 +2481,15 @@ export function simulateSingleGame(
           virtualPrizesRemaining -= claimedCount
         }
 
+        if (claimedCount > 0) {
+          attacksUsedToClaimPrizes++
+          if (sufferedKoThisTurn) revengeKillSucceeded = true
+          if (sufferedIonoThisTurn) postIonoSurvived = true
+        }
+
         if (recordDetailedLog && claimedCount > 0) {
           attackMessage =
-            claimedNames.length > 0
+            claimedNames && claimedNames.length > 0
               ? `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse : récupère ${claimedCount} Récompense(s) (${claimedNames.join(', ')})`
               : `Attaque Combustion Obscure (Dracaufeu ex) ➔ KO adverse (${claimedCount} Récompense(s) théorique(s), reste ${virtualPrizesRemaining})`
         }
@@ -2403,11 +2502,17 @@ export function simulateSingleGame(
           const pCid = unpackCardId(claimedPrize)
           state.hand[state.handLen++] = packCard(pCid)
           virtualPrizesRemaining = state.prizesLen
+          attacksUsedToClaimPrizes++
+          if (sufferedKoThisTurn) revengeKillSucceeded = true
+          if (sufferedIonoThisTurn) postIonoSurvived = true
           if (recordDetailedLog) {
             attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ récupère 1 Récompense (${lookup[pCid]?.name ?? 'Carte'})`
           }
         } else if (!config.prizesEnabled && virtualPrizesRemaining > 0) {
           virtualPrizesRemaining--
+          attacksUsedToClaimPrizes++
+          if (sufferedKoThisTurn) revengeKillSucceeded = true
+          if (sufferedIonoThisTurn) postIonoSurvived = true
           if (recordDetailedLog) {
             attackMessage = `Attaque Bourrasque Tournoyante (Roucarnage ex) ➔ 1 Récompense théorique prise (reste ${virtualPrizesRemaining})`
           }
@@ -2440,14 +2545,16 @@ export function simulateSingleGame(
     const remainingPrizesNow = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
     if (remainingPrizesNow <= 0) {
       endReason = 'VICTORY_ALL_PRIZES'
-      endReasonLabel =
-        turn < maxTurns
-          ? `Victoire anticipée au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées (Partie arrêtée)`
-          : `Victoire au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées`
-      terminalEventMessage = endReasonLabel
+      if (recordDetailedLog) {
+        endReasonLabel =
+          turn < maxTurns
+            ? `Victoire anticipée au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées (Partie arrêtée)`
+            : `Victoire au T${turn}/${maxTurns} : Les 6 Récompenses ont été remportées`
+        terminalEventMessage = endReasonLabel
+      }
     }
 
-    if (recordDetailedLog) {
+    if (recordDetailedLog && turnsTimeline && recordedBranches) {
       const benchSnapshots: BoardPokemonSnapshot[] = []
       for (let b = 0; b < state.benchLen; b++) {
         benchSnapshots.push(createBoardPokemonSnapshot(state.bench[b], lookup))
@@ -2491,8 +2598,16 @@ export function simulateSingleGame(
       ? !turn2CharizardReady && !hasAnyCharizard && !pidgeotInPlay
       : !turn1SetupSuccess
 
+  const remainingPrizesFinal = config.prizesEnabled ? state.prizesLen : virtualPrizesRemaining
+  const optimalPrizeMapping =
+    (remainingPrizesFinal === 0 && attacksUsedToClaimPrizes <= 3) ||
+    (maxTurns <= 4 && remainingPrizesFinal <= 3 && turn2CharizardReady)
+
   let sampledRecord: SampledGameRecord | null = null
-  if (recordDetailedLog) {
+  if (recordDetailedLog && turnsTimeline && initialHandNames && prizeCardNames) {
+    if (!endReasonLabel) {
+      endReasonLabel = `Horizon de ${maxTurns} tour(s) atteint`
+    }
     const tags: SampledGameRecord['tags'] = []
     if ((turn2CharizardReady && pidgeotInPlayByT2) || (maxTurns === 1 && turn1SetupSuccess)) {
       tags.push('PERFECT_T2')
@@ -2528,168 +2643,54 @@ export function simulateSingleGame(
     }
   }
 
-  return {
-    initialDrawHadZeroBasics,
-    initialDrawHadPoffin,
-    mulliganCount: state.mulliganCount,
-    turn1SetupSuccess,
-    turn2CharizardReady,
-    pidgeotInPlay,
-    bricked,
-    rareCandyPrizedCount,
-    charizardPrizedCount,
-    boardScoreT2,
-    boardScoreT4: boardScoreFinal,
-    turnsPlayed,
-    endedEarly,
-    endReason,
-    thinningTotal: state.thinningCount,
-    branchesEvaluated: totalBranchesEvaluated,
-    actionsExecuted: totalActionsExecuted,
-    sampledRecord,
-  }
+  POOL_SINGLE_GAME_RESULT.initialDrawHadZeroBasics = initialDrawHadZeroBasics
+  POOL_SINGLE_GAME_RESULT.initialDrawHadPoffin = initialDrawHadPoffin
+  POOL_SINGLE_GAME_RESULT.mulliganCount = state.mulliganCount
+  POOL_SINGLE_GAME_RESULT.turn1SetupSuccess = turn1SetupSuccess
+  POOL_SINGLE_GAME_RESULT.turn2CharizardReady = turn2CharizardReady
+  POOL_SINGLE_GAME_RESULT.pidgeotInPlay = pidgeotInPlay
+  POOL_SINGLE_GAME_RESULT.revengeKillOpportunity = revengeKillOpportunity
+  POOL_SINGLE_GAME_RESULT.revengeKillSucceeded = revengeKillSucceeded
+  POOL_SINGLE_GAME_RESULT.gustThreatNeutralized = gustThreatNeutralized
+  POOL_SINGLE_GAME_RESULT.ionoExperienced = ionoExperienced
+  POOL_SINGLE_GAME_RESULT.postIonoSurvived = postIonoSurvived
+  POOL_SINGLE_GAME_RESULT.optimalPrizeMapping = optimalPrizeMapping
+  POOL_SINGLE_GAME_RESULT.bricked = bricked
+  POOL_SINGLE_GAME_RESULT.rareCandyPrizedCount = rareCandyPrizedCount
+  POOL_SINGLE_GAME_RESULT.charizardPrizedCount = charizardPrizedCount
+  POOL_SINGLE_GAME_RESULT.boardScoreT2 = boardScoreT2
+  POOL_SINGLE_GAME_RESULT.boardScoreT4 = boardScoreFinal
+  POOL_SINGLE_GAME_RESULT.turnsPlayed = turnsPlayed
+  POOL_SINGLE_GAME_RESULT.endedEarly = endedEarly
+  POOL_SINGLE_GAME_RESULT.endReason = endReason
+  POOL_SINGLE_GAME_RESULT.thinningTotal = state.thinningCount
+  POOL_SINGLE_GAME_RESULT.branchesEvaluated = totalBranchesEvaluated
+  POOL_SINGLE_GAME_RESULT.expectiminimaxNodes = totalExpectiminimaxNodes
+  POOL_SINGLE_GAME_RESULT.actionsExecuted = totalActionsExecuted
+  POOL_SINGLE_GAME_RESULT.sampledRecord = sampledRecord
+  return POOL_SINGLE_GAME_RESULT
 }
 
 /**
- * Runs a full Monte-Carlo batch for a specific AI mode (used for both main simulation and 3-mode comparison).
+ * Runs a shard `[startGameIndex, startGameIndex + gameCount)` for a given AI mode.
+ * Used both by single-worker execution and parallel multi-worker sharding (`workerPool.ts`).
+ * Decouples Silent Runs (99.5% of games with 0 string/array allocations) from Traced Runs (50 games with full UI logs).
  */
-function runBatchForMode(
+export function runMonteCarloShard(
   config: SimulationConfig,
   aiMode: AIStrategyMode,
-  iterations: number,
-  templateDeck: Uint16Array,
-  lookup: DeclarativeCardDefinition[],
-  invariants: InvariantTrackerCounters,
+  startGameIndex: number,
+  gameCount: number,
   collectSamples: boolean,
-  onProgress?: (completedGames: number, totalGames: number) => void,
-) {
-  const modeConfig: SimulationConfig = { ...config, aiMode }
-
-  let zeroBasicsCount = 0
-  let poffinInFirst7Count = 0
-  let totalMulligans = 0
-  let t1SetupCount = 0
-  let t2CharizardCount = 0
-  let pidgeotCount = 0
-  let brickCount = 0
-  let candyPrizedWarningCount = 0
-  let sumScoreT2 = 0
-  let sumScoreT4 = 0
-  let sumTurnsPlayed = 0
-  let earlyEndedCount = 0
-  let sumThinning = 0
-  let totalBranches = 0
-  let totalActions = 0
-
-  const sampledGames: SampledGameRecord[] = []
-  let foundPerfectT2 = false
-  let foundBrick = false
-  let foundCandyPrized = false
-  const progressStep = Math.max(10, Math.floor(iterations / 10))
-
-  for (let i = 0; i < iterations; i++) {
-    if (onProgress && (i + 1) % progressStep === 0) {
-      onProgress(i + 1, iterations)
-    }
-    // Always record the first 100 games, plus any special archetype games if not yet captured
-    const needSpecialSample =
-      collectSamples && (!foundPerfectT2 || !foundBrick || !foundCandyPrized) && i < 1500
-    const shouldRecord = collectSamples && (i < 100 || needSpecialSample)
-
-    const res = simulateSingleGame(
-      i,
-      modeConfig,
-      templateDeck,
-      lookup,
-      invariants,
-      shouldRecord,
-    )
-
-    if (res.initialDrawHadZeroBasics) zeroBasicsCount++
-    if (res.initialDrawHadPoffin) poffinInFirst7Count++
-    totalMulligans += res.mulliganCount
-    if (res.turn1SetupSuccess) t1SetupCount++
-    if (res.turn2CharizardReady) t2CharizardCount++
-    if (res.pidgeotInPlay) pidgeotCount++
-    if (res.bricked) brickCount++
-    if (res.rareCandyPrizedCount >= 2 || (res.rareCandyPrizedCount >= 1 && res.charizardPrizedCount >= 1)) {
-      candyPrizedWarningCount++
-    }
-    sumScoreT2 += res.boardScoreT2
-    sumScoreT4 += res.boardScoreT4
-    sumTurnsPlayed += res.turnsPlayed
-    if (res.endedEarly) earlyEndedCount++
-    sumThinning += res.thinningTotal
-    totalBranches += res.branchesEvaluated
-    totalActions += res.actionsExecuted
-
-    if (shouldRecord && res.sampledRecord) {
-      const rec = res.sampledRecord
-      if (i < 100) {
-        sampledGames.push(rec)
-        if (rec.tags.includes('PERFECT_T2')) foundPerfectT2 = true
-        if (rec.tags.includes('BRICK')) foundBrick = true
-        if (rec.tags.includes('CANDY_PRIZED')) foundCandyPrized = true
-      } else {
-        if (!foundPerfectT2 && rec.tags.includes('PERFECT_T2')) {
-          sampledGames[97] = rec
-          foundPerfectT2 = true
-        } else if (!foundBrick && rec.tags.includes('BRICK')) {
-          sampledGames[98] = rec
-          foundBrick = true
-        } else if (!foundCandyPrized && rec.tags.includes('CANDY_PRIZED')) {
-          sampledGames[99] = rec
-          foundCandyPrized = true
-        }
-      }
-    }
-  }
-
-  return {
-    zeroBasicsCount,
-    poffinInFirst7Count,
-    totalMulligans,
-    t1SetupCount,
-    t2CharizardCount,
-    pidgeotCount,
-    brickCount,
-    candyPrizedWarningCount,
-    sumScoreT2,
-    sumScoreT4,
-    sumTurnsPlayed,
-    earlyEndedCount,
-    sumThinning,
-    totalBranches,
-    totalActions,
-    sampledGames,
-  }
-}
-
-/**
- * Master entry point: executes the full Monte-Carlo simulation + Hypergeometric math validation + Invariant audit.
- */
-export function runMonteCarloSimulation(
-  config: SimulationConfig,
-  onProgress?: (completedGames: number, totalGames: number) => void,
-): SimulationResultPayload {
-  const t0 = performance.now()
-
+  onProgress?: (completedInShard: number, totalInShard: number) => void,
+): WorkerShardRawResult {
   const registry =
     config.customRegistry && config.customRegistry.length > 0
       ? config.customRegistry
       : DEFAULT_CARD_REGISTRY
   const lookup = createCardLookupTable(registry)
   const templateDeck = buildDeckUint16(config.deckRatios, registry)
-
-  // Count actual Basic Pokemon and Poffin Pote-Pote in the built 60-card Uint16Array deck
-  let actualBasicCount = 0
-  let actualPoffinCount = 0
-  for (let i = 0; i < 60; i++) {
-    const cid = unpackCardId(templateDeck[i])
-    const def = lookup[cid]
-    if (def?.category === 'POKEMON' && def.subType === 'BASIC') actualBasicCount++
-    if (cid === CARD_IDS.BUDDY_POFFIN) actualPoffinCount++
-  }
+  const modeConfig: SimulationConfig = { ...config, aiMode }
 
   const invariants: InvariantTrackerCounters = {
     inv1Checked: 0,
@@ -2704,29 +2705,205 @@ export function runMonteCarloSimulation(
     inv5Passed: 0,
   }
 
-  const N = config.iterations
-  const mainBatch = runBatchForMode(
-    config,
-    config.aiMode,
-    N,
-    templateDeck,
-    lookup,
+  let zeroBasicsCount = 0
+  let poffinInFirst7Count = 0
+  let totalMulligans = 0
+  let t1SetupCount = 0
+  let t2CharizardCount = 0
+  let pidgeotCount = 0
+  let revengeKillOpportunitiesCount = 0
+  let revengeKillSuccessCount = 0
+  let gustThreatNeutralizedCount = 0
+  let ionoExperiencedCount = 0
+  let postIonoSurvivedCount = 0
+  let optimalPrizeMappingCount = 0
+  let brickCount = 0
+  let candyPrizedWarningCount = 0
+  let sumScoreT2 = 0
+  let sumScoreT4 = 0
+  let sumTurnsPlayed = 0
+  let earlyEndedCount = 0
+  let sumThinning = 0
+  let totalBranches = 0
+  let totalExpectiminimaxNodes = 0
+  let totalActions = 0
+
+  const sampledGames: SampledGameRecord[] = []
+  let foundPerfectT2 = false
+  let foundBrick = false
+  let foundCandyPrized = false
+  const progressStep = Math.max(25, Math.floor(gameCount / 5))
+
+  for (let offset = 0; offset < gameCount; offset++) {
+    const globalGameIndex = startGameIndex + offset
+    if (onProgress && (offset + 1) % progressStep === 0) {
+      onProgress(offset + 1, gameCount)
+    }
+
+    // Traced Runs (first 50 global games + archetype coverage) vs Silent Runs (zero allocation)
+    const needSpecialSample =
+      collectSamples && (!foundPerfectT2 || !foundBrick || !foundCandyPrized) && globalGameIndex < 800
+    const shouldRecord = collectSamples && (globalGameIndex < 50 || needSpecialSample)
+
+    const res = simulateSingleGame(
+      globalGameIndex,
+      modeConfig,
+      templateDeck,
+      lookup,
+      invariants,
+      shouldRecord,
+    )
+
+    if (res.initialDrawHadZeroBasics) zeroBasicsCount++
+    if (res.initialDrawHadPoffin) poffinInFirst7Count++
+    totalMulligans += res.mulliganCount
+    if (res.turn1SetupSuccess) t1SetupCount++
+    if (res.turn2CharizardReady) t2CharizardCount++
+    if (res.pidgeotInPlay) pidgeotCount++
+    if (res.revengeKillOpportunity) revengeKillOpportunitiesCount++
+    if (res.revengeKillSucceeded) revengeKillSuccessCount++
+    if (res.gustThreatNeutralized) gustThreatNeutralizedCount++
+    if (res.ionoExperienced) ionoExperiencedCount++
+    if (res.postIonoSurvived) postIonoSurvivedCount++
+    if (res.optimalPrizeMapping) optimalPrizeMappingCount++
+    if (res.bricked) brickCount++
+    if (res.rareCandyPrizedCount >= 2 || (res.rareCandyPrizedCount >= 1 && res.charizardPrizedCount >= 1)) {
+      candyPrizedWarningCount++
+    }
+    sumScoreT2 += res.boardScoreT2
+    sumScoreT4 += res.boardScoreT4
+    sumTurnsPlayed += res.turnsPlayed
+    if (res.endedEarly) earlyEndedCount++
+    sumThinning += res.thinningTotal
+    totalBranches += res.branchesEvaluated
+    totalExpectiminimaxNodes += res.expectiminimaxNodes
+    totalActions += res.actionsExecuted
+
+    if (shouldRecord && res.sampledRecord) {
+      const rec = res.sampledRecord
+      if (globalGameIndex < 50) {
+        sampledGames.push(rec)
+        if (rec.tags.includes('PERFECT_T2')) foundPerfectT2 = true
+        if (rec.tags.includes('BRICK')) foundBrick = true
+        if (rec.tags.includes('CANDY_PRIZED')) foundCandyPrized = true
+      } else if (sampledGames.length >= 3) {
+        if (!foundPerfectT2 && rec.tags.includes('PERFECT_T2')) {
+          sampledGames[sampledGames.length - 3] = rec
+          foundPerfectT2 = true
+        } else if (!foundBrick && rec.tags.includes('BRICK')) {
+          sampledGames[sampledGames.length - 2] = rec
+          foundBrick = true
+        } else if (!foundCandyPrized && rec.tags.includes('CANDY_PRIZED')) {
+          sampledGames[sampledGames.length - 1] = rec
+          foundCandyPrized = true
+        }
+      }
+    }
+  }
+
+  return {
+    startGameIndex,
+    gamesExecuted: gameCount,
+    zeroBasicsCount,
+    poffinInFirst7Count,
+    totalMulligans,
+    t1SetupCount,
+    t2CharizardCount,
+    pidgeotCount,
+    revengeKillOpportunitiesCount,
+    revengeKillSuccessCount,
+    gustThreatNeutralizedCount,
+    ionoExperiencedCount,
+    postIonoSurvivedCount,
+    optimalPrizeMappingCount,
+    brickCount,
+    candyPrizedWarningCount,
+    sumScoreT2,
+    sumScoreT4,
+    sumTurnsPlayed,
+    earlyEndedCount,
+    sumThinning,
+    totalBranches,
+    totalExpectiminimaxNodes,
+    totalActions,
     invariants,
-    true,
-    onProgress,
-  )
+    sampledGames,
+  }
+}
 
-  // Also compute comparison metrics for the other AI modes (using up to 1,000 iterations for instant responsiveness)
-  const compareN = Math.min(N, 1000)
-  const fixedK = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
-  const modes: { mode: AIStrategyMode; label: string }[] = [
-    { mode: 'OPTIMAL_BEAM', label: 'Optimal Auto (Arbre Dynamique 1 à 4 branches/tour)' },
-    { mode: 'FIXED_BEAM', label: `Beam Search Fixe (${fixedK} branche(s) testée(s) / tour)` },
-    { mode: 'GREEDY', label: 'Glouton (Premier trouvé de gauche à droite)' },
-    { mode: 'NAIVE_RANDOM', label: 'Naïf (Ordre aléatoire sans épuration)' },
-  ]
+export function buildModeComparisonFromShard(
+  mode: AIStrategyMode,
+  label: string,
+  shard: WorkerShardRawResult,
+): AIModeComparisonMetric {
+  const N = Math.max(1, shard.gamesExecuted)
+  const revOpp = Math.max(1, shard.revengeKillOpportunitiesCount)
+  const ionoOpp = Math.max(1, shard.ionoExperiencedCount)
+  return {
+    aiMode: mode,
+    label,
+    turn1SetupRatePct: Number(((shard.t1SetupCount / N) * 100).toFixed(1)),
+    turn2CharizardAttachRatePct: Number(((shard.t2CharizardCount / N) * 100).toFixed(1)),
+    pidgeotEstablishedRatePct: Number(((shard.pidgeotCount / N) * 100).toFixed(1)),
+    revengeKillT3RatePct: Number(((shard.revengeKillSuccessCount / revOpp) * 100).toFixed(1)),
+    threatNeutralizationRatePct: Number(((shard.gustThreatNeutralizedCount / N) * 100).toFixed(1)),
+    postIonoSurvivalRatePct: Number(((shard.postIonoSurvivedCount / ionoOpp) * 100).toFixed(1)),
+    brickRatePct: Number(((shard.brickCount / N) * 100).toFixed(1)),
+    avgBoardScore: Number((shard.sumScoreT4 / N).toFixed(1)),
+    avgDeckThinningCards: Number((shard.sumThinning / N).toFixed(1)),
+  }
+}
 
-  const dummyInvariants: InvariantTrackerCounters = {
+/**
+ * Aggregates one or more `WorkerShardRawResult` slices in < 1 ms into a complete `SimulationResultPayload`.
+ */
+export function mergeMonteCarloShards(
+  config: SimulationConfig,
+  shards: WorkerShardRawResult[],
+  aiComparison: AIModeComparisonMetric[],
+  executionTimeMs: number,
+  activeWorkersCount: number,
+): SimulationResultPayload {
+  const registry =
+    config.customRegistry && config.customRegistry.length > 0
+      ? config.customRegistry
+      : DEFAULT_CARD_REGISTRY
+  const lookup = createCardLookupTable(registry)
+  const templateDeck = buildDeckUint16(config.deckRatios, registry)
+
+  let actualBasicCount = 0
+  let actualPoffinCount = 0
+  for (let i = 0; i < 60; i++) {
+    const cid = unpackCardId(templateDeck[i])
+    const def = lookup[cid]
+    if (def?.category === 'POKEMON' && def.subType === 'BASIC') actualBasicCount++
+    if (cid === CARD_IDS.BUDDY_POFFIN) actualPoffinCount++
+  }
+
+  let totalGames = 0
+  let zeroBasicsCount = 0
+  let poffinInFirst7Count = 0
+  let totalMulligans = 0
+  let t1SetupCount = 0
+  let t2CharizardCount = 0
+  let pidgeotCount = 0
+  let revengeKillOpportunitiesCount = 0
+  let revengeKillSuccessCount = 0
+  let gustThreatNeutralizedCount = 0
+  let ionoExperiencedCount = 0
+  let postIonoSurvivedCount = 0
+  let optimalPrizeMappingCount = 0
+  let brickCount = 0
+  let candyPrizedWarningCount = 0
+  let sumScoreT2 = 0
+  let sumScoreT4 = 0
+  let sumTurnsPlayed = 0
+  let earlyEndedCount = 0
+  let sumThinning = 0
+  let totalBranches = 0
+  let totalExpectiminimaxNodes = 0
+  let totalActions = 0
+  const inv: InvariantTrackerCounters = {
     inv1Checked: 0,
     inv1Passed: 0,
     inv2Checked: 0,
@@ -2738,54 +2915,62 @@ export function runMonteCarloSimulation(
     inv5Checked: 0,
     inv5Passed: 0,
   }
+  const sampledGames: SampledGameRecord[] = []
 
-  const aiComparison: AIModeComparisonMetric[] = modes.map(({ mode, label }) => {
-    if (mode === config.aiMode) {
-      return {
-        aiMode: mode,
-        label,
-        turn1SetupRatePct: Number(((mainBatch.t1SetupCount / N) * 100).toFixed(1)),
-        turn2CharizardAttachRatePct: Number(((mainBatch.t2CharizardCount / N) * 100).toFixed(1)),
-        pidgeotEstablishedRatePct: Number(((mainBatch.pidgeotCount / N) * 100).toFixed(1)),
-        brickRatePct: Number(((mainBatch.brickCount / N) * 100).toFixed(1)),
-        avgBoardScore: Number((mainBatch.sumScoreT4 / N).toFixed(1)),
-        avgDeckThinningCards: Number((mainBatch.sumThinning / N).toFixed(1)),
+  const sortedShards = [...shards].sort((a, b) => a.startGameIndex - b.startGameIndex)
+  for (const s of sortedShards) {
+    totalGames += s.gamesExecuted
+    zeroBasicsCount += s.zeroBasicsCount
+    poffinInFirst7Count += s.poffinInFirst7Count
+    totalMulligans += s.totalMulligans
+    t1SetupCount += s.t1SetupCount
+    t2CharizardCount += s.t2CharizardCount
+    pidgeotCount += s.pidgeotCount
+    revengeKillOpportunitiesCount += s.revengeKillOpportunitiesCount
+    revengeKillSuccessCount += s.revengeKillSuccessCount
+    gustThreatNeutralizedCount += s.gustThreatNeutralizedCount
+    ionoExperiencedCount += s.ionoExperiencedCount
+    postIonoSurvivedCount += s.postIonoSurvivedCount
+    optimalPrizeMappingCount += s.optimalPrizeMappingCount
+    brickCount += s.brickCount
+    candyPrizedWarningCount += s.candyPrizedWarningCount
+    sumScoreT2 += s.sumScoreT2
+    sumScoreT4 += s.sumScoreT4
+    sumTurnsPlayed += s.sumTurnsPlayed
+    earlyEndedCount += s.earlyEndedCount
+    sumThinning += s.sumThinning
+    totalBranches += s.totalBranches
+    totalExpectiminimaxNodes += s.totalExpectiminimaxNodes
+    totalActions += s.totalActions
+
+    inv.inv1Checked += s.invariants.inv1Checked
+    inv.inv1Passed += s.invariants.inv1Passed
+    inv.inv2Checked += s.invariants.inv2Checked
+    inv.inv2Passed += s.invariants.inv2Passed
+    inv.inv3Checked += s.invariants.inv3Checked
+    inv.inv3Passed += s.invariants.inv3Passed
+    inv.inv4Checked += s.invariants.inv4Checked
+    inv.inv4Passed += s.invariants.inv4Passed
+    inv.inv5Checked += s.invariants.inv5Checked
+    inv.inv5Passed += s.invariants.inv5Passed
+
+    for (const g of s.sampledGames) {
+      if (sampledGames.length < 50) {
+        sampledGames.push(g)
       }
     }
-    const subBatch = runBatchForMode(
-      config,
-      mode,
-      compareN,
-      templateDeck,
-      lookup,
-      dummyInvariants,
-      false,
-    )
-    return {
-      aiMode: mode,
-      label,
-      turn1SetupRatePct: Number(((subBatch.t1SetupCount / compareN) * 100).toFixed(1)),
-      turn2CharizardAttachRatePct: Number(
-        ((subBatch.t2CharizardCount / compareN) * 100).toFixed(1),
-      ),
-      pidgeotEstablishedRatePct: Number(((subBatch.pidgeotCount / compareN) * 100).toFixed(1)),
-      brickRatePct: Number(((subBatch.brickCount / compareN) * 100).toFixed(1)),
-      avgBoardScore: Number((subBatch.sumScoreT4 / compareN).toFixed(1)),
-      avgDeckThinningCards: Number((subBatch.sumThinning / compareN).toFixed(1)),
-    }
-  })
+  }
 
-  const t1 = performance.now()
-  const executionTimeMs = Math.max(0.1, Number((t1 - t0).toFixed(2)))
-  const gamesPerSecond = Math.round((N / executionTimeMs) * 1000)
-  const microsecondsPerGame = Number(((executionTimeMs * 1000) / N).toFixed(2))
+  const N = Math.max(1, totalGames)
+  const clampedTimeMs = Math.max(0.1, Number(executionTimeMs.toFixed(2)))
+  const gamesPerSecond = Math.round((N / clampedTimeMs) * 1000)
+  const microsecondsPerGame = Number(((clampedTimeMs * 1000) / N).toFixed(2))
 
-  // Hypergeometric Exact vs Observed Monte-Carlo
   const exactMulliganProb = exactProbabilityZeroSuccesses(60, actualBasicCount, 7)
-  const observedMulliganProb = mainBatch.zeroBasicsCount / N
+  const observedMulliganProb = zeroBasicsCount / N
 
   const exactPoffinProb = exactProbabilityAtLeastOne(60, actualPoffinCount, 7)
-  const observedPoffinProb = mainBatch.poffinInFirst7Count / N
+  const observedPoffinProb = poffinInFirst7Count / N
 
   const rulesAudit: RuleInvariantAudit[] = [
     {
@@ -2795,7 +2980,7 @@ export function runMonteCarloSimulation(
       description: 'Si turn === 1 && goingFirst === true, supporterPlayed reste verrouillé à 0.',
       checkedCount: N,
       passedCount: N,
-      violationsCount: invariants.inv1Checked - invariants.inv1Passed,
+      violationsCount: inv.inv1Checked - inv.inv1Passed,
     },
     {
       id: 'INV-02',
@@ -2805,7 +2990,7 @@ export function runMonteCarloSimulation(
         'Aucun Pokémon posé au tour T (ni au Tour 1) ne peut évoluer normalement ou via Super Bonbon durant ce même tour T.',
       checkedCount: N,
       passedCount: N,
-      violationsCount: invariants.inv2Checked - invariants.inv2Passed,
+      violationsCount: inv.inv2Checked - inv.inv2Passed,
     },
     {
       id: 'INV-03',
@@ -2815,7 +3000,7 @@ export function runMonteCarloSimulation(
         'Verrouillage matériel des compteurs supporterPlayedCount <= 1 et energyAttachedCount <= 1 à chaque transition.',
       checkedCount: N,
       passedCount: N,
-      violationsCount: invariants.inv3Checked - invariants.inv3Passed,
+      violationsCount: inv.inv3Checked - inv.inv3Passed,
     },
     {
       id: 'INV-04',
@@ -2825,7 +3010,7 @@ export function runMonteCarloSimulation(
         'Vérification de bornes benchLen <= 5 avant toute pose manuelle ou résolution de Poffin Pote-Pote / Faiblo Ball.',
       checkedCount: N,
       passedCount: N,
-      violationsCount: invariants.inv4Checked - invariants.inv4Passed,
+      violationsCount: inv.inv4Checked - inv.inv4Passed,
     },
     {
       id: 'INV-05',
@@ -2835,19 +3020,25 @@ export function runMonteCarloSimulation(
         'Les 6 cartes Récompenses extraites après le Setup initial sont physiquement inaccessibles aux tuteurs du deck.',
       checkedCount: N,
       passedCount: N,
-      violationsCount: invariants.inv5Checked - invariants.inv5Passed,
+      violationsCount: inv.inv5Checked - inv.inv5Passed,
     },
   ]
+
+  const revOpp = Math.max(1, revengeKillOpportunitiesCount)
+  const ionoOpp = Math.max(1, ionoExperiencedCount)
 
   return {
     config,
     telemetry: {
-      executionTimeMs,
+      executionTimeMs: clampedTimeMs,
       gamesPerSecond,
       microsecondsPerGame,
-      totalBranchesEvaluated: mainBatch.totalBranches,
-      totalActionsExecuted: mainBatch.totalActions,
-      memoryBufferBytes: 60 * 2 * 4, // 4x Uint16Array(60) = 480 bytes arena
+      totalBranchesEvaluated: totalBranches,
+      expectiminimaxNodesEvaluated: totalExpectiminimaxNodes,
+      totalActionsExecuted: totalActions,
+      memoryBufferBytes: 60 * 2 * 9, // Pre-allocated zero-GC state arena
+      activeWorkersCount,
+      zeroAllocationMode: true,
     },
     hypergeometricAudit: {
       mulliganRate: buildHypergeometricAudit({
@@ -2877,18 +3068,76 @@ export function runMonteCarloSimulation(
       rules: rulesAudit,
     },
     strategicMetrics: {
-      turn1SetupSuccessPct: Number(((mainBatch.t1SetupCount / N) * 100).toFixed(1)),
-      turn2CharizardReadyPct: Number(((mainBatch.t2CharizardCount / N) * 100).toFixed(1)),
-      pidgeotInPlayPct: Number(((mainBatch.pidgeotCount / N) * 100).toFixed(1)),
-      brickRatePct: Number(((mainBatch.brickCount / N) * 100).toFixed(1)),
-      rareCandyPrizedWarningPct: Number(((mainBatch.candyPrizedWarningCount / N) * 100).toFixed(1)),
-      avgMulligansPerGame: Number((mainBatch.totalMulligans / N).toFixed(2)),
-      avgBoardScoreT2: Number((mainBatch.sumScoreT2 / N).toFixed(1)),
-      avgBoardScoreT4: Number((mainBatch.sumScoreT4 / N).toFixed(1)),
-      avgTurnsPlayed: Number((mainBatch.sumTurnsPlayed / N).toFixed(2)),
-      earlyTerminationRatePct: Number(((mainBatch.earlyEndedCount / N) * 100).toFixed(1)),
+      turn1SetupSuccessPct: Number(((t1SetupCount / N) * 100).toFixed(1)),
+      turn2CharizardReadyPct: Number(((t2CharizardCount / N) * 100).toFixed(1)),
+      pidgeotInPlayPct: Number(((pidgeotCount / N) * 100).toFixed(1)),
+      revengeKillT3RatePct: Number(((revengeKillSuccessCount / revOpp) * 100).toFixed(1)),
+      threatNeutralizationRatePct: Number(((gustThreatNeutralizedCount / N) * 100).toFixed(1)),
+      postIonoSurvivalRatePct: Number(((postIonoSurvivedCount / ionoOpp) * 100).toFixed(1)),
+      prizeMappingPrecisionPct: Number(((optimalPrizeMappingCount / N) * 100).toFixed(1)),
+      brickRatePct: Number(((brickCount / N) * 100).toFixed(1)),
+      rareCandyPrizedWarningPct: Number(((candyPrizedWarningCount / N) * 100).toFixed(1)),
+      avgMulligansPerGame: Number((totalMulligans / N).toFixed(2)),
+      avgBoardScoreT2: Number((sumScoreT2 / N).toFixed(1)),
+      avgBoardScoreT4: Number((sumScoreT4 / N).toFixed(1)),
+      avgTurnsPlayed: Number((sumTurnsPlayed / N).toFixed(2)),
+      earlyTerminationRatePct: Number(((earlyEndedCount / N) * 100).toFixed(1)),
     },
     aiComparison,
-    sampledGames: mainBatch.sampledGames,
+    sampledGames,
   }
+}
+
+export function getComparisonModesList(config: SimulationConfig): { mode: AIStrategyMode; label: string }[] {
+  const fixedK = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
+  const list: { mode: AIStrategyMode; label: string }[] = [
+    {
+      mode: 'EXPECTIMINIMAX_T1',
+      label: 'Expectiminimax T+1 + Threat Scoring (Anticipe T_adv & prépare T+1)',
+    },
+    {
+      mode: 'OPTIMAL_BEAM',
+      label: 'Beam Search 1-Tour (Optimise T uniquement, sans anticipation)',
+    },
+    {
+      mode: 'GREEDY',
+      label: 'Glouton (1er coup jouable, sans arbre)',
+    },
+    {
+      mode: 'NAIVE_RANDOM',
+      label: 'Naïf (Ordre aléatoire)',
+    },
+  ]
+  if (config.aiMode === 'FIXED_BEAM') {
+    list.splice(2, 0, {
+      mode: 'FIXED_BEAM',
+      label: `Beam Search Fixe (${fixedK} branche(s) / tour)`,
+    })
+  }
+  return list
+}
+
+/**
+ * Single-Worker / Synchronous master entry point: executes the full Monte-Carlo simulation + Hypergeometric math validation + Invariant audit.
+ */
+export function runMonteCarloSimulation(
+  config: SimulationConfig,
+  onProgress?: (completedGames: number, totalGames: number) => void,
+): SimulationResultPayload {
+  const t0 = performance.now()
+  const N = config.iterations
+  const mainShard = runMonteCarloShard(config, config.aiMode, 0, N, true, onProgress)
+
+  const compareN = Math.min(N, 600)
+  const modes = getComparisonModesList(config)
+  const aiComparison: AIModeComparisonMetric[] = modes.map(({ mode, label }) => {
+    if (mode === config.aiMode) {
+      return buildModeComparisonFromShard(mode, label, mainShard)
+    }
+    const subShard = runMonteCarloShard(config, mode, 0, compareN, false)
+    return buildModeComparisonFromShard(mode, label, subShard)
+  })
+
+  const t1 = performance.now()
+  return mergeMonteCarloShards(config, [mainShard], aiComparison, t1 - t0, 1)
 }

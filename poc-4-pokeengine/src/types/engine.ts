@@ -82,7 +82,25 @@ export interface DeclarativeCardDefinition {
   primitives: AtomicEffectPrimitive[]
 }
 
-export type AIStrategyMode = 'OPTIMAL_BEAM' | 'FIXED_BEAM' | 'GREEDY' | 'NAIVE_RANDOM'
+export type AIStrategyMode =
+  | 'EXPECTIMINIMAX_T1'
+  | 'OPTIMAL_BEAM'
+  | 'FIXED_BEAM'
+  | 'GREEDY'
+  | 'NAIVE_RANDOM'
+
+export type WorkerExecutionMode = 'MULTI_WORKER' | 'SINGLE_WORKER'
+
+export type OpponentArchetype =
+  | 'RAGING_BOLT_AGGRO'
+  | 'CHARIZARD_DRAGAPULT_SETUP'
+  | 'GARDEVOIR_DISRUPTION'
+
+export type OpponentPokemonRole =
+  | 'LOADED_ATTACKER'
+  | 'ENGINE_SUPPORT'
+  | 'BASIC_EVOLVER'
+  | 'TWO_PRIZE_LIABILITY'
 
 export type Turn3DisruptionMode = 'NONE' | 'IONO_HAND_TO_3' | 'KO_ACTIVE_POKEMON'
 
@@ -97,6 +115,8 @@ export interface SimulationConfig {
   maxTurns: number // 1..10 turns (early stop if game ends before maxTurns)
   aiMode: AIStrategyMode
   fixedBeamWidth: number // 1..8 branches tested every turn when aiMode === 'FIXED_BEAM'
+  workerMode: WorkerExecutionMode // 'MULTI_WORKER' (4..8 parallel workers) | 'SINGLE_WORKER'
+  opponentArchetype: OpponentArchetype
   goingFirst: boolean
   prizesEnabled: boolean
   turn3Disruption: Turn3DisruptionMode
@@ -121,6 +141,34 @@ export interface BoardPokemonSnapshot {
   abilityUsedThisTurn: boolean
 }
 
+export interface OpponentPokemonSnapshot {
+  slotIndex: number // 0 = Active, 1..5 = Bench
+  name: string
+  hp: number
+  attachedEnergies: number
+  prizeValue: 1 | 2
+  role: OpponentPokemonRole
+  roleLabel: string
+  threatScore: number
+  threatBreakdown: string[]
+  targetedAndKnockedOut?: boolean
+}
+
+export interface ExpectiminimaxProjectionRecord {
+  immediateScore: number // V_immediat(S_T)
+  energyBankingBonus: number // +30 pts if manual energy banked on backup attacker
+  resourceConservationBonus: number // +25 pts if T+1 Supporter / Rare Candy preserved in hand
+  threatReductionBonus: number // Threat points eliminated on opponent board
+  opponentKoProbPct: number // p_KO (%)
+  opponentIonoProbPct: number // p_iono (%)
+  opponentGustProbPct: number // p_gust (%)
+  reboundExpectedScore: number // E[V_rebond(S_{T+1})]
+  revengeKillReadyAtTPlus1: boolean // Can immediately counter-attack after Active KO
+  postIonoRecoveryReady: boolean // On-board draw engine ready (Pidgeot ex / Fezandipiti ex)
+  totalExpectiminimaxScore: number // U(S_T) = V_immediat + 0.75 * E[V_rebond]
+  summaryLine: string
+}
+
 export interface DecisionBranchRecord {
   branchId: string
   label: string
@@ -129,12 +177,15 @@ export interface DecisionBranchRecord {
   scoreBreakdown: string[]
   actions: string[]
   thinningDelta: number // Cards removed from deck before random draw
+  attackTargetSummary?: string | null // e.g. "Cible : Roucarnage ex adverse via Attrape-Riposte [Menace : 165 pts]"
+  expectiminimax?: ExpectiminimaxProjectionRecord
 }
 
 export interface TurnTimelineRecord {
   turnNumber: number
   drawnCardName: string | null
   disruptionApplied: string | null
+  opponentTurnSummary?: string | null
   attackExecuted: string | null
   terminalEvent: string | null
   deckCountStart: number
@@ -143,6 +194,11 @@ export interface TurnTimelineRecord {
   branches: DecisionBranchRecord[]
   activePokemon: BoardPokemonSnapshot | null
   benchPokemon: BoardPokemonSnapshot[]
+  opponentActivePokemon?: OpponentPokemonSnapshot | null
+  opponentBenchPokemon?: OpponentPokemonSnapshot[]
+  opponentPrizesRemaining?: number
+  prizesKnownByPlayer?: boolean
+  prizeCheckDeductionNote?: string | null
   handCardNames: string[]
   prizesRemaining: number
   supporterPlayedThisTurn: boolean
@@ -159,6 +215,7 @@ export interface SampledGameRecord {
   criticalPrizesCount: number // Rare Candy or Charizard ex in prizes
   rareCandyPrizedCount: number
   charizardPrizedCount: number
+  firstSearchTurn?: number | null // Turn on which first SEARCH_DECK deduced the 6 Prizes
   turn1SetupSuccess: boolean
   turn2CharizardReady: boolean
   pidgeotInPlayByT2: boolean
@@ -202,9 +259,52 @@ export interface AIModeComparisonMetric {
   turn1SetupRatePct: number
   turn2CharizardAttachRatePct: number
   pidgeotEstablishedRatePct: number
+  revengeKillT3RatePct?: number
+  threatNeutralizationRatePct?: number
+  postIonoSurvivalRatePct?: number
   brickRatePct: number
   avgBoardScore: number
   avgDeckThinningCards: number
+}
+
+export interface WorkerShardRawResult {
+  startGameIndex: number
+  gamesExecuted: number
+  zeroBasicsCount: number
+  poffinInFirst7Count: number
+  totalMulligans: number
+  t1SetupCount: number
+  t2CharizardCount: number
+  pidgeotCount: number
+  revengeKillOpportunitiesCount: number
+  revengeKillSuccessCount: number
+  gustThreatNeutralizedCount: number
+  ionoExperiencedCount: number
+  postIonoSurvivedCount: number
+  optimalPrizeMappingCount: number
+  brickCount: number
+  candyPrizedWarningCount: number
+  sumScoreT2: number
+  sumScoreT4: number
+  sumTurnsPlayed: number
+  earlyEndedCount: number
+  sumThinning: number
+  totalBranches: number
+  totalExpectiminimaxNodes: number
+  totalActions: number
+  invariants: {
+    inv1Checked: number
+    inv1Passed: number
+    inv2Checked: number
+    inv2Passed: number
+    inv3Checked: number
+    inv3Passed: number
+    inv4Checked: number
+    inv4Passed: number
+    inv5Checked: number
+    inv5Passed: number
+  }
+  sampledGames: SampledGameRecord[]
 }
 
 export interface SimulationResultPayload {
@@ -214,8 +314,11 @@ export interface SimulationResultPayload {
     gamesPerSecond: number
     microsecondsPerGame: number
     totalBranchesEvaluated: number
+    expectiminimaxNodesEvaluated: number
     totalActionsExecuted: number
     memoryBufferBytes: number
+    activeWorkersCount: number
+    zeroAllocationMode: boolean
   }
   hypergeometricAudit: {
     mulliganRate: HypergeometricComparison
@@ -230,6 +333,10 @@ export interface SimulationResultPayload {
     turn1SetupSuccessPct: number
     turn2CharizardReadyPct: number
     pidgeotInPlayPct: number
+    revengeKillT3RatePct: number
+    threatNeutralizationRatePct: number
+    postIonoSurvivalRatePct: number
+    prizeMappingPrecisionPct: number
     brickRatePct: number
     rareCandyPrizedWarningPct: number
     avgMulligansPerGame: number

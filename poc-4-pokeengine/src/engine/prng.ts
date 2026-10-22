@@ -38,6 +38,24 @@ export class Mulberry32 {
   }
 
   /**
+   * Reseeds the PRNG in-place without allocating a new object
+   */
+  public reseed(seed: number): void {
+    this.state = seed >>> 0
+    if (this.state === 0) {
+      this.state = 0x9e3779b9
+    }
+  }
+
+  public getState(): number {
+    return this.state
+  }
+
+  public setState(rawState: number): void {
+    this.state = rawState >>> 0
+  }
+
+  /**
    * Clones the PRNG at its exact current internal state
    */
   public clone(): Mulberry32 {

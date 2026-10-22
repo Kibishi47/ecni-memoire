@@ -6,14 +6,16 @@ import type {
   SimulationConfig,
   SimulationResultPayload,
 } from '@/types/engine'
-import type { WorkerRequestMessage, WorkerResponseMessage } from '@/worker/simulation.worker'
+import { SimulationWorkerPool } from '@/worker/workerPool'
 
 export function useSimulationWorker() {
   const config = reactive<SimulationConfig>({
     iterations: 10000,
     maxTurns: 4,
-    aiMode: 'OPTIMAL_BEAM',
+    aiMode: 'EXPECTIMINIMAX_T1',
     fixedBeamWidth: 3,
+    workerMode: 'MULTI_WORKER',
+    opponentArchetype: 'RAGING_BOLT_AGGRO',
     goingFirst: false, // 2nd player allows T1 Arven/Supporter by default, toggleable in 1 click
     prizesEnabled: true,
     turn3Disruption: 'NONE',
@@ -30,6 +32,7 @@ export function useSimulationWorker() {
   const isRunning = ref(false)
   const result = ref<SimulationResultPayload | null>(null)
   const totalRunsTriggered = ref(0)
+  const detectedWorkerThreads = ref(4)
 
   // Live notification banner & progress state
   const showStatusBanner = ref(false)
@@ -48,7 +51,7 @@ export function useSimulationWorker() {
   let frameCount = 0
   let lastFpsTimestamp = 0
 
-  let worker: Worker | null = null
+  let workerPool: SimulationWorkerPool | null = null
   let latestRequestId = 0
 
   function startFpsMonitor() {
@@ -73,8 +76,8 @@ export function useSimulationWorker() {
 
   function finalizeSimulationResult(payload: SimulationResultPayload) {
     const elapsedSinceTrigger = performance.now() - runStartTimestamp
-    // Ensure the "Simulation en cours..." banner is perceptible for at least 260ms even on ultra-fast 3ms runs
-    const remainingMinDisplayMs = Math.max(0, 260 - elapsedSinceTrigger)
+    // Ensure the "Simulation en cours..." banner is perceptible for at least 220ms even on <80ms parallel runs
+    const remainingMinDisplayMs = Math.max(0, 220 - elapsedSinceTrigger)
 
     if (minDisplayTimeout) clearTimeout(minDisplayTimeout)
     minDisplayTimeout = setTimeout(() => {
@@ -95,31 +98,9 @@ export function useSimulationWorker() {
     }, remainingMinDisplayMs)
   }
 
-  function initWorker() {
-    try {
-      worker = new Worker(new URL('../worker/simulation.worker.ts', import.meta.url), {
-        type: 'module',
-      })
-      worker.onmessage = (event: MessageEvent<WorkerResponseMessage>) => {
-        const data = event.data
-        if (data.requestId !== latestRequestId) return
-
-        if (data.type === 'PROGRESS') {
-          progressCompletedGames.value = data.completedGames
-          progressTotalGames.value = data.totalGames
-          progressPct.value = Math.min(99, Math.round((data.completedGames / data.totalGames) * 100))
-        } else if (data.type === 'RESULT') {
-          finalizeSimulationResult(data.result)
-        }
-      }
-      worker.onerror = () => {
-        const rawConfig = structuredClone(toRaw(config))
-        const syncResult = runMonteCarloSimulation(rawConfig)
-        finalizeSimulationResult(syncResult)
-      }
-    } catch {
-      worker = null
-    }
+  function initPool() {
+    workerPool = new SimulationWorkerPool()
+    detectedWorkerThreads.value = workerPool.getPoolSize()
   }
 
   function triggerSimulation() {
@@ -140,12 +121,23 @@ export function useSimulationWorker() {
 
     const plainConfig: SimulationConfig = JSON.parse(JSON.stringify(toRaw(config)))
 
-    if (worker) {
-      const msg: WorkerRequestMessage = {
-        requestId: reqId,
-        config: plainConfig,
-      }
-      worker.postMessage(msg)
+    if (workerPool) {
+      workerPool
+        .executeSimulation(reqId, plainConfig, (completedGames, totalGames) => {
+          if (reqId !== latestRequestId) return
+          progressCompletedGames.value = completedGames
+          progressTotalGames.value = totalGames
+          progressPct.value = Math.min(99, Math.round((completedGames / totalGames) * 100))
+        })
+        .then((payload) => {
+          if (reqId !== latestRequestId) return
+          finalizeSimulationResult(payload)
+        })
+        .catch(() => {
+          if (reqId !== latestRequestId) return
+          const syncRes = runMonteCarloSimulation(plainConfig)
+          finalizeSimulationResult(syncRes)
+        })
     } else {
       setTimeout(() => {
         const syncRes = runMonteCarloSimulation(plainConfig)
@@ -162,8 +154,10 @@ export function useSimulationWorker() {
   function resetToDefaults() {
     config.iterations = 10000
     config.maxTurns = 4
-    config.aiMode = 'OPTIMAL_BEAM'
+    config.aiMode = 'EXPECTIMINIMAX_T1'
     config.fixedBeamWidth = 3
+    config.workerMode = 'MULTI_WORKER'
+    config.opponentArchetype = 'RAGING_BOLT_AGGRO'
     config.goingFirst = false
     config.prizesEnabled = true
     config.turn3Disruption = 'NONE'
@@ -187,7 +181,7 @@ export function useSimulationWorker() {
 
   onMounted(() => {
     startFpsMonitor()
-    initWorker()
+    initPool()
     triggerSimulation()
   })
 
@@ -195,7 +189,7 @@ export function useSimulationWorker() {
     if (rafId) cancelAnimationFrame(rafId)
     if (hideBannerTimeout) clearTimeout(hideBannerTimeout)
     if (minDisplayTimeout) clearTimeout(minDisplayTimeout)
-    if (worker) worker.terminate()
+    if (workerPool) workerPool.terminateAll()
   })
 
   return {
@@ -205,6 +199,7 @@ export function useSimulationWorker() {
     currentFps,
     minFpsDuringRun,
     totalRunsTriggered,
+    detectedWorkerThreads,
     showStatusBanner,
     statusBannerPhase,
     progressCompletedGames,
