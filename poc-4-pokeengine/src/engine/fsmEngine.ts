@@ -4,7 +4,9 @@ import type {
   BoardPokemonSnapshot,
   DecisionBranchRecord,
   DeclarativeCardDefinition,
+  ExpectiminimaxProjectionRecord,
   GameEndReason,
+  OpponentArchetype,
   OpponentPokemonSnapshot,
   RuleInvariantAudit,
   SampledGameRecord,
@@ -379,7 +381,7 @@ export function evaluateBoardState(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
   recordBreakdown = false,
-): { score: number; breakdown: string[] } {
+): { score: number; breakdown: string[]; projection?: ExpectiminimaxProjectionRecord } {
   let score = 0
   const breakdown: string[] = recordBreakdown ? [] : EMPTY_STRING_ARRAY
 
@@ -490,6 +492,222 @@ export function evaluateBoardState(
     return POOL_EVAL_RESULT
   }
   return { score, breakdown }
+}
+
+const POOL_EXPECTIMINIMAX_RESULT: {
+  score: number
+  breakdown: string[]
+  projection: ExpectiminimaxProjectionRecord | undefined
+} = {
+  score: 0,
+  breakdown: EMPTY_STRING_ARRAY,
+  projection: undefined,
+}
+
+/**
+ * Open-Loop Expectiminimax Lookahead ($T \rightarrow T_{\text{adv}} \rightarrow T+1$) according to Section 3.C:
+ * $$U(S_T) = V_{\text{immediat}}(S_T) + 0.75 \times \mathbb{E}[V_{\text{rebond}}(S_{T+1})]$$
+ *
+ * 1. Immediate Evaluation $V_{\text{immediat}}(S_T)$:
+ *    - Base Board Score (`evaluateBoardState`)
+ *    - Energy Banking Bonus (+30 pts if Active attacker is already loaded and manual energy was banked on a Bench relay attacker)
+ *    - Resource Conservation T+1 Bonus (+25 pts if holding a follow-up Supporter or Rare Candy in hand for T+1)
+ *    - Opponent Threat Reduction Bonus (points of threat eliminated on the opponent board by our Turn T attack / Gust)
+ * 2. Probabilistic Projection of Opponent Turn $T_{\text{adv}}$ (3 weighted scenarios):
+ *    - $p_{\text{KO}}$: probability opponent KOs our Active Pokemon (high if a `LOADED_ATTACKER` survives our Turn T attack, low if neutralized)
+ *    - $p_{\text{iono}}$: probability opponent plays Mashynn / Iono (scales up as `playerPrizesRemaining` decreases)
+ *    - $p_{\text{gust}}$: probability opponent plays Boss's Orders on our Bench
+ * 3. Rebound Evaluation at $T+1$ ($\mathbb{E}[V_{\text{rebond}}(S_{T+1})]$):
+ *    - After Active KO: checks if we can immediately promote or evolve a 2nd attacker on $T+1$ (Revenge Kill T+1) via Bench + Hand + Fezandipiti ex (+3 cards) + Pidgeot ex (Quick Search). If yes: `+110 pts`; if Wipeout / no attacker ready: `-90 pts`.
+ *    - After Mashynn: checks if an on-board draw engine (`Roucarnage ex` or `Fezandipiti ex`) recovers without bricking (`+60 pts`).
+ */
+export function evaluateExpectiminimaxState(
+  state: LowLevelGameState,
+  lookup: DeclarativeCardDefinition[],
+  opponentArchetype: OpponentArchetype,
+  recordBreakdown = false,
+): {
+  score: number
+  breakdown: string[]
+  projection?: ExpectiminimaxProjectionRecord
+} {
+  const baseEval = evaluateBoardState(state, lookup, recordBreakdown)
+  const baseBoardScore = baseEval.score
+  const breakdown = baseEval.breakdown
+
+  // 1a. Energy Banking Bonus (+30 pts)
+  const energyBankingBonus = state.manualEnergyBankedOnBench ? 30 : 0
+  if (recordBreakdown && energyBankingBonus > 0) {
+    breakdown.push('+30 pts : Energy Banking T+1 (Énergie manuelle pré-attachée sur attaquant de relais du Banc)')
+  }
+
+  // 1b. Resource Conservation T+1 Bonus (+25 pts)
+  let hasNextTurnResource = false
+  for (let i = 0; i < state.handLen; i++) {
+    const cid = unpackCardId(state.hand[i])
+    if (
+      cid === CARD_IDS.ARVEN ||
+      cid === CARD_IDS.BOSS_ORDERS ||
+      cid === CARD_IDS.PROFESSORS_RESEARCH ||
+      cid === CARD_IDS.RARE_CANDY
+    ) {
+      hasNextTurnResource = true
+      break
+    }
+  }
+  const resourceConservationBonus = hasNextTurnResource ? 25 : 0
+  if (recordBreakdown && resourceConservationBonus > 0) {
+    breakdown.push('+25 pts : Conservation T+1 (Supporter de relance ou Super Bonbon préservé en main)')
+  }
+
+  // 1c. Threat Reduction Bonus from our Turn T attack
+  const activeId = state.active !== 0 ? unpackCardId(state.active) : 0
+  const activeEnergies = state.active !== 0 ? unpackEnergies(state.active) : 0
+  const canAttackThisTurn =
+    state.currentTurn >= 2 &&
+    ((activeId === CARD_IDS.CHARIZARD_EX && activeEnergies >= 2) ||
+      (activeId === CARD_IDS.PIDGEOT_EX && activeEnergies >= 2))
+
+  const playerPrizesBefore = state.prizesLen > 0 ? state.prizesLen : 6
+  const basicEvolvers = countOpponentBasicEvolvers(state)
+  let threatEliminatedRaw = 0
+  let playerPrizesAfterAttack = playerPrizesBefore
+
+  if (canAttackThisTurn && state.oppIds[0] !== 0) {
+    const oppActiveTpl = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]
+    if (oppActiveTpl) {
+      const targetThreat = evaluateTargetThreatScoreFast(state, 0, playerPrizesBefore, basicEvolvers)
+      threatEliminatedRaw = Math.min(220, targetThreat) // Cap Lethal 1000 scaling so formula stays readable
+      playerPrizesAfterAttack = Math.max(0, playerPrizesBefore - oppActiveTpl.prizeValue)
+    }
+  }
+
+  const threatReductionBonus = Math.round(threatEliminatedRaw * 0.35)
+  if (recordBreakdown && threatReductionBonus > 0) {
+    const targetName = OPPONENT_POKEMON_CATALOG[state.oppIds[0]]?.name ?? 'Cible Actif'
+    breakdown.push(
+      `+${threatReductionBonus} pts : Réduction de menace adverse (KO prévu sur ${targetName}, menace ${threatEliminatedRaw} pts)`,
+    )
+  }
+
+  const immediateScore =
+    baseBoardScore + energyBankingBonus + resourceConservationBonus + threatReductionBonus
+
+  // 2. Probabilistic Projection of Opponent Turn T_adv (3 weighted scenarios)
+  // Check if opponent has a surviving LOADED_ATTACKER or ENGINE_SUPPORT after our attack
+  const startCheckSlot = canAttackThisTurn ? 1 : 0
+  let opponentLoadedAttackerSurvives = false
+  let opponentEngineSurvives = false
+  for (let s = startCheckSlot; s <= state.oppBenchLen; s++) {
+    const oid = state.oppIds[s]
+    if (oid === 0) continue
+    const tpl = OPPONENT_POKEMON_CATALOG[oid]
+    if (!tpl) continue
+    if (tpl.role === 'LOADED_ATTACKER' && state.oppEnergies[s] >= 2) {
+      opponentLoadedAttackerSurvives = true
+    }
+    if (tpl.role === 'ENGINE_SUPPORT') {
+      opponentEngineSurvives = true
+    }
+  }
+
+  let pKo = 0.22
+  if (state.currentTurn === 1 && state.goingFirst) {
+    pKo = 0.14
+  } else if (opponentLoadedAttackerSurvives) {
+    pKo = opponentEngineSurvives ? 0.78 : 0.68
+  } else {
+    pKo = 0.18 // Loaded attacker was neutralized!
+  }
+
+  const prizesTakenByUs = 6 - playerPrizesAfterAttack
+  let pIono = 0.14 + prizesTakenByUs * 0.1
+  if (opponentArchetype === 'GARDEVOIR_DISRUPTION') pIono += 0.18
+  if (!opponentEngineSurvives && state.currentTurn >= 2) pIono *= 0.65
+  pIono = Math.max(0.1, Math.min(0.75, pIono))
+
+  const pGust = opponentEngineSurvives ? 0.24 : 0.14
+
+  // 3. Rebound Evaluation at T+1: E[V_rebond(S_{T+1})]
+  // Check if we have a 2nd attacker (Revenge Kill T+1) ready on Bench if our Active is KO'd
+  let benchHasCharizardEx = false
+  let benchHasCharmanderOrCharmeleon = false
+  let benchHasPidgeotEx = false
+  let benchHasFezandipitiEx = false
+
+  for (let b = 0; b < state.benchLen; b++) {
+    const bCid = unpackCardId(state.bench[b])
+    if (bCid === CARD_IDS.CHARIZARD_EX) benchHasCharizardEx = true
+    else if (bCid === CARD_IDS.CHARMANDER || bCid === CARD_IDS.CHARMELEON) {
+      benchHasCharmanderOrCharmeleon = true
+    } else if (bCid === CARD_IDS.PIDGEOT_EX) benchHasPidgeotEx = true
+    else if (bCid === CARD_IDS.FEZANDIPITI_EX) benchHasFezandipitiEx = true
+  }
+
+  const hasQuickSearchEngine =
+    benchHasPidgeotEx || unpackCardId(state.active) === CARD_IDS.PIDGEOT_EX
+  const hasFezEngine =
+    benchHasFezandipitiEx || unpackCardId(state.active) === CARD_IDS.FEZANDIPITI_EX
+  const hasCandyOrZardInHand =
+    countCardIdInHand(state, CARD_IDS.RARE_CANDY) > 0 ||
+    countCardIdInHand(state, CARD_IDS.CHARIZARD_EX) > 0 ||
+    countCardIdInHand(state, CARD_IDS.ARVEN) > 0
+
+  const revengeKillReadyAtTPlus1 =
+    benchHasCharizardEx ||
+    (benchHasCharmanderOrCharmeleon &&
+      (hasQuickSearchEngine || hasFezEngine || hasCandyOrZardInHand || state.manualEnergyBankedOnBench))
+
+  const koReboundScore = revengeKillReadyAtTPlus1
+    ? 110 + (benchHasFezandipitiEx ? 15 : 0) + (state.manualEnergyBankedOnBench ? 15 : 0)
+    : -90
+
+  const postIonoRecoveryReady = benchHasPidgeotEx || benchHasFezandipitiEx || hasCardIdOnBoard(state, CARD_IDS.ROTOM_V)
+  const ionoReboundScore = postIonoRecoveryReady ? 60 : -35
+
+  const gustReboundScore = state.benchLen >= 2 && (benchHasPidgeotEx || benchHasCharmanderOrCharmeleon) ? 25 : -20
+
+  const reboundExpectedScore = Math.round(
+    pKo * koReboundScore + pIono * ionoReboundScore + pGust * gustReboundScore,
+  )
+
+  const totalExpectiminimaxScore = Math.round(immediateScore + 0.75 * reboundExpectedScore)
+
+  if (!recordBreakdown) {
+    POOL_EXPECTIMINIMAX_RESULT.score = totalExpectiminimaxScore
+    POOL_EXPECTIMINIMAX_RESULT.projection = undefined
+    return POOL_EXPECTIMINIMAX_RESULT
+  }
+
+  const opponentKoProbPct = Math.round(pKo * 100)
+  const opponentIonoProbPct = Math.round(pIono * 100)
+  const opponentGustProbPct = Math.round(pGust * 100)
+  const weightedRebound = Math.round(0.75 * reboundExpectedScore)
+
+  breakdown.push(
+    `${weightedRebound >= 0 ? '+' : ''}${weightedRebound} pts : Anticipation Expectiminimax 0.75 × E[V_rebond(S_T+1)] (p_KO=${opponentKoProbPct}%, p_Mashynn=${opponentIonoProbPct}%, Revenge Kill T+1=${revengeKillReadyAtTPlus1 ? 'OUI (+110)' : 'NON (-90)'})`,
+  )
+
+  const projection: ExpectiminimaxProjectionRecord = {
+    immediateScore,
+    energyBankingBonus,
+    resourceConservationBonus,
+    threatReductionBonus,
+    opponentKoProbPct,
+    opponentIonoProbPct,
+    opponentGustProbPct,
+    reboundExpectedScore,
+    revengeKillReadyAtTPlus1,
+    postIonoRecoveryReady,
+    totalExpectiminimaxScore,
+    summaryLine: `U(S_T) = ${immediateScore} + 0.75 × (${reboundExpectedScore}) = ${totalExpectiminimaxScore} pts`,
+  }
+
+  return {
+    score: totalExpectiminimaxScore,
+    breakdown,
+    projection,
+  }
 }
 
 /**
@@ -1936,6 +2154,7 @@ function triggerOnEvolveAbilities(
  * - Policy 'NAIVE_RANDOM': Random action ordering
  */
 type IntraTurnPolicyType =
+  | 'EXPECTIMINIMAX_HORIZON'
   | 'OPTIMAL_THINNING'
   | 'ZARD_FIRST_AGGRO'
   | 'DRAW_FIRST'
@@ -1955,10 +2174,103 @@ function runIntraTurnPolicy(
 ): number {
   let actionsExecuted = 0
 
-  if (policy === 'OPTIMAL_THINNING' || policy === 'ZARD_FIRST_AGGRO') {
+  if (policy === 'EXPECTIMINIMAX_HORIZON') {
+    // Horizon T -> T_adv -> T+1 Policy:
+    // 1. Ensure 2nd Charmander & Fezandipiti ex on Bench for T+1 Revenge Kill & Post-Mashynn recovery
+    // 2. Evolve Pidgeot ex & Charizard ex (Infernal Reign)
+    // 3. Use Quick Search / VSTAR / Arven + Counter Catcher / Boss's Orders to eliminate top opponent Bench threat
+    // 4. Bank manual energy on Bench relay attacker & conserve T+1 Supporter/Rare Candy in hand
+    for (let step = 0; step < 10; step++) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_FLIP_THE_SCRIPT', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_BASIC_FROM_HAND', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ARVEN', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_QUICK_SEARCH', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SEAL_STONE_AND_VSTAR', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ULTRA_BALL', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      break
+    }
+
+    // Only play Draw Supporter if we don't already have an optimal board + T+1 recovery piece
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', true, logs)) {
+      actionsExecuted++
+    }
+
+    for (let step = 0; step < 8; step++) {
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_BASIC_FROM_HAND', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_RARE_CANDY', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_QUICK_SEARCH', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_STAGE_EVOLUTION', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_SUPER_ROD_OR_STRETCHER', true, logs)) {
+        actionsExecuted++
+        continue
+      }
+      break
+    }
+
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'ATTACH_MANUAL_ENERGY', true, logs)) {
+      actionsExecuted++
+    }
+    if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_ROTOM_INSTANT_CHARGE', true, logs)) {
+      actionsExecuted++
+    }
+  } else if (policy === 'OPTIMAL_THINNING' || policy === 'ZARD_FIRST_AGGRO') {
     const pigeotFirst = policy === 'OPTIMAL_THINNING'
-    // Phase 1: Pre-draw Deck Thinning (Bench tutors, Arven, Quick Search, VSTAR, Evolutions, Counter Catcher / Boss)
-    for (let step = 0; step < 9; step++) {
+    // Phase 1: Pre-draw Deck Thinning (Bench tutors, Arven, Quick Search, VSTAR, Evolutions)
+    for (let step = 0; step < 8; step++) {
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'USE_FLIP_THE_SCRIPT', true, logs)) {
         actionsExecuted++
         continue
@@ -1995,19 +2307,15 @@ function runIntraTurnPolicy(
         actionsExecuted++
         continue
       }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
-        actionsExecuted++
-        continue
-      }
       break
     }
 
-    // Phase 2: Draw Supporter (only if Supporter wasn't used on Arven or Boss's Orders)
+    // Phase 2: Draw Supporter (only if Supporter wasn't used on Arven)
     if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_DRAW_SUPPORTER', true, logs)) {
       actionsExecuted++
     }
 
-    // Phase 3: Post-draw resolution (Play newly drawn Basics, Candies, Evolutions, Gust, Energy, Recovery)
+    // Phase 3: Post-draw resolution (Play newly drawn Basics, Candies, Evolutions, Energy, Recovery)
     for (let step = 0; step < 8; step++) {
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_POFFIN_OR_NEST', true, logs)) {
         actionsExecuted++
@@ -2034,10 +2342,6 @@ function runIntraTurnPolicy(
         continue
       }
       if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_ULTRA_BALL', true, logs)) {
-        actionsExecuted++
-        continue
-      }
-      if (executeDeclarativeCardOrAbility(state, lookup, rng, invariants, 'PLAY_GUST_EFFECT', true, logs)) {
         actionsExecuted++
         continue
       }
@@ -2206,38 +2510,38 @@ interface CandidateBeamBranch {
 const FIXED_BEAM_BRANCH_CATALOG: CandidateBeamBranch[] = [
   {
     branchId: 'A',
-    label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
-    policy: 'OPTIMAL_THINNING',
+    label: 'Branche A — Anticipation Expectiminimax T+1 (Ciblage Menace & Energy Banking)',
+    policy: 'EXPECTIMINIMAX_HORIZON',
   },
   {
     branchId: 'B',
-    label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
-    policy: 'DRAW_FIRST',
+    label: 'Branche B — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
+    policy: 'OPTIMAL_THINNING',
   },
   {
     branchId: 'C',
-    label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
-    policy: 'CONSERVATIVE',
+    label: 'Branche C — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
+    policy: 'DRAW_FIRST',
   },
   {
     branchId: 'D',
-    label: 'Branche D — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
-    policy: 'ZARD_FIRST_AGGRO',
+    label: 'Branche D — Ligne Conservatrice (Rétention des Ressources en Main)',
+    policy: 'CONSERVATIVE',
   },
   {
     branchId: 'E',
-    label: 'Branche E — Séquence Turbo VSTAR & Hyper Ball Prioritaire',
-    policy: 'TURBO_VSTAR_THINNING',
+    label: 'Branche E — Séquence Offensive (Priorité Dracaufeu ex avant Roucarnage ex)',
+    policy: 'ZARD_FIRST_AGGRO',
   },
   {
     branchId: 'F',
-    label: 'Branche F — Saturation Maximale du Banc & Charge Motisma V',
-    policy: 'BENCH_SATURATION',
+    label: 'Branche F — Séquence Turbo VSTAR & Hyper Ball Prioritaire',
+    policy: 'TURBO_VSTAR_THINNING',
   },
   {
     branchId: 'G',
-    label: 'Branche G — Exécution Séquentielle Gauche-Droite Directe',
-    policy: 'GREEDY',
+    label: 'Branche G — Saturation Maximale du Banc & Charge Motisma V',
+    policy: 'BENCH_SATURATION',
   },
   {
     branchId: 'H',
@@ -2251,9 +2555,19 @@ const STATIC_BRANCH_RESTRICTED: CandidateBeamBranch = {
   label: 'Branche A — Action Unique Disponible (Main Restreinte / Attachement Simple)',
   policy: 'CONSERVATIVE',
 }
+const STATIC_BRANCH_EXPECTIMINIMAX: CandidateBeamBranch = {
+  branchId: 'A',
+  label: 'Branche A — Anticipation Expectiminimax T+1 (Ciblage Menace & Energy Banking)',
+  policy: 'EXPECTIMINIMAX_HORIZON',
+}
 const STATIC_BRANCH_A: CandidateBeamBranch = {
   branchId: 'A',
   label: 'Branche A — Épuration (Deck Thinning) & Priorité Moteur Roucarnage',
+  policy: 'OPTIMAL_THINNING',
+}
+const STATIC_BRANCH_A_ALT: CandidateBeamBranch = {
+  branchId: 'B',
+  label: 'Branche B — Épuration pure 1-Tour (Sans Ciblage Menace T+1)',
   policy: 'OPTIMAL_THINNING',
 }
 const STATIC_BRANCH_B: CandidateBeamBranch = {
@@ -2261,9 +2575,19 @@ const STATIC_BRANCH_B: CandidateBeamBranch = {
   label: 'Branche B — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
   policy: 'DRAW_FIRST',
 }
+const STATIC_BRANCH_B_ALT: CandidateBeamBranch = {
+  branchId: 'C',
+  label: 'Branche C — Pioche Aléatoire Prioritaire avant Tuteurs (Glouton)',
+  policy: 'DRAW_FIRST',
+}
 const STATIC_BRANCH_C: CandidateBeamBranch = {
   branchId: 'C',
   label: 'Branche C — Ligne Conservatrice (Rétention des Ressources en Main)',
+  policy: 'CONSERVATIVE',
+}
+const STATIC_BRANCH_C_ALT: CandidateBeamBranch = {
+  branchId: 'D',
+  label: 'Branche D — Ligne Conservatrice (Rétention des Ressources en Main)',
   policy: 'CONSERVATIVE',
 }
 const STATIC_BRANCH_D: CandidateBeamBranch = {
@@ -2278,12 +2602,13 @@ const POOL_CANDIDATE_BRANCHES: CandidateBeamBranch[] = []
  * depending on the actual playable cards in hand and the current board state:
  * - 1 branch if the hand is restricted/bricked (no tutors, no draw supporters, no abilities).
  * - 2 to 4 branches depending on whether a Draw Supporter can be sequenced before Tutors ('DRAW_FIRST'),
- *   and whether both Charizard and Pidgeot lines can evolve on Turn 2+ ('ZARD_FIRST_AGGRO' vs 'OPTIMAL_THINNING').
+ *   and whether Expectiminimax T+1 lookahead is enabled.
  * Reuses `POOL_CANDIDATE_BRANCHES` for zero heap allocation in the hot loop.
  */
 function discoverCandidateBeamBranches(
   state: LowLevelGameState,
   lookup: DeclarativeCardDefinition[],
+  useExpectiminimaxPolicy: boolean,
 ): CandidateBeamBranch[] {
   POOL_CANDIDATE_BRANCHES.length = 0
   const canPlaySupporter = !(state.currentTurn === 1 && state.goingFirst) && state.supporterPlayedCount === 0
@@ -2300,10 +2625,11 @@ function discoverCandidateBeamBranches(
       cid === CARD_IDS.FOREST_SEAL_STONE ||
       cid === CARD_IDS.SUPER_ROD ||
       cid === CARD_IDS.NIGHT_STRETCHER ||
-      cid === CARD_IDS.LUMINEON_V
+      cid === CARD_IDS.LUMINEON_V ||
+      cid === CARD_IDS.COUNTER_CATCHER
     ) {
       hasTutorOrItem = true
-    } else if (cid === CARD_IDS.ARVEN && canPlaySupporter) {
+    } else if ((cid === CARD_IDS.ARVEN || cid === CARD_IDS.BOSS_ORDERS) && canPlaySupporter) {
       hasTutorOrItem = true
     } else if ((cid === CARD_IDS.PROFESSORS_RESEARCH || cid === CARD_IDS.IONO) && canPlaySupporter) {
       hasDrawSupporter = true
@@ -2324,6 +2650,16 @@ function discoverCandidateBeamBranches(
   // Case 1: Restricted / Brick hand (no tutor, no draw supporter, no active search ability) -> Only 1 branch needed
   if (!hasTutorOrItem && !hasDrawSupporter && !hasQuickSearchReady && !hasFezReady && !hasRareCandyOrEvo) {
     POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_RESTRICTED)
+    return POOL_CANDIDATE_BRANCHES
+  }
+
+  if (useExpectiminimaxPolicy && state.currentTurn >= 2) {
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_EXPECTIMINIMAX)
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_A_ALT)
+    if (hasDrawSupporter) {
+      POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_B_ALT)
+    }
+    POOL_CANDIDATE_BRANCHES.push(STATIC_BRANCH_C_ALT)
     return POOL_CANDIDATE_BRANCHES
   }
 
@@ -2799,18 +3135,19 @@ export function simulateSingleGame(
       config.aiMode === 'OPTIMAL_BEAM' ||
       config.aiMode === 'FIXED_BEAM'
     ) {
+      const useExpectiminimax =
+        config.aiMode === 'EXPECTIMINIMAX_T1' || config.aiMode === 'FIXED_BEAM'
       const clampedFixedWidth = Math.max(1, Math.min(8, config.fixedBeamWidth || 3))
       const candidateBranches =
         config.aiMode === 'FIXED_BEAM'
           ? FIXED_BEAM_BRANCH_CATALOG.slice(0, clampedFixedWidth)
-          : discoverCandidateBeamBranches(state, lookup)
+          : discoverCandidateBeamBranches(state, lookup, useExpectiminimax)
 
       branchesEvaluatedThisTurn = candidateBranches.length
       totalBranchesEvaluated += branchesEvaluatedThisTurn
-      totalExpectiminimaxNodes +=
-        config.aiMode === 'EXPECTIMINIMAX_T1'
-          ? branchesEvaluatedThisTurn * 4
-          : branchesEvaluatedThisTurn
+      totalExpectiminimaxNodes += useExpectiminimax
+        ? branchesEvaluatedThisTurn * 4
+        : branchesEvaluatedThisTurn
       const thinBefore = state.thinningCount
       const savedRngState = rng.getState()
 
@@ -2836,7 +3173,14 @@ export function simulateSingleGame(
           candidate.policy,
           branchLogs,
         )
-        const evalRes = evaluateBoardState(branchState, lookup, recordDetailedLog)
+        const evalRes = useExpectiminimax
+          ? evaluateExpectiminimaxState(
+              branchState,
+              lookup,
+              config.opponentArchetype || 'RAGING_BOLT_AGGRO',
+              recordDetailedLog,
+            )
+          : evaluateBoardState(branchState, lookup, recordDetailedLog)
 
         if (evalRes.score > bestScore) {
           bestScore = evalRes.score
@@ -2877,6 +3221,8 @@ export function simulateSingleGame(
             actions: branchLogs ?? [],
             thinningDelta: branchState.thinningCount - thinBefore,
             attackTargetSummary,
+            expectiminimax:
+              'projection' in evalRes ? evalRes.projection : undefined,
           })
         }
       }
