@@ -1,0 +1,65 @@
+# Pokémon TCG Card Compiler (`card-compiler`)
+
+Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il interroge l'API **TCGdex**, charge directement un LLM local en mémoire via `llama-cpp-python` (accélération GPU Apple Metal M4 + **Constrained Decoding GBNF** natif via Pydantic V2) et génère les modèles JSON déterministes (`EngineCardModel`) sur le disque.
+
+## Architecture & Caractéristiques
+
+- **Zéro serveur / Zéro démon externe** : Aucun serveur FastAPI/Flask ni démon Ollama/LM Studio. Le modèle `.gguf` (`Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` en `Q4_K_M` par défaut, ou `7B` avec `--fast`) est téléchargé automatiquement via `huggingface_hub` et chargé en RAM/VRAM avec `n_gpu_layers=-1`.
+- **Constrained Decoding GBNF Natif** : Utilisation de `response_format={"type": "json_object", "schema": LLMCompiledCardPart.model_json_schema()}` pour garantir mathématiquement le respect des `Enum` fermés et du schéma Pydantic V2.
+- **Résolution de lignée d'évolution** : Calcul automatique du Pokémon de base racine (`rootBasicName`, `evolvesFrom`) via l'API TCGdex pour alimenter les synergies et conditions de cartes mortes (ex. *Super Bonbon*).
+- **Cache disque & Reprise sur lot** : Les réponses brutes TCGdex (`FR` + secours `EN`) sont mises en cache dans `data/raw_tcgdex/`, et les cartes compilées sont sauvegardées individuellement dans `data/compiled_cards/{id}.json` ainsi que consolidées dans `data/cards_database.json`.
+
+## Structure du Projet
+
+```text
+card-compiler/
+├── requirements.txt         # llama-cpp-python, huggingface-hub, httpx, pydantic>=2.9, typer, rich
+├── setup_mac_metal.sh       # Installation et compilation Metal (CMAKE_ARGS="-DGGML_METAL=on")
+├── README.md
+├── data/
+│   ├── raw_tcgdex/          # Cache JSON brut de TCGdex (.json) + _cards_index.json
+│   ├── compiled_cards/      # 1 fichier JSON compilé par carte (.json)
+│   └── cards_database.json  # Fichier consolidé regroupant toutes les cartes compilées
+└── compiler/
+    ├── __init__.py
+    ├── schemas.py           # Tous les Enums stricts et modèles Pydantic V2
+    ├── tcgdex_fetcher.py    # Client HTTP asynchrone + cache disque + résolveur de lignée d'évolution
+    ├── llm_engine.py        # Chargement direct Llama() en RAM + Prompt Système PTCG + Constrained Decoding
+    └── cli.py               # CLI Typer (commandes run/compile, inspect, stats/validate)
+```
+
+## Installation (Apple Silicon M4 / Metal)
+
+```bash
+chmod +x setup_mac_metal.sh
+./setup_mac_metal.sh
+source .venv/bin/activate
+```
+
+## Utilisation du CLI
+
+### 1. Compiler le jeu de 10 cartes stratégiques de référence (mode test par défaut)
+
+```bash
+python -m compiler.cli run --mode test
+```
+
+Options disponibles sur `run` (alias `compile`) :
+- `--mode test` (défaut) : Compile les 10 cartes stratégiques de référence (`TEST_CARD_IDS`).
+- `--mode standard` : Compile toutes les cartes légales au format Standard (`legal.standard == true`).
+- `--ids sv04-125,sv03-125` : Compile uniquement la liste d'identifiants fournie.
+- `--fast` : Utilise le modèle 7B (`Qwen/Qwen2.5-Coder-7B-Instruct-GGUF`) au lieu du 14B par défaut.
+- `--force` : Force la recompilation même si le fichier existe déjà dans `data/compiled_cards/`.
+
+### 2. Inspecter le modèle JSON d'une carte compilée
+
+```bash
+python -m compiler.cli inspect sv04-125
+python -m compiler.cli inspect sv03-125
+```
+
+### 3. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
+
+```bash
+python -m compiler.cli stats
+```
