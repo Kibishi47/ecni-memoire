@@ -421,6 +421,16 @@ class LLMCompiledCardPart(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    reasoningAnalysis: str = Field(
+        ...,
+        description=(
+            "Analyse obligatoire étape par étape avant de remplir le JSON : "
+            "1) Catégorie et Rôle de la carte. "
+            "2) Coûts explicites exigés par le texte ('vous ne pouvez utiliser cette carte que si vous défaussez...'). "
+            "3) Filtres exacts (PV max, type d'énergie précis comme Feu, sous-catégorie). "
+            "4) Conditions où la carte est morte en main ou inutile dans le deck."
+        ),
+    )
     category: CardCategory = Field(
         ...,
         description="Catégorie principale de la carte (POKEMON, TRAINER, ENERGY).",

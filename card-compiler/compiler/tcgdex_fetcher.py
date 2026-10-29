@@ -33,19 +33,19 @@ TCGDEX_API_BASE = "https://api.tcgdex.net/v2"
 
 # Liste officielle des 10 cartes stratégiques de référence du mode --test
 TEST_CARD_IDS: List[str] = [
-    "sv04-125",    # Super Bonbon (Rare Candy)
-    "sv05-144",    # Poffin Pote-Pote (Buddy-Buddy Poffin)
-    "sv01-196",    # Hyper Ball (Ultra Ball)
-    "sv01-181",    # Faiblo Ball (Nest Ball)
-    "sv03-125",    # Dracaufeu ex (Charizard ex)
-    "sv03-164",    # Roucarnage ex (Pidgeot ex)
-    "sv02-185",    # Mashynn (Iono)
-    "sv01-166",    # Pepper / Arven
-    "sv04-160",    # Attrape-Riposte (Counter Catcher)
-    "sv06.5-038",  # Fezandipiti ex (Félicanis ex)
+    "sv04-125",  # Super Bonbon (Rare Candy)
+    "sv05-144",  # Poffin Copain-Copain (Buddy-Buddy Poffin)
+    "sv01-196",  # Hyper Ball (Ultra Ball)
+    "sv01-181",  # Faiblo Ball (Nest Ball)
+    "sv03-125",  # Dracaufeu-ex (Charizard ex)
+    "sv03-164",  # Roucarnage-ex (Pidgeot ex)
+    "sv02-185",  # Mashynn (Iono)
+    "sv01-166",  # Pepper / Arven
+    "sv04-160",  # Attrape-Riposte (Counter Catcher)
+    "sv05-123",  # Ire-Foudre-ex (Raging Bolt ex)
 ]
 
-# Table de référence garantissant que les 10 IDs stratégiques résolvent toujours vers la bonne carte
+# Table de référence garantissant que les IDs stratégiques résolvent toujours vers la bonne carte
 # même si la numérotation locale varie entre extensions TCGdex (ex: Super Bonbon est sv01-191 sur TCGdex).
 TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
     "sv04-125": {
@@ -92,6 +92,11 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "expected_name_fr": "Attrape-Riposte",
         "expected_name_en": "Counter Catcher",
         "fallback_tcgdex_id": "sv04-160",
+    },
+    "sv05-123": {
+        "expected_name_fr": "Ire-Foudre",
+        "expected_name_en": "Raging Bolt",
+        "fallback_tcgdex_id": "sv05-123",
     },
     "sv06.5-038": {
         "expected_name_fr": "Favianos",

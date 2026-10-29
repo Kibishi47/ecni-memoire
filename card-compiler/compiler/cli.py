@@ -40,6 +40,7 @@ from compiler.llm_engine import (
     FAST_MODEL_FILENAME,
     FAST_MODEL_REPO_ID,
     LocalLLMCardCompiler,
+    ModelTier,
 )
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import EngineCardModel
@@ -73,15 +74,21 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-def rebuild_consolidated_database(data_dir: Path) -> Path:
-    """Regroupe tous les fichiers `data/compiled_cards/*.json` valides dans `data/cards_database.json`."""
+def rebuild_consolidated_database(
+    data_dir: Path,
+    active_ids: Optional[List[str]] = None,
+) -> Path:
+    """Regroupe les fichiers `data/compiled_cards/*.json` valides dans `data/cards_database.json`."""
     compiled_dir = data_dir / "compiled_cards"
     db_path = data_dir / "cards_database.json"
 
+    allowed_ids = set(active_ids) if active_ids is not None else None
     cards_by_id: Dict[str, Any] = {}
     for json_file in sorted(compiled_dir.glob("*.json")):
         try:
             model = EngineCardModel.model_validate_json(json_file.read_text(encoding="utf-8"))
+            if allowed_ids is not None and model.cardId not in allowed_ids:
+                continue
             cards_by_id[model.cardId] = model.model_dump(mode="json")
         except Exception:
             continue
@@ -104,6 +111,7 @@ def _execute_run_pipeline(
     test_flag: bool,
     standard_flag: bool,
     ids: Optional[str],
+    tier: ModelTier,
     fast: bool,
     force: bool,
     limit: Optional[int],
@@ -116,6 +124,8 @@ def _execute_run_pipeline(
     elif test_flag:
         effective_mode = RunMode.test.value
 
+    effective_tier = ModelTier.fast if (fast and tier == ModelTier.qwen3) else tier
+
     custom_ids: Optional[List[str]] = None
     if ids:
         custom_ids = [cid.strip() for cid in ids.split(",") if cid.strip()]
@@ -123,8 +133,9 @@ def _execute_run_pipeline(
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
 
-    model_repo = FAST_MODEL_REPO_ID if fast else DEFAULT_MODEL_REPO_ID
-    model_file = FAST_MODEL_FILENAME if fast else DEFAULT_MODEL_FILENAME
+    compiler_engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
+    model_repo = compiler_engine_preview.repo_id
+    model_file = compiler_engine_preview.filename
 
     mode_label = (
         f"IDs personnalisés ({len(custom_ids)})"
@@ -132,7 +143,6 @@ def _execute_run_pipeline(
         else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
     )
 
-    compiler_engine_preview = LocalLLMCardCompiler(fast=fast, hf_token=hf_token)
     token_status = (
         "[green]Configuré ✓ (téléchargement accéléré)[/green]"
         if compiler_engine_preview.hf_token
@@ -141,9 +151,9 @@ def _execute_run_pipeline(
 
     console.print(
         Panel.fit(
-            f"[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF)[/bold cyan]\n"
+            f"[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]\n"
             f"• [bold]Mode[/bold] : {mode_label}\n"
-            f"• [bold]Modèle GGUF[/bold] : [yellow]{model_repo}[/yellow] ([green]{model_file}[/green])\n"
+            f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{model_repo}[/yellow] ([green]{model_file}[/green])\n"
             f"• [bold]HF Token[/bold] : {token_status}\n"
             f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
             f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}",
@@ -194,13 +204,15 @@ def _execute_run_pipeline(
         bundles_to_compile.append(bundle)
 
     if bundles_to_compile:
-        compiler_engine = LocalLLMCardCompiler(fast=fast, hf_token=hf_token)
+        compiler_engine = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
         with console.status(
-            f"[bold magenta]Étape 3a : Téléchargement / vérification de {model_file} et chargement en RAM/VRAM (Metal)...[/bold magenta]"
+            f"[bold magenta]Étape 3a : Sélection & chargement de {compiler_engine.repo_id} ({compiler_engine.filename}) en RAM/VRAM (Metal)...[/bold magenta]"
         ):
             compiler_engine.load_model_in_memory()
 
-        console.print("[green]✓[/green] Modèle GGUF chargé en mémoire avec accélération Metal.")
+        console.print(
+            f"[green]✓[/green] Modèle GGUF [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) chargé en mémoire avec accélération Metal."
+        )
 
         with Progress(
             SpinnerColumn(),
@@ -232,8 +244,9 @@ def _execute_run_pipeline(
             "[green]✓[/green] Toutes les cartes cibles sont déjà compilées et valides (utilisez [bold]--force[/bold] pour recompiler)."
         )
 
-    # Consolidation dans data/cards_database.json
-    db_path = rebuild_consolidated_database(data_dir)
+    # Consolidation dans data/cards_database.json (filtrée sur les cartes du mode test si mode == test)
+    active_ids_for_db = [b.card_id for b in bundles] if effective_mode == "test" and not custom_ids else None
+    db_path = rebuild_consolidated_database(data_dir, active_ids=active_ids_for_db)
     console.print(
         f"[green]✓[/green] Base consolidée mise à jour : [bold]{db_path}[/bold]."
     )
@@ -312,10 +325,16 @@ def run_command(
         "--ids",
         help="Liste d'identifiants TCGdex séparés par des virgules (ex: 'sv04-125,sv03-125').",
     ),
+    tier: ModelTier = typer.Option(
+        ModelTier.qwen3,
+        "--tier",
+        "-t",
+        help="Palier de modèle LLM : 'qwen3' (Qwen3-14B Q6_K par défaut), 'max' (Qwen3-30B-A3B / 32B Q4_K_M), ou 'fast' (7B Q4_K_M).",
+    ),
     fast: bool = typer.Option(
         False,
         "--fast",
-        help="Utilise le modèle 7B (Qwen2.5-Coder-7B-Instruct-Q4_K_M) au lieu du 14B par défaut.",
+        help="Raccourci pour '--tier fast' (Qwen2.5-Coder-7B-Instruct-Q4_K_M).",
     ),
     force: bool = typer.Option(
         False,
@@ -340,6 +359,7 @@ def run_command(
         test_flag=test_flag,
         standard_flag=standard_flag,
         ids=ids,
+        tier=tier,
         fast=fast,
         force=force,
         limit=limit,
@@ -353,6 +373,7 @@ def compile_alias(
     test_flag: bool = typer.Option(False, "--test"),
     standard_flag: bool = typer.Option(False, "--standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
+    tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t"),
     fast: bool = typer.Option(False, "--fast"),
     force: bool = typer.Option(False, "--force"),
     limit: Optional[int] = typer.Option(None, "--limit"),
@@ -369,6 +390,7 @@ def compile_alias(
         test_flag=test_flag,
         standard_flag=standard_flag,
         ids=ids,
+        tier=tier,
         fast=fast,
         force=force,
         limit=limit,
