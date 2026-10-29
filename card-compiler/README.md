@@ -51,8 +51,12 @@ Options disponibles sur `run` (alias `compile`) :
 - `--mode test` (défaut) : Compile les 10 cartes stratégiques de référence (`TEST_CARD_IDS`).
 - `--mode standard` : Compile toutes les cartes légales au format Standard (`legal.standard == true`).
 - `--ids sv04-125,sv03-125` : Compile uniquement la liste d'identifiants fournie.
-- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer le téléchargement du modèle GGUF (peut aussi être configuré via `export HF_TOKEN="hf_..."`).
-- `--fast` : Utilise le modèle 7B (`Qwen/Qwen2.5-Coder-7B-Instruct-GGUF`) au lieu du 14B par défaut.
+- `--tier qwen3|max|fast` (défaut : `qwen3`) :
+  - `qwen3` : `Qwen/Qwen3-14B-GGUF` (`Q6_K` / `Q5_K_M`, ~11-12 Go, sélection dynamique via `list_repo_files` et fallback automatique).
+  - `max` : `Qwen/Qwen3-30B-A3B-GGUF` ou `Qwen/Qwen2.5-Coder-32B-Instruct-GGUF` (`Q4_K_M`, ~16-18.5 Go).
+  - `fast` : `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF` (`Q4_K_M`).
+- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer le téléchargement du modèle GGUF (peut aussi être configuré via `.env` ou `export HF_TOKEN="hf_..."`).
+- `--fast` : Raccourci pour `--tier fast`.
 - `--force` : Force la recompilation même si le fichier existe déjà dans `data/compiled_cards/`.
 
 ### 2. Inspecter le modèle JSON d'une carte compilée
