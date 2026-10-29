@@ -10,9 +10,9 @@ Ce module définit :
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ============================================================================
@@ -209,6 +209,14 @@ class ActionCost(BaseModel):
         description="Filtre éventuel sur les cartes autorisées pour payer ce coût, ou null.",
     )
 
+    @field_validator("count", mode="before")
+    @classmethod
+    def clamp_cost_count(cls, v: Any) -> int:
+        try:
+            return max(0, int(round(float(v))))
+        except (ValueError, TypeError):
+            return 1
+
 
 class AtomicEffect(BaseModel):
     """Effet élémentaire atomique modifiant l'état de la partie Pokémon TCG."""
@@ -250,6 +258,24 @@ class AtomicEffect(BaseModel):
         ge=0,
         description="Bonus de dégâts par carte Récompense déjà prise par l'adversaire (ex: 30 pour Dracaufeu ex) ou null.",
     )
+
+    @field_validator("count", mode="before")
+    @classmethod
+    def clamp_effect_count(cls, v: Any) -> int:
+        try:
+            return max(0, int(round(float(v))))
+        except (ValueError, TypeError):
+            return 1
+
+    @field_validator("baseDamage", "damageScalingPerOpponentPrizeTaken", mode="before")
+    @classmethod
+    def clamp_damage_vals(cls, v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        try:
+            return max(0, int(round(float(v))))
+        except (ValueError, TypeError):
+            return 0
 
 
 class PlayableAction(BaseModel):
@@ -325,6 +351,15 @@ class TurnPhaseWeights(BaseModel):
         description="Coefficient d'utilité aux Tours 4 et suivants (0.0 à 2.0).",
     )
 
+    @field_validator("turn1", "turn2", "turn3", "turn4Plus", mode="before")
+    @classmethod
+    def clamp_phase_weight(cls, v: Any) -> float:
+        try:
+            val = float(v)
+            return max(0.0, min(2.0, round(val, 2)))
+        except (ValueError, TypeError):
+            return 1.0
+
 
 class SynergyRequirement(BaseModel):
     """Condition de synergie de decklist pour l'évaluation statique et dynamique de la carte."""
@@ -349,6 +384,22 @@ class SynergyRequirement(BaseModel):
         ge=0.0,
         description="Bonus de score attribué par exemplaire compatible présent dans le deck.",
     )
+
+    @field_validator("minCountInDeck", mode="before")
+    @classmethod
+    def clamp_min_count(cls, v: Any) -> int:
+        try:
+            return max(1, int(round(float(v))))
+        except (ValueError, TypeError):
+            return 1
+
+    @field_validator("bonusWeightPerCopy", mode="before")
+    @classmethod
+    def clamp_bonus_weight(cls, v: Any) -> float:
+        try:
+            return max(0.0, float(v))
+        except (ValueError, TypeError):
+            return 0.0
 
 
 class DeadCardCondition(BaseModel):
@@ -409,6 +460,22 @@ class StrategicEvaluator(BaseModel):
         le=50,
         description="Bonus (0 à 50) récompensant la conservation de la carte en main pour le tour suivant (T+1).",
     )
+
+    @field_validator("intrinsicBaseScore", "discardPriorityWhenDead", mode="before")
+    @classmethod
+    def clamp_score_100(cls, v: Any) -> int:
+        try:
+            return max(0, min(100, int(round(float(v)))))
+        except (ValueError, TypeError):
+            return 50
+
+    @field_validator("holdForNextTurnBonus", mode="before")
+    @classmethod
+    def clamp_hold_bonus(cls, v: Any) -> int:
+        try:
+            return max(0, min(50, int(round(float(v)))))
+        except (ValueError, TypeError):
+            return 0
 
 
 # ============================================================================
