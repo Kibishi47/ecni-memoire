@@ -195,6 +195,11 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
 7. **INVARIANTS PHYSIQUES TOUR 1 & STADES D'ÉVOLUTION (`STAGE_1`, `STAGE_2`)** :
    - Tout Pokémon `STAGE_1` ou `STAGE_2` (**Dracaufeu-ex**, **Roucarnage-ex**) a `canUseTurn1GoingFirst: false`, `canUseTurn1GoingSecond: false` sur toutes ses actions et `turnPhaseWeights.turn1 = 0.0`.
 
+8. **INTERVALLES NUMÉRIQUES STRICTS DANS `strategicEvaluator`** :
+   - `turnPhaseWeights` (`turn1`, `turn2`, `turn3`, `turn4Plus`) : nombres décimaux obligatoirement compris entre `0.0` et `2.0` (ex: 1.0, 1.5, 2.0 — INTERDICTION formelle d'excéder 2.0).
+   - `intrinsicBaseScore` et `discardPriorityWhenDead` : entiers compris entre `0` et `100`.
+   - `holdForNextTurnBonus` : entier compris entre `0` et `50`.
+
 ---
 
 ### 3. EXEMPLE FEW-SHOT #1 — CARTE DRESSEUR OBJET : Super Bonbon (Rare Candy)
@@ -570,6 +575,12 @@ def enforce_ptcg_invariants(
             if action.sourceType == ActionSourceType.ABILITY_ON_EVOLVE:
                 action.timing = ActionTiming.ON_EVOLVE_TRIGGER
 
+    weights = compiled_part.strategicEvaluator.turnPhaseWeights
+    weights.turn1 = max(0.0, min(2.0, round(float(weights.turn1), 2)))
+    weights.turn2 = max(0.0, min(2.0, round(float(weights.turn2), 2)))
+    weights.turn3 = max(0.0, min(2.0, round(float(weights.turn3), 2)))
+    weights.turn4Plus = max(0.0, min(2.0, round(float(weights.turn4Plus), 2)))
+
     return compiled_part
 
 
@@ -726,7 +737,28 @@ class LocalLLMCardCompiler:
         elapsed = round(time.perf_counter() - t0, 3)
         raw_content = completion["choices"][0]["message"]["content"]
 
-        compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
+        try:
+            compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
+        except Exception as val_err:
+            try:
+                raw_dict = json.loads(raw_content)
+                if isinstance(raw_dict, dict):
+                    strat = raw_dict.get("strategicEvaluator")
+                    if isinstance(strat, dict):
+                        weights = strat.get("turnPhaseWeights")
+                        if isinstance(weights, dict):
+                            for k in ["turn1", "turn2", "turn3", "turn4Plus"]:
+                                if k in weights:
+                                    try:
+                                        weights[k] = max(0.0, min(2.0, float(weights[k])))
+                                    except Exception:
+                                        pass
+                    compiled_part = LLMCompiledCardPart.model_validate(raw_dict)
+                else:
+                    raise val_err
+            except Exception:
+                raise val_err
+
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
         metadata = CompilationMetadata(
