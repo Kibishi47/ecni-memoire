@@ -5,3 +5,11 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 *.gguf
+.env
+.env.*
+!.env.example
+
+# Fichiers de données générés (ne rien envoyer sur git/GitHub)
+data/**/*.json
+data/*.json
+!data/**/.gitkeep

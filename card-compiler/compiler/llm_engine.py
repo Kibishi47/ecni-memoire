@@ -12,6 +12,7 @@ Ce module :
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any, Dict, Optional
 
 from huggingface_hub import hf_hub_download
 
+from compiler import load_env_file
 from compiler.schemas import (
     ActionSourceType,
     ActionTiming,
@@ -304,6 +306,7 @@ class LocalLLMCardCompiler:
         fast: bool = False,
         repo_id: Optional[str] = None,
         filename: Optional[str] = None,
+        hf_token: Optional[str] = None,
         n_ctx: int = 8192,
         n_gpu_layers: int = -1,
         verbose: bool = False,
@@ -318,6 +321,8 @@ class LocalLLMCardCompiler:
             self.repo_id = DEFAULT_MODEL_REPO_ID
             self.filename = DEFAULT_MODEL_FILENAME
 
+        load_env_file()
+        self.hf_token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
         self.verbose = verbose
@@ -333,6 +338,7 @@ class LocalLLMCardCompiler:
         downloaded_path = hf_hub_download(
             repo_id=self.repo_id,
             filename=self.filename,
+            token=self.hf_token,
         )
         self.model_path = Path(downloaded_path)
         return self.model_path
