@@ -379,7 +379,7 @@ def _build_deterministic_ability_action(
             sourceType=ActionSourceType.ABILITY_ACTIVATED,
             timing=ActionTiming.ONCE_PER_TURN_ABILITY,
             canUseTurn1GoingFirst=False,
-            canUseTurn1GoingSecond=False,
+            canUseTurn1GoingSecond=True,
             preconditions=[
                 ActionPrecondition(
                     type=PreconditionType.KO_SUFFERED_LAST_TURN,
@@ -456,37 +456,72 @@ def _sanitize_pokemon_card(
     ]
 
     # 1. Réconciliation des Talents (abilities)
-    abilities_fr = raw_fr.get("abilities") or []
-    abilities_en = (raw_en or {}).get("abilities") or []
-    deterministic_abilities: List[PlayableAction] = []
-    for idx, ab_fr in enumerate(abilities_fr):
-        if not isinstance(ab_fr, dict):
-            continue
-        ab_en = abilities_en[idx] if idx < len(abilities_en) and isinstance(abilities_en[idx], dict) else None
-        det_ab = _build_deterministic_ability_action(ab_fr, ab_en, sub_cat)
-        if det_ab is not None:
-            deterministic_abilities.append(det_ab)
+    abilities_fr = [a for a in (raw_fr.get("abilities") or []) if isinstance(a, dict)]
+    abilities_en = [a for a in ((raw_en or {}).get("abilities") or []) if isinstance(a, dict)]
+    all_raw_abilities = abilities_fr + abilities_en
+
+    # Si le Pokémon n'a AUCUN talent dans ses données TCGdex brutes :
+    # PURGE STRICTE ET ABSOLUE de tout talent fantôme halluciné ou contaminé
+    if not all_raw_abilities:
+        compiled_model.playableActions = [
+            act for act in compiled_model.playableActions
+            if act.sourceType not in {
+                ActionSourceType.ABILITY_ACTIVATED,
+                ActionSourceType.ABILITY_ON_EVOLVE,
+                ActionSourceType.ABILITY_PASSIVE,
+            }
+            and act.timing not in {
+                ActionTiming.ONCE_PER_TURN_ABILITY,
+                ActionTiming.ON_EVOLVE_TRIGGER,
+            }
+        ]
+        final_abilities: List[PlayableAction] = []
+    else:
+        deterministic_abilities: List[PlayableAction] = []
+        for idx, ab_fr in enumerate(abilities_fr):
+            ab_en = abilities_en[idx] if idx < len(abilities_en) else None
+            det_ab = _build_deterministic_ability_action(ab_fr, ab_en, sub_cat)
+            if det_ab is not None:
+                deterministic_abilities.append(det_ab)
+
+        # Collecte des noms de talents autorisés issus de TCGdex
+        allowed_ability_names = set()
+        for ab in all_raw_abilities:
+            name_val = str(ab.get("name") or "").strip().lower()
+            if name_val:
+                allowed_ability_names.add(name_val)
+                allowed_ability_names.add(_slugify(name_val))
+
+        if deterministic_abilities:
+            final_abilities = deterministic_abilities
+        else:
+            existing_abilities = [
+                act for act in compiled_model.playableActions
+                if act.sourceType in {
+                    ActionSourceType.ABILITY_ACTIVATED,
+                    ActionSourceType.ABILITY_ON_EVOLVE,
+                    ActionSourceType.ABILITY_PASSIVE,
+                }
+            ]
+            final_abilities = [
+                act for act in existing_abilities
+                if any(
+                    allowed in act.label.strip().lower()
+                    or allowed in _slugify(act.label)
+                    or allowed in act.actionId.replace("ability_", "").strip().lower()
+                    for allowed in allowed_ability_names
+                )
+            ]
 
     # 2. Réconciliation des Attaques (attacks)
-    attacks_fr = raw_fr.get("attacks") or []
-    attacks_en = (raw_en or {}).get("attacks") or []
+    attacks_fr = [a for a in (raw_fr.get("attacks") or []) if isinstance(a, dict)]
+    attacks_en = [a for a in ((raw_en or {}).get("attacks") or []) if isinstance(a, dict)]
     deterministic_attacks: List[PlayableAction] = []
     for idx, atk_fr in enumerate(attacks_fr):
-        if not isinstance(atk_fr, dict):
-            continue
-        atk_en = attacks_en[idx] if idx < len(attacks_en) and isinstance(attacks_en[idx], dict) else None
+        atk_en = attacks_en[idx] if idx < len(attacks_en) else None
         det_atk = _build_deterministic_attack_action(atk_fr, atk_en, sub_cat)
         deterministic_attacks.append(det_atk)
 
-    existing_abilities = [
-        act for act in compiled_model.playableActions
-        if act.sourceType in {
-            ActionSourceType.ABILITY_ACTIVATED,
-            ActionSourceType.ABILITY_ON_EVOLVE,
-            ActionSourceType.ABILITY_PASSIVE,
-        }
-    ]
-    final_abilities = deterministic_abilities if deterministic_abilities else existing_abilities
     final_attacks = deterministic_attacks if deterministic_attacks else [
         act for act in compiled_model.playableActions if act.sourceType == ActionSourceType.ATTACK
     ]
@@ -503,7 +538,7 @@ def _sanitize_pokemon_card(
             act.timing = ActionTiming.END_OF_TURN_ATTACK
         if any(p.type == PreconditionType.KO_SUFFERED_LAST_TURN for p in act.preconditions):
             act.canUseTurn1GoingFirst = False
-            act.canUseTurn1GoingSecond = False
+            act.canUseTurn1GoingSecond = True
 
     # 4. Rôle stratégique, score intrinsèque et pondérations par tour
     evaluator = compiled_model.strategicEvaluator
@@ -980,12 +1015,6 @@ def _sanitize_trainer_card(
                 zone=ZoneType.DECK,
                 minCount=1,
                 targetFilter=item_filter,
-            ),
-            ActionPrecondition(
-                type=PreconditionType.ZONE_HAS_MATCHING_CARD,
-                zone=ZoneType.DECK,
-                minCount=1,
-                targetFilter=tool_filter,
             ),
         ]
         action.costs = []

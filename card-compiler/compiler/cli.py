@@ -308,12 +308,12 @@ def run_command(
         RunMode.test,
         "--mode",
         "-m",
-        help="Mode d'exécution : 'test' (10 cartes stratégiques de référence) ou 'standard' (cartes légales Standard).",
+        help="Mode d'exécution : 'test' (11 cartes stratégiques de référence) ou 'standard' (cartes légales Standard).",
     ),
     test_flag: bool = typer.Option(
         False,
         "--test",
-        help="Raccourci pour forcer le mode test (10 cartes de référence).",
+        help="Raccourci pour forcer le mode test (11 cartes de référence).",
     ),
     standard_flag: bool = typer.Option(
         False,

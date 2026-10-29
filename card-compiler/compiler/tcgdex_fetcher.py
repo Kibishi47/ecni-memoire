@@ -31,7 +31,7 @@ from compiler.schemas import (
 
 TCGDEX_API_BASE = "https://api.tcgdex.net/v2"
 
-# Liste officielle des 10 cartes stratégiques de référence du mode --test
+# Liste officielle des 11 cartes stratégiques de référence du mode --test
 TEST_CARD_IDS: List[str] = [
     "sv04-125",  # Super Bonbon (Rare Candy)
     "sv05-144",  # Poffin Copain-Copain (Buddy-Buddy Poffin)
@@ -43,6 +43,7 @@ TEST_CARD_IDS: List[str] = [
     "sv01-166",  # Pepper / Arven
     "sv04-160",  # Attrape-Riposte (Counter Catcher)
     "sv05-123",  # Ire-Foudre-ex (Raging Bolt ex)
+    "sv06.5-038",  # Favianos-ex (Fezandipiti ex)
 ]
 
 # Table de référence garantissant que les IDs stratégiques résolvent toujours vers la bonne carte
