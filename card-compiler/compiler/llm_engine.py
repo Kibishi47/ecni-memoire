@@ -166,6 +166,11 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
 4. **Synergies de decklist et conditions de carte morte** en main ou dans le deck.
 
 ### 2. RÈGLES CRITIQUES ET INTERDICTIONS D'HALLUCINATIONS SÉMANTIQUES
+0. **INTERDICTION FORMELLE D'INVENTER OU DE COPIER UN TALENT (`ABILITY_*`)** :
+   - Ne te base JAMAIS sur les talents d'autres cartes.
+   - Si le JSON brut TCGdex d'une carte ne contient aucune entrée dans `abilities` (ou `abilities: []`), il est **STRICTEMENT INTERDIT** d'inventer, d'imaginer ou de copier une action de type `ABILITY_*` (comme `ability_infernal_reign`, `ability_quick_search`, etc.).
+   - Pour tout Pokémon sans talent (ex: **Ire-Foudre-ex `sv05-123`**), `playableActions` doit contenir **EXCLUSIVEMENT** les attaques réelles de la carte (`sourceType: "ATTACK"`).
+
 1. **INTERDICTION D'UTILISER `SHUFFLE_HAND_AND_DRAW` POUR UN MÉLANGE DE DECK** :
    - Lorsqu'une carte de recherche (ex: Pepper / Arven, Hyper Ball, Faiblo Ball, Poffin Copain-Copain) se termine par *"Mélangez ensuite votre deck"* (*"Then, shuffle your deck"*), n'ajoute **JAMAIS** `SHUFFLE_HAND_AND_DRAW`.
    - Pour **Mashynn (Iono)** qui place la main **en dessous du deck** (*"bottom of their deck"*) et pioche selon les cartes Récompense restantes, utilise **exclusivement** `SHUFFLE_HAND_BOTTOM_DRAW_PRIZES` avec `targetFilter: null`, `primaryRole: "HAND_DISRUPTION"` et `turnPhaseWeights.turn1: 0.8`.
@@ -185,10 +190,10 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
    - Sur **Dracaufeu-ex (`sv03-125`)**, le talent *Règne Infernal* mentionne `Énergie {R} de base` / `Basic {R} Energy` : tu DOIS mettre `energyType: "Feu"` et `subCategory: "BASIC_ENERGY"` dans `targetFilter`.
 
 5. **PEPPER / ARVEN (`sv01-166`)** :
-   - Cherche 1 `ITEM` et 1 `TOOL` dans le deck : génère 2 effets `SEARCH_DECK_TO_HAND` (`ITEM` + `TOOL` avec `upTo: true`), 2 préconditions `ZONE_HAS_MATCHING_CARD` (`ITEM` + `TOOL`), 2 synergies (`ITEM` min 4 + `TOOL` min 1), 2 `inGameDeadCardConditions` (`NO_VALID_TARGET_IN_DECK` pour `ITEM` et `TOOL`), `primaryRole: "CONSISTENCY_TUTOR"` et `intrinsicBaseScore: 88`.
+   - Cherche 1 `ITEM` et 1 `TOOL` dans le deck : génère 2 effets `SEARCH_DECK_TO_HAND` (`ITEM` + `TOOL` avec `upTo: true`), mais 1 SEULE précondition `ZONE_HAS_MATCHING_CARD` (`ITEM`) pour ne pas bloquer par un AND logique s'il n'y a plus d'Outil dans le deck. 2 synergies (`ITEM` min 4 + `TOOL` min 1), 2 `inGameDeadCardConditions` (`NO_VALID_TARGET_IN_DECK` pour `ITEM` et `TOOL`), `primaryRole: "CONSISTENCY_TUTOR"` et `intrinsicBaseScore: 88`.
 
 6. **IRE-FOUDRE-EX / RAGING BOLT EX (`sv05-123`)** :
-   - `primaryRole: "MAIN_ATTACKER"`, 2 attaques :
+   - `primaryRole: "MAIN_ATTACKER"`, AUCUN talent (`abilities: []`), 2 attaques :
      - Attaque 1 *Explosion Hurlante* (*Burst Roar*) : `"Défaussez votre main, puis piochez 6 cartes"` -> effet `DISCARD_HAND_AND_DRAW` (`count: 6`, `sourceZone: "DECK"`, `targetZone: "HAND"`).
      - Attaque 2 *Tempête Éclats* (*Bellowing Thunder*, `70×` dégâts par énergie de base défaussée de vos Pokémon) -> `costs`: `[{"type": "DISCARD_ENERGY_FROM_PLAY", "count": 1, "targetFilter": {"category": "ENERGY", "subCategory": "BASIC_ENERGY", "maxHp": null, "energyType": null, "specificCardName": null}}]` et `effects`: `[{"primitive": "DEAL_DAMAGE_ACTIVE", "sourceZone": "ACTIVE", "targetZone": "ACTIVE", "count": 1, "upTo": false, "targetFilter": null, "baseDamage": 70, "damageScalingPerOpponentPrizeTaken": null}]`.
 
@@ -328,30 +333,36 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
 }
 ```
 
-### 4. EXEMPLE FEW-SHOT #2 — CARTE POKÉMON NIVEAU 2 : Dracaufeu-ex (Charizard ex)
+### 4. EXEMPLE FEW-SHOT #2 — CARTE POKÉMON ATTAQUANT SANS TALENT (abilities: []) :
 ```json
 {
-  "reasoningAnalysis": "1) Catégorie POKEMON / STAGE_2 (évolue de Reptincel, base Salamèche), rôle MAIN_ATTACKER. 2) Deux actions : Talent Règne Infernal (ABILITY_ON_EVOLVE) qui cherche jusqu'à 3 Énergies {R} (Feu) de base dans le deck et les attache, et Attaque Combustion Obscure (ATTACK, coût 2 Feu, 180 dégâts de base + 30 par Récompense adverse). Stage 2 donc inutilisable au Tour 1. 3) Filtre d'énergie sur Règne Infernal : ENERGY, BASIC_ENERGY, energyType='Feu'. 4) Carte morte si plus aucun Salamèche disponible.",
+  "reasoningAnalysis": "1) Catégorie POKEMON / BASIC, rôle MAIN_ATTACKER. 2) La carte n'a AUCUN talent dans ses données brutes TCGdex (abilities: []) -> INTERDICTION d'inventer une action ABILITY_*, uniquement des attaques (sourceType: 'ATTACK'). Deux attaques : Attaque 1 (pioche/mise en place, 1 énergie incolore) et Attaque 2 (attaque principale, 2 énergies, 70 dégâts par énergie défaussée). 3) Filtres d'énergie sur les coûts. 4) Synergies avec énergies du deck.",
   "category": "POKEMON",
-  "subCategory": "STAGE_2",
+  "subCategory": "BASIC",
   "playableActions": [
     {
-      "actionId": "ability_infernal_reign",
-      "label": "Règne Infernal",
-      "sourceType": "ABILITY_ON_EVOLVE",
-      "timing": "ON_EVOLVE_TRIGGER",
+      "actionId": "attack_burst_setup",
+      "label": "Mise en Place",
+      "sourceType": "ATTACK",
+      "timing": "END_OF_TURN_ATTACK",
       "canUseTurn1GoingFirst": false,
-      "canUseTurn1GoingSecond": false,
+      "canUseTurn1GoingSecond": true,
       "preconditions": [
         {
-          "type": "ZONE_HAS_MATCHING_CARD",
-          "zone": "DECK",
+          "type": "SELF_IS_ACTIVE",
+          "zone": "ACTIVE",
+          "minCount": 1,
+          "targetFilter": null
+        },
+        {
+          "type": "SELF_HAS_ENERGY_COST",
+          "zone": "ACTIVE",
           "minCount": 1,
           "targetFilter": {
             "category": "ENERGY",
-            "subCategory": "BASIC_ENERGY",
+            "subCategory": null,
             "maxHp": null,
-            "energyType": "Feu",
+            "energyType": "Incolore",
             "specificCardName": null
           }
         }
@@ -359,30 +370,24 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
       "costs": [],
       "effects": [
         {
-          "primitive": "SEARCH_AND_ATTACH_ENERGY",
+          "primitive": "DISCARD_HAND_AND_DRAW",
           "sourceZone": "DECK",
-          "targetZone": "IN_PLAY_ALL",
-          "count": 3,
-          "upTo": true,
-          "targetFilter": {
-            "category": "ENERGY",
-            "subCategory": "BASIC_ENERGY",
-            "maxHp": null,
-            "energyType": "Feu",
-            "specificCardName": null
-          },
+          "targetZone": "HAND",
+          "count": 6,
+          "upTo": false,
+          "targetFilter": null,
           "baseDamage": null,
           "damageScalingPerOpponentPrizeTaken": null
         }
       ]
     },
     {
-      "actionId": "attack_burning_darkness",
-      "label": "Combustion Obscure",
+      "actionId": "attack_thunder_strike",
+      "label": "Frappe Foudroyante",
       "sourceType": "ATTACK",
       "timing": "END_OF_TURN_ATTACK",
       "canUseTurn1GoingFirst": false,
-      "canUseTurn1GoingSecond": false,
+      "canUseTurn1GoingSecond": true,
       "preconditions": [
         {
           "type": "SELF_IS_ACTIVE",
@@ -398,12 +403,24 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
             "category": "ENERGY",
             "subCategory": null,
             "maxHp": null,
-            "energyType": "Feu",
+            "energyType": "Électrique",
             "specificCardName": null
           }
         }
       ],
-      "costs": [],
+      "costs": [
+        {
+          "type": "DISCARD_ENERGY_FROM_PLAY",
+          "count": 1,
+          "targetFilter": {
+            "category": "ENERGY",
+            "subCategory": "BASIC_ENERGY",
+            "maxHp": null,
+            "energyType": null,
+            "specificCardName": null
+          }
+        }
+      ],
       "effects": [
         {
           "primitive": "DEAL_DAMAGE_ACTIVE",
@@ -412,74 +429,38 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
           "count": 1,
           "upTo": false,
           "targetFilter": null,
-          "baseDamage": 180,
-          "damageScalingPerOpponentPrizeTaken": 30
+          "baseDamage": 70,
+          "damageScalingPerOpponentPrizeTaken": null
         }
       ]
     }
   ],
   "strategicEvaluator": {
     "primaryRole": "MAIN_ATTACKER",
-    "intrinsicBaseScore": 97,
+    "intrinsicBaseScore": 95,
     "turnPhaseWeights": {
-      "turn1": 0.0,
-      "turn2": 1.8,
+      "turn1": 1.7,
+      "turn2": 1.9,
       "turn3": 2.0,
-      "turn4Plus": 2.0
+      "turn4Plus": 1.9
     },
     "decklistSynergyRequirements": [
-      {
-        "requiredFilter": {
-          "category": "POKEMON",
-          "subCategory": "BASIC",
-          "maxHp": null,
-          "energyType": null,
-          "specificCardName": "Salamèche"
-        },
-        "minCountInDeck": 2,
-        "ifMissingSetValueToZero": true,
-        "bonusWeightPerCopy": 20.0
-      },
-      {
-        "requiredFilter": {
-          "category": "TRAINER",
-          "subCategory": "ITEM",
-          "maxHp": null,
-          "energyType": null,
-          "specificCardName": "Super Bonbon"
-        },
-        "minCountInDeck": 2,
-        "ifMissingSetValueToZero": false,
-        "bonusWeightPerCopy": 15.0
-      },
       {
         "requiredFilter": {
           "category": "ENERGY",
           "subCategory": "BASIC_ENERGY",
           "maxHp": null,
-          "energyType": "Feu",
+          "energyType": null,
           "specificCardName": null
         },
-        "minCountInDeck": 5,
+        "minCountInDeck": 8,
         "ifMissingSetValueToZero": true,
-        "bonusWeightPerCopy": 8.0
+        "bonusWeightPerCopy": 6.0
       }
     ],
-    "inGameDeadCardConditions": [
-      {
-        "reason": "NO_BASE_POKEMON_LINE_LEFT",
-        "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
-        "targetFilter": {
-          "category": "POKEMON",
-          "subCategory": "BASIC",
-          "maxHp": null,
-          "energyType": null,
-          "specificCardName": "Salamèche"
-        }
-      }
-    ],
-    "discardPriorityWhenDead": 82,
-    "holdForNextTurnBonus": 45
+    "inGameDeadCardConditions": [],
+    "discardPriorityWhenDead": 30,
+    "holdForNextTurnBonus": 32
   }
 }
 ```
@@ -552,6 +533,22 @@ def enforce_ptcg_invariants(
     """Garantit les invariants de premier niveau des règles Pokémon TCG sur `LLMCompiledCardPart`."""
     compiled_part.category = bundle.identity.category
     compiled_part.subCategory = bundle.identity.subCategory
+
+    # Purge stricte des talents fantômes si le Pokémon n'a aucun talent dans ses données brutes
+    raw_abilities = (bundle.raw_fr.get("abilities") or []) + ((bundle.raw_en or {}).get("abilities") or [])
+    if not raw_abilities:
+        compiled_part.playableActions = [
+            act for act in compiled_part.playableActions
+            if act.sourceType not in {
+                ActionSourceType.ABILITY_ACTIVATED,
+                ActionSourceType.ABILITY_ON_EVOLVE,
+                ActionSourceType.ABILITY_PASSIVE,
+            }
+            and act.timing not in {
+                ActionTiming.ONCE_PER_TURN_ABILITY,
+                ActionTiming.ON_EVOLVE_TRIGGER,
+            }
+        ]
 
     for action in compiled_part.playableActions:
         if bundle.identity.subCategory == CardSubCategory.SUPPORTER and action.sourceType == ActionSourceType.TRAINER_PLAY:
@@ -720,6 +717,13 @@ class LocalLLMCardCompiler:
 
         user_prompt = build_user_prompt(bundle)
         t0 = time.perf_counter()
+
+        # Reset strict de l'état interne de llama.cpp (KV Cache C++) pour garantir une inférence 100% stateless
+        if hasattr(self._llm, "reset"):
+            try:
+                self._llm.reset()
+            except Exception:
+                pass
 
         completion = self._llm.create_chat_completion(
             messages=[
