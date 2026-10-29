@@ -54,7 +54,7 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "fallback_tcgdex_id": "sv01-191",
     },
     "sv05-144": {
-        "expected_name_fr": "Poffin Pote-Pote",
+        "expected_name_fr": "Poffin",
         "expected_name_en": "Buddy-Buddy Poffin",
         "fallback_tcgdex_id": "sv05-144",
     },
@@ -94,7 +94,7 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "fallback_tcgdex_id": "sv04-160",
     },
     "sv06.5-038": {
-        "expected_name_fr": "Félicanis",
+        "expected_name_fr": "Favianos",
         "expected_name_en": "Fezandipiti",
         "fallback_tcgdex_id": "sv06.5-038",
     },
