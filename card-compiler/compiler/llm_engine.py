@@ -16,13 +16,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from huggingface_hub import hf_hub_download, list_repo_files
+# Désactivation de Xet et de hf_transfer pour éviter les plantages de Background Writer sous macOS
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+
+from huggingface_hub import hf_hub_download, list_repo_files, try_to_load_from_cache
 
 from compiler import load_env_file
 from compiler.post_processor import sanitize_and_enrich_card
@@ -87,10 +92,42 @@ def resolve_best_gguf_for_tier(
     tier: ModelTier = ModelTier.qwen3,
     hf_token: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Interroge Hugging Face via `list_repo_files` pour sélectionner le meilleur `.gguf` disponible sans planter."""
+    """Sélectionne le meilleur fichier .gguf disponible en tenant compte du cache local et de l'espace disque."""
     candidates = TIER_CANDIDATES.get(tier, TIER_CANDIDATES[ModelTier.qwen3])
 
-    for repo_id, preferred_quants, _ in candidates:
+    # 1. Vérification prioritaire si un modèle compatible est déjà présent dans le cache local
+    for repo_id, preferred_quants, fallback_file in candidates:
+        all_quants = list(preferred_quants) + ["q4_k_m", "q5_k_m", "q6_k"]
+        for q in all_quants:
+            test_filenames = [
+                fallback_file,
+                f"qwen2.5-coder-14b-instruct-{q}.gguf",
+                f"Qwen3-14B-{q.upper()}.gguf",
+                f"Qwen_Qwen3-14B-{q.upper()}.gguf",
+                f"qwen2.5-coder-7b-instruct-{q}.gguf",
+                f"qwen2.5-coder-32b-instruct-{q}.gguf",
+                f"Qwen3-30B-A3B-{q.upper()}.gguf",
+            ]
+            for fn in test_filenames:
+                try:
+                    cached_path = try_to_load_from_cache(repo_id, fn)
+                    if cached_path is not None and isinstance(cached_path, (str, Path)) and Path(cached_path).exists():
+                        return repo_id, fn
+                except Exception:
+                    pass
+
+    # 2. Vérification de l'espace disque disponible
+    try:
+        free_gb = shutil.disk_usage(Path.home()).free / (1024**3)
+    except Exception:
+        free_gb = 50.0
+
+    for repo_id, preferred_quants, fallback_file in candidates:
+        quants_to_try = list(preferred_quants)
+        # Si l'espace disque est restreint (< 14 Go), éviter de télécharger un fichier Q6_K de 13 Go
+        if free_gb < 14.0:
+            quants_to_try = [q for q in ["q4_k_m", "q5_k_m", "q4_0"] if q in quants_to_try] or ["q4_k_m"]
+
         try:
             files = list_repo_files(repo_id=repo_id, token=hf_token)
             gguf_files = [
@@ -102,7 +139,7 @@ def resolve_best_gguf_for_tier(
             if not gguf_files:
                 continue
 
-            for quant in preferred_quants:
+            for quant in quants_to_try:
                 for gf in gguf_files:
                     if quant.lower() in gf.lower():
                         return repo_id, gf
@@ -111,8 +148,10 @@ def resolve_best_gguf_for_tier(
         except Exception:
             continue
 
-    # Fallback déterministe si hors-ligne ou API Hugging Face indisponible
+    # 3. Fallback déterministe
     fallback_repo, _, fallback_file = candidates[-1]
+    if free_gb < 14.0 and "14b" in fallback_file.lower():
+        fallback_file = "qwen2.5-coder-14b-instruct-q4_k_m.gguf"
     return fallback_repo, fallback_file
 
 
@@ -586,12 +625,41 @@ class LocalLLMCardCompiler:
             )
             self._resolved = True
 
-        # Tentative sur le candidat résolu puis sur les fallbacks du palier en cas d'erreur réseau/fichier
+        # Vérifie d'abord si le fichier résolu est déjà présent dans le cache local
+        try:
+            cached = try_to_load_from_cache(self.repo_id, self.filename)
+            if cached is not None and isinstance(cached, (str, Path)) and Path(cached).exists():
+                self.model_path = Path(cached)
+                return self.model_path
+        except Exception:
+            pass
+
+        # Liste de paires de candidats et de secours (y compris les versions Q4_K_M plus légères)
         tried_pairs: List[Tuple[str, str]] = [(self.repo_id, self.filename)]
         for cand_repo, _, cand_file in TIER_CANDIDATES.get(self.tier, []):
-            if (cand_repo, cand_file) not in tried_pairs:
-                tried_pairs.append((cand_repo, cand_file))
+            for candidate_filename in [
+                cand_file,
+                cand_file.replace("q6_k", "q4_k_m").replace("Q6_K", "Q4_K_M"),
+                "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+                "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+            ]:
+                pair = (cand_repo, candidate_filename)
+                if pair not in tried_pairs:
+                    tried_pairs.append(pair)
 
+        # Passe 1 : recherche instantanée dans le cache local (0 Mo à télécharger)
+        for r_id, f_name in tried_pairs:
+            try:
+                cached = try_to_load_from_cache(r_id, f_name)
+                if cached is not None and isinstance(cached, (str, Path)) and Path(cached).exists():
+                    self.repo_id = r_id
+                    self.filename = f_name
+                    self.model_path = Path(cached)
+                    return self.model_path
+            except Exception:
+                continue
+
+        # Passe 2 : téléchargement via hf_hub_download (avec Xet désactivé pour éviter les plantages)
         last_err: Optional[Exception] = None
         for r_id, f_name in tried_pairs:
             try:
