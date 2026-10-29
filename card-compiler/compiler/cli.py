@@ -41,6 +41,7 @@ from compiler.llm_engine import (
     FAST_MODEL_REPO_ID,
     LocalLLMCardCompiler,
 )
+from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import EngineCardModel
 from compiler.tcgdex_fetcher import TEST_CARD_IDS, TCGdexFetcher
 
@@ -180,6 +181,11 @@ def _execute_run_pipeline(
         if out_path.exists() and not force:
             try:
                 existing_model = EngineCardModel.model_validate_json(out_path.read_text(encoding="utf-8"))
+                existing_model = sanitize_and_enrich_card(bundle, existing_model)
+                out_path.write_text(
+                    json.dumps(existing_model.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
                 compiled_results.append(existing_model)
                 skipped_ids.add(bundle.card_id)
                 continue

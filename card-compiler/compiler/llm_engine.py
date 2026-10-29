@@ -4,9 +4,10 @@ Ce module :
 1. Télécharge automatiquement le modèle `.gguf` depuis Hugging Face via `huggingface_hub.hf_hub_download`
    (par défaut `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` en `Q4_K_M`, ou `7B` avec `--fast`).
 2. Charge une seule fois le modèle directement en RAM/VRAM avec `Llama(..., n_gpu_layers=-1)`.
-3. Applique le `SYSTEM_PROMPT` expert Pokémon TCG (avec Few-Shot complet) et force la sortie via
-   `response_format={"type": "json_object", "schema": LLMCompiledCardPart.model_json_schema()}`.
-4. Fusionne la sortie contrainte avec `CardIdentity` et `PokemonStats` pour produire `EngineCardModel`.
+3. Applique le `SYSTEM_PROMPT` expert Pokémon TCG (avec règles anti-hallucinations et 2 exemples Few-Shot complets)
+   et force la sortie via `response_format={"type": "json_object", "schema": LLMCompiledCardPart.model_json_schema()}`.
+4. Fusionne la sortie contrainte avec `CardIdentity` et `PokemonStats`, puis exécute le post-processeur
+   déterministe `sanitize_and_enrich_card` pour produire un `EngineCardModel` 100 % conforme.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Any, Dict, Optional
 from huggingface_hub import hf_hub_download
 
 from compiler import load_env_file
+from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import (
     ActionSourceType,
     ActionTiming,
@@ -39,43 +41,56 @@ FAST_MODEL_FILENAME = "qwen2.5-coder-7b-instruct-q4_k_m.gguf"
 
 
 SYSTEM_PROMPT = """Tu es un compilateur expert du Jeu de Cartes à Collectionner Pokémon (Pokémon TCG - Format Standard).
-Ta mission est de traduire les données brutes d'une carte Pokémon TCG en un modèle formel déterministe `LLMCompiledCardPart` composé de primitives atomiques d'actions (`playableActions`) et d'un évaluateur stratégique dynamique (`strategicEvaluator`).
+Ta mission est de traduire les données brutes TCGdex d'une carte Pokémon TCG en un modèle formel déterministe `LLMCompiledCardPart` composé de primitives atomiques d'actions (`playableActions`) et d'un évaluateur stratégique dynamique (`strategicEvaluator`).
 
-### 1. RÈGLES OFFICIELLES POKÉMON TCG À RESPECTER IMPÉRATIVEMENT
-- **Tour 1 du Premier Joueur (`canUseTurn1GoingFirst`)** :
-  - `false` pour TOUTE carte `SUPPORTER` (interdit de jouer un Supporter au Tour 1 quand on commence).
-  - `false` pour TOUTE attaque (`sourceType: "ATTACK"`).
-  - `false` pour TOUTE carte d'évolution ou `Super Bonbon` / `Rare Candy` (`EVOLVE_SKIP_STAGE1`, `EVOLVE_NORMAL`).
-  - `true` pour les cartes `ITEM` de recherche/déploiement (ex: Poffin Pote-Pote, Faiblo Ball, Hyper Ball, Attrape-Riposte) et les Talents de Pokémon de Base utilisables dès le Tour 1.
-- **Tour 1 du Second Joueur (`canUseTurn1GoingSecond`)** :
-  - `true` pour les cartes `SUPPORTER` et les `ATTACK` d'un Pokémon de Base.
-  - `false` pour `Super Bonbon` (`EVOLVE_SKIP_STAGE1`) et toute évolution (un Pokémon posé ce tour ne peut pas évoluer au Tour 1).
-- **Correspondance `sourceType` et `timing`** :
-  - Carte Objet (`ITEM`), Outil (`TOOL`), Stade (`STADIUM`) : `sourceType: "TRAINER_PLAY"`, `timing: "ONCE_PER_CARD"`.
-  - Carte Supporter (`SUPPORTER`) : `sourceType: "TRAINER_PLAY"`, `timing: "ONCE_PER_TURN_SUPPORTER"`.
-  - Talent activable à chaque tour (ex: *Recherche Rapide* de Roucarnage-ex, *Retour Renversant* de Félicanis-ex) : `sourceType: "ABILITY_ACTIVATED"`, `timing: "ONCE_PER_TURN_ABILITY"`.
-  - Talent déclenché lors de l'évolution depuis la main (ex: *Règne Infernal* de Dracaufeu-ex) : `sourceType: "ABILITY_ON_EVOLVE"`, `timing: "ON_EVOLVE_TRIGGER"`.
-  - Talent passif continu : `sourceType: "ABILITY_PASSIVE"`, `timing: "ONCE_PER_TURN_ABILITY"`.
-  - Attaque de Pokémon : `sourceType: "ATTACK"`, `timing: "END_OF_TURN_ATTACK"`.
+### 1. RÈGLES CRITIQUES ET INTERDICTIONS D'HALLUCINATIONS SÉMANTIQUES
+1. **INTERDICTION D'UTILISER `SHUFFLE_HAND_AND_DRAW` POUR UN MÉLANGE DE DECK** :
+   - Lorsqu'une carte de recherche (ex: Pepper / Arven, Hyper Ball, Faiblo Ball, Poffin Copain-Copain) se termine par *"Mélangez ensuite votre deck"* (*"Then, shuffle your deck"*), ce mélange de deck est implicite à toute recherche.
+   - Tu ne dois **JAMAIS** ajouter d'effet `SHUFFLE_HAND_AND_DRAW` pour cela ! `SHUFFLE_HAND_AND_DRAW` est réservé uniquement aux cartes qui mélangent la **MAIN** dans le deck pour piocher un nombre fixe de cartes.
+   - Pour **Mashynn (Iono)** qui place la main **en dessous du deck** (*"bottom of their deck"*) et pioche selon les cartes Récompense restantes, utilise **exclusivement** `SHUFFLE_HAND_BOTTOM_DRAW_PRIZES` avec `targetFilter: null`, `primaryRole: "HAND_DISRUPTION"` et `turnPhaseWeights.turn1: 0.8`.
 
-### 2. RÈGLES D'ÉVALUATION DYNAMIQUE (`strategicEvaluator`)
-- **`decklistSynergyRequirements`** :
-  - **Super Bonbon (Rare Candy)** : exige des Pokémon `STAGE_2` dans le deck (`minCountInDeck: 2`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 15.0`) ET des Pokémon `BASIC` (`minCountInDeck: 2`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 10.0`).
-  - **Poffin Pote-Pote (Buddy-Buddy Poffin)** : exige des Pokémon `BASIC` avec `maxHp: 70` (`minCountInDeck: 4`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 12.0`).
-  - **Faiblo Ball (Nest Ball)** : exige des Pokémon `BASIC` (`minCountInDeck: 4`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 8.0`).
-  - **Hyper Ball (Ultra Ball)** : exige des Pokémon (`category: "POKEMON"`, `minCountInDeck: 6`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 5.0`).
-  - **Pepper (Arven)** : exige des cartes `ITEM` (`minCountInDeck: 4`, `ifMissingSetValueToZero: false`, `bonusWeightPerCopy: 8.0`) et des cartes `TOOL` (`minCountInDeck: 1`, `ifMissingSetValueToZero: false`, `bonusWeightPerCopy: 12.0`).
-  - **Pokémon `STAGE_2` (ex: Dracaufeu-ex, Roucarnage-ex)** : exige son Pokémon `BASIC` racine (`specificCardName: rootBasicName`, `minCountInDeck: 2`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 20.0`) ainsi que l'Objet `Super Bonbon` (`category: "TRAINER"`, `subCategory: "ITEM"`, `specificCardName: "Super Bonbon"`, `minCountInDeck: 2`, `ifMissingSetValueToZero: false`, `bonusWeightPerCopy: 15.0`). Also pour Dracaufeu-ex, exige des `BASIC_ENERGY` de type `"Feu"` (`minCountInDeck: 5`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 8.0`).
-- **`inGameDeadCardConditions`** :
-  - **Super Bonbon** : `NO_STAGE2_LEFT_IN_DECK_OR_HAND` sur `["DECK", "HAND"]` (filtre `POKEMON` + `STAGE_2`) ET `NO_BASE_POKEMON_LINE_LEFT` sur `["BENCH", "ACTIVE"]` (filtre `POKEMON` + `BASIC`).
-  - **Poffin Pote-Pote / Faiblo Ball** : `BENCH_ALREADY_FULL` sur `["BENCH"]` ET `NO_VALID_TARGET_IN_DECK` sur `["DECK"]` (avec le filtre `BASIC` <= 70 PV pour Poffin, ou `BASIC` pour Faiblo Ball).
-  - **Hyper Ball / Pepper** : `NO_VALID_TARGET_IN_DECK` sur `["DECK"]`.
-  - **Attrape-Riposte (Counter Catcher)** : `NOT_BEHIND_ON_PRIZES` sur `["PRIZES"]`.
-  - **Pokémon `STAGE_2` (Dracaufeu-ex, Roucarnage-ex)** : `NO_BASE_POKEMON_LINE_LEFT` sur `["BENCH", "ACTIVE", "DECK", "HAND"]` avec `specificCardName` pointant vers le Pokémon de Base racine (ex: `"Salamèche"` ou `"Roucool"`).
+2. **DISTINCTION STRICTE ENTRE `SEARCH_DECK_TO_BENCH` ET `DEAL_DAMAGE_ACTIVE`** :
+   - `SEARCH_DECK_TO_BENCH` (`sourceZone: "DECK"`, `targetZone: "BENCH"`) : à utiliser obligatoirement quand une carte cherche des Pokémon dans le deck et dit *"placez-le sur votre Banc"* ou *"placez-les sur votre Banc"* (ex: **Faiblo Ball / Nest Ball**, **Poffin Copain-Copain / Buddy-Buddy Poffin**). Ces cartes DOIVENT avoir la précondition `BENCH_HAS_EMPTY_SLOTS` (`zone: "BENCH"`, `minCount: 1`) et `primaryRole: "BENCH_DEPLOYER"`.
+   - `DEAL_DAMAGE_ACTIVE` : réservé **exclusivement** aux attaques (`sourceType: "ATTACK"`) d'un Pokémon qui infligent des dégâts. Une carte Dresseur (`TRAINER`) n'utilise **JAMAIS** `DEAL_DAMAGE_ACTIVE`.
 
-### 3. EXEMPLE FEW-SHOT COMPLET (Super Bonbon / Rare Candy)
-Entrée : Carte Dresseur Objet "Super Bonbon" (Rare Candy).
-Sortie JSON attendue :
+3. **DISTINCTION STRICTE ENTRE `SWITCH_ACTIVE_POKEMON` ET `GUST_OPPONENT_BENCH`** :
+   - `SWITCH_ACTIVE_POKEMON` : échange **votre propre** Pokémon Actif avec l'un de vos Pokémon de Banc (ex: Échange / Switch, Chariot Échange).
+   - `GUST_OPPONENT_BENCH` : force **votre adversaire** à envoyer l'un de ses Pokémon de Banc sur le Poste Actif (*"Envoyez l'un des Pokémon de Banc de votre adversaire sur le Poste Actif"* / *"Switch in 1 of your opponent's Benched Pokémon to the Active Spot"*, ex: **Attrape-Riposte / Counter Catcher**, **Ordres du Boss / Boss's Orders**). Son `primaryRole` DOIT être `"GUST_BOSS_EFFECT"`. Pour Attrape-Riposte, ajoute la précondition `PLAYER_BEHIND_ON_PRIZES`, la condition de carte morte `NOT_BEHIND_ON_PRIZES` et des poids faibles au T1 (`turn1: 0.2`) mais forts aux T2/T3 (`1.6`, `1.8`).
+
+4. **PRÉCISION DES FILTRES (`targetFilter`)** :
+   - **Hyper Ball (Ultra Ball)** cherche *"un Pokémon"* sans restriction de stade : `targetFilter` doit avoir `category: "POKEMON"` et **`subCategory: null`** (surtout PAS `"BASIC"` !), avec `primaryRole: "CONSISTENCY_TUTOR"`.
+   - **Recherche Rapide (Quick Search)** de **Roucarnage-ex (Pidgeot ex)** cherche *"une carte"* (n'importe laquelle) : `targetFilter` doit être **`null`**, et son `primaryRole` doit être `"TUTOR_ENGINE_POKEMON"`.
+   - **Pepper (Arven)** cherche 1 carte `ITEM` et 1 carte `TOOL` : génère exactement **2 effets** `SEARCH_DECK_TO_HAND` (`upTo: true`, `count: 1`), avec `primaryRole: "CONSISTENCY_TUTOR"`.
+
+5. **OBLIGATION DE MODÉLISER TOUS LES TALENTS ET TOUTES LES ATTAQUES DES POKÉMON** :
+   - Tout Pokémon ayant des entrées dans `abilitiesFr`/`abilitiesEn` DOIT avoir une action `ABILITY_ON_EVOLVE`, `ABILITY_ACTIVATED` ou `ABILITY_PASSIVE` dans `playableActions`.
+   - Tout Pokémon ayant des entrées dans `attacksFr`/`attacksEn` DOIT obligatoirement avoir une action `sourceType: "ATTACK"` (`timing: "END_OF_TURN_ATTACK"`) correspondante dans `playableActions` (ex: *Combustion Obscure* pour Dracaufeu-ex, *Rafale Tornade* pour Roucarnage-ex, *Flèche Cruelle / Cruel Arrow* à 100 dégâts pour Félicanis-ex / Fezandipiti ex).
+   - N'invente **JAMAIS** de coût `DISCARD_ENERGY_FROM_PLAY` ni d'effet `DISCARD_HAND_AND_DRAW` sur une attaque si le texte de l'attaque ne demande pas explicitement de défausser.
+
+6. **RÈGLES PHYSIQUES DU TOUR 1 ET DES STADES D'ÉVOLUTION (`STAGE_1`, `STAGE_2`)** :
+   - Tout Pokémon `STAGE_1` ou `STAGE_2` (ex: **Dracaufeu-ex**, **Roucarnage-ex**) a obligatoirement `canUseTurn1GoingFirst: false` et `canUseTurn1GoingSecond: false` sur **toutes** ses actions (Talents ET Attaques), ainsi que `turnPhaseWeights.turn1 = 0.0`.
+   - Tout Talent exigeant qu'un Pokémon ait été mis KO au tour précédent (`KO_SUFFERED_LAST_TURN`, ex: *Retour Renversant / Flip the Script* de **Félicanis-ex / Fezandipiti ex**) a obligatoirement `canUseTurn1GoingFirst: false`, `turnPhaseWeights.turn1 = 0.0`, `turn2 = 1.6`, `turn3 = 1.8`, et `primaryRole: "DRAW_ENGINE_POKEMON"`.
+   - Toute carte `SUPPORTER` a `canUseTurn1GoingFirst: false`, `canUseTurn1GoingSecond: true`, `timing: "ONCE_PER_TURN_SUPPORTER"`.
+   - **Super Bonbon (Rare Candy)** a `canUseTurn1GoingFirst: false`, `canUseTurn1GoingSecond: false`, `turnPhaseWeights.turn1 = 0.0`.
+
+7. **OBLIGATION DE REMPLIR `decklistSynergyRequirements` ET `inGameDeadCardConditions`** :
+   - **Super Bonbon (`sv04-125`)** :
+     - `preconditions` : `BASIC_IN_PLAY_PREVIOUS_TURN` (1 `BASIC` en jeu) + `ZONE_HAS_MATCHING_CARD` (`zone: "HAND"`, 1 `POKEMON` `STAGE_2`).
+     - `decklistSynergyRequirements` : `STAGE_2` (`minCountInDeck: 1`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 15.0`) + `BASIC` (`minCountInDeck: 2`, `ifMissingSetValueToZero: true`, `bonusWeightPerCopy: 10.0`).
+     - `inGameDeadCardConditions` : `NO_STAGE2_LEFT_IN_DECK_OR_HAND` sur `["HAND", "DECK"]` (`STAGE_2`) + `NO_BASE_POKEMON_LINE_LEFT` sur `["BENCH", "ACTIVE", "HAND", "DECK"]` (`BASIC`).
+   - **Poffin Copain-Copain (`sv05-144`) & Faiblo Ball (`sv01-181`)** :
+     - `decklistSynergyRequirements` : `BASIC` (avec `maxHp: 70` pour Poffin), `minCountInDeck: 4`, `ifMissingSetValueToZero: true`.
+     - `inGameDeadCardConditions` : `BENCH_ALREADY_FULL` sur `["BENCH"]` + `NO_VALID_TARGET_IN_DECK` sur `["DECK"]`.
+   - **Pepper (`sv01-166`)** :
+     - `decklistSynergyRequirements` : `ITEM` (`minCountInDeck: 4`) + `TOOL` (`minCountInDeck: 1`).
+     - `inGameDeadCardConditions` : `NO_VALID_TARGET_IN_DECK` sur `["DECK"]` pour `ITEM`.
+   - **Pokémon `STAGE_2` (Dracaufeu-ex, Roucarnage-ex)** :
+     - `decklistSynergyRequirements` : son Pokémon `BASIC` racine (`specificCardName: rootBasicName`, `minCountInDeck: 2`, `ifMissingSetValueToZero: true`) + `"Super Bonbon"` (`ITEM`, `minCountInDeck: 2`). N'ajoute JAMAIS `SPECIAL_ENERGY` si la carte n'en mentionne pas !
+     - `inGameDeadCardConditions` : `NO_BASE_POKEMON_LINE_LEFT` sur `["BENCH", "ACTIVE", "HAND", "DECK"]` pour `rootBasicName`.
+
+---
+
+### 2. EXEMPLE FEW-SHOT #1 — CARTE DRESSEUR OBJET : Super Bonbon (Rare Candy)
 ```json
 {
   "category": "TRAINER",
@@ -83,7 +98,7 @@ Sortie JSON attendue :
   "playableActions": [
     {
       "actionId": "play_rare_candy",
-      "label": "Super Bonbon (Évolution directe De base -> Niveau 2)",
+      "label": "Super Bonbon",
       "sourceType": "TRAINER_PLAY",
       "timing": "ONCE_PER_CARD",
       "canUseTurn1GoingFirst": false,
@@ -141,8 +156,8 @@ Sortie JSON attendue :
     "turnPhaseWeights": {
       "turn1": 0.0,
       "turn2": 1.9,
-      "turn3": 1.5,
-      "turn4Plus": 0.8
+      "turn3": 1.6,
+      "turn4Plus": 0.9
     },
     "decklistSynergyRequirements": [
       {
@@ -153,7 +168,7 @@ Sortie JSON attendue :
           "energyType": null,
           "specificCardName": null
         },
-        "minCountInDeck": 2,
+        "minCountInDeck": 1,
         "ifMissingSetValueToZero": true,
         "bonusWeightPerCopy": 15.0
       },
@@ -173,7 +188,7 @@ Sortie JSON attendue :
     "inGameDeadCardConditions": [
       {
         "reason": "NO_STAGE2_LEFT_IN_DECK_OR_HAND",
-        "zonesToCheck": ["DECK", "HAND"],
+        "zonesToCheck": ["HAND", "DECK"],
         "targetFilter": {
           "category": "POKEMON",
           "subCategory": "STAGE_2",
@@ -184,7 +199,7 @@ Sortie JSON attendue :
       },
       {
         "reason": "NO_BASE_POKEMON_LINE_LEFT",
-        "zonesToCheck": ["BENCH", "ACTIVE"],
+        "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
         "targetFilter": {
           "category": "POKEMON",
           "subCategory": "BASIC",
@@ -196,6 +211,161 @@ Sortie JSON attendue :
     ],
     "discardPriorityWhenDead": 95,
     "holdForNextTurnBonus": 42
+  }
+}
+```
+
+### 3. EXEMPLE FEW-SHOT #2 — CARTE POKÉMON NIVEAU 2 : Dracaufeu-ex (Charizard ex)
+```json
+{
+  "category": "POKEMON",
+  "subCategory": "STAGE_2",
+  "playableActions": [
+    {
+      "actionId": "ability_infernal_reign",
+      "label": "Règne Infernal",
+      "sourceType": "ABILITY_ON_EVOLVE",
+      "timing": "ON_EVOLVE_TRIGGER",
+      "canUseTurn1GoingFirst": false,
+      "canUseTurn1GoingSecond": false,
+      "preconditions": [
+        {
+          "type": "ZONE_HAS_MATCHING_CARD",
+          "zone": "DECK",
+          "minCount": 1,
+          "targetFilter": {
+            "category": "ENERGY",
+            "subCategory": "BASIC_ENERGY",
+            "maxHp": null,
+            "energyType": "Feu",
+            "specificCardName": null
+          }
+        }
+      ],
+      "costs": [],
+      "effects": [
+        {
+          "primitive": "SEARCH_AND_ATTACH_ENERGY",
+          "sourceZone": "DECK",
+          "targetZone": "IN_PLAY_ALL",
+          "count": 3,
+          "upTo": true,
+          "targetFilter": {
+            "category": "ENERGY",
+            "subCategory": "BASIC_ENERGY",
+            "maxHp": null,
+            "energyType": "Feu",
+            "specificCardName": null
+          },
+          "baseDamage": null,
+          "damageScalingPerOpponentPrizeTaken": null
+        }
+      ]
+    },
+    {
+      "actionId": "attack_burning_darkness",
+      "label": "Combustion Obscure",
+      "sourceType": "ATTACK",
+      "timing": "END_OF_TURN_ATTACK",
+      "canUseTurn1GoingFirst": false,
+      "canUseTurn1GoingSecond": false,
+      "preconditions": [
+        {
+          "type": "SELF_IS_ACTIVE",
+          "zone": "ACTIVE",
+          "minCount": 1,
+          "targetFilter": null
+        },
+        {
+          "type": "SELF_HAS_ENERGY_COST",
+          "zone": "ACTIVE",
+          "minCount": 2,
+          "targetFilter": {
+            "category": "ENERGY",
+            "subCategory": null,
+            "maxHp": null,
+            "energyType": "Feu",
+            "specificCardName": null
+          }
+        }
+      ],
+      "costs": [],
+      "effects": [
+        {
+          "primitive": "DEAL_DAMAGE_ACTIVE",
+          "sourceZone": "ACTIVE",
+          "targetZone": "ACTIVE",
+          "count": 1,
+          "upTo": false,
+          "targetFilter": null,
+          "baseDamage": 180,
+          "damageScalingPerOpponentPrizeTaken": 30
+        }
+      ]
+    }
+  ],
+  "strategicEvaluator": {
+    "primaryRole": "MAIN_ATTACKER",
+    "intrinsicBaseScore": 98,
+    "turnPhaseWeights": {
+      "turn1": 0.0,
+      "turn2": 1.8,
+      "turn3": 2.0,
+      "turn4Plus": 2.0
+    },
+    "decklistSynergyRequirements": [
+      {
+        "requiredFilter": {
+          "category": "POKEMON",
+          "subCategory": "BASIC",
+          "maxHp": null,
+          "energyType": null,
+          "specificCardName": "Salamèche"
+        },
+        "minCountInDeck": 2,
+        "ifMissingSetValueToZero": true,
+        "bonusWeightPerCopy": 20.0
+      },
+      {
+        "requiredFilter": {
+          "category": "TRAINER",
+          "subCategory": "ITEM",
+          "maxHp": null,
+          "energyType": null,
+          "specificCardName": "Super Bonbon"
+        },
+        "minCountInDeck": 2,
+        "ifMissingSetValueToZero": false,
+        "bonusWeightPerCopy": 15.0
+      },
+      {
+        "requiredFilter": {
+          "category": "ENERGY",
+          "subCategory": "BASIC_ENERGY",
+          "maxHp": null,
+          "energyType": "Feu",
+          "specificCardName": null
+        },
+        "minCountInDeck": 5,
+        "ifMissingSetValueToZero": true,
+        "bonusWeightPerCopy": 8.0
+      }
+    ],
+    "inGameDeadCardConditions": [
+      {
+        "reason": "NO_BASE_POKEMON_LINE_LEFT",
+        "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
+        "targetFilter": {
+          "category": "POKEMON",
+          "subCategory": "BASIC",
+          "maxHp": null,
+          "energyType": null,
+          "specificCardName": "Salamèche"
+        }
+      }
+    ],
+    "discardPriorityWhenDead": 85,
+    "holdForNextTurnBonus": 45
   }
 }
 ```
@@ -236,7 +406,6 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
             "isRuleBox": pstats.isRuleBox,
         }
 
-    # Inclusion des structures brutes d'effets/talents/attaques FR et EN pour précision maximale
     if bundle.raw_fr.get("abilities"):
         payload["abilitiesFr"] = bundle.raw_fr.get("abilities")
     if bundle.raw_en and bundle.raw_en.get("abilities"):
@@ -253,7 +422,9 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
     return (
         "Compile la carte Pokémon TCG suivante en un objet JSON conforme au schéma `LLMCompiledCardPart`.\n"
         f"Utilise obligatoirement `category`: \"{identity.category.value}\" et "
-        f"`subCategory`: \"{identity.subCategory.value}\".\n\n"
+        f"`subCategory`: \"{identity.subCategory.value}\".\n"
+        "Si c'est un POKEMON, génère une action par Talent (`abilitiesFr`) ET une action `ATTACK` par attaque (`attacksFr`).\n"
+        "Si c'est un TRAINER, n'utilise jamais `SHUFFLE_HAND_AND_DRAW` pour un simple mélange de deck après recherche.\n\n"
         "DONNÉES TCGDEX DE LA CARTE :\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
@@ -263,37 +434,31 @@ def enforce_ptcg_invariants(
     compiled_part: LLMCompiledCardPart,
     bundle: FetchedCardBundle,
 ) -> LLMCompiledCardPart:
-    """Garantit les invariants déterministes des règles Pokémon TCG sur la sortie du LLM."""
+    """Garantit les invariants de premier niveau des règles Pokémon TCG sur `LLMCompiledCardPart`."""
     compiled_part.category = bundle.identity.category
     compiled_part.subCategory = bundle.identity.subCategory
 
     for action in compiled_part.playableActions:
-        # 1. Règle Supporter : jamais au Tour 1 du joueur qui commence
         if bundle.identity.subCategory == CardSubCategory.SUPPORTER and action.sourceType == ActionSourceType.TRAINER_PLAY:
             action.canUseTurn1GoingFirst = False
             action.canUseTurn1GoingSecond = True
             action.timing = ActionTiming.ONCE_PER_TURN_SUPPORTER
 
-        # 2. Règle Attaque : jamais au Tour 1 du joueur qui commence, met fin au tour
         if action.sourceType == ActionSourceType.ATTACK:
             action.canUseTurn1GoingFirst = False
             action.timing = ActionTiming.END_OF_TURN_ATTACK
             if bundle.identity.subCategory in {CardSubCategory.STAGE_1, CardSubCategory.STAGE_2}:
                 action.canUseTurn1GoingSecond = False
 
-        # 3. Règle Évolution / Super Bonbon : jamais au Tour 1 (ni 1er ni 2nd joueur)
         if any(eff.primitive.value in {"EVOLVE_SKIP_STAGE1", "EVOLVE_NORMAL"} for eff in action.effects):
             action.canUseTurn1GoingFirst = False
             action.canUseTurn1GoingSecond = False
 
-        # 4. Talent déclenché à l'évolution d'un Niveau 1 / Niveau 2 : impossible au Tour 1
-        if (
-            action.sourceType == ActionSourceType.ABILITY_ON_EVOLVE
-            and bundle.identity.subCategory in {CardSubCategory.STAGE_1, CardSubCategory.STAGE_2}
-        ):
+        if bundle.identity.subCategory in {CardSubCategory.STAGE_1, CardSubCategory.STAGE_2}:
             action.canUseTurn1GoingFirst = False
             action.canUseTurn1GoingSecond = False
-            action.timing = ActionTiming.ON_EVOLVE_TRIGGER
+            if action.sourceType == ActionSourceType.ABILITY_ON_EVOLVE:
+                action.timing = ActionTiming.ON_EVOLVE_TRIGGER
 
     return compiled_part
 
@@ -365,7 +530,7 @@ class LocalLLMCardCompiler:
         temperature: float = 0.1,
         max_tokens: int = 2048,
     ) -> EngineCardModel:
-        """Compile une carte unique avec Constrained Decoding GBNF et retourne `EngineCardModel` validé."""
+        """Compile une carte unique avec Constrained Decoding GBNF, post-processe et retourne `EngineCardModel`."""
         self.load_model_in_memory()
 
         user_prompt = build_user_prompt(bundle)
@@ -407,4 +572,7 @@ class LocalLLMCardCompiler:
             strategicEvaluator=compiled_part.strategicEvaluator,
             compilationMetadata=metadata,
         )
+
+        # Post-processing déterministe des règles métier Pokémon TCG
+        engine_card = sanitize_and_enrich_card(bundle, engine_card)
         return engine_card
