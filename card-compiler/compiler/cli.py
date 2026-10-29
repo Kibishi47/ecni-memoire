@@ -106,6 +106,7 @@ def _execute_run_pipeline(
     fast: bool,
     force: bool,
     limit: Optional[int],
+    hf_token: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -130,11 +131,19 @@ def _execute_run_pipeline(
         else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
     )
 
+    compiler_engine_preview = LocalLLMCardCompiler(fast=fast, hf_token=hf_token)
+    token_status = (
+        "[green]Configuré ✓ (téléchargement accéléré)[/green]"
+        if compiler_engine_preview.hf_token
+        else "[yellow]Non renseigné (anonyme)[/yellow]"
+    )
+
     console.print(
         Panel.fit(
             f"[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF)[/bold cyan]\n"
             f"• [bold]Mode[/bold] : {mode_label}\n"
             f"• [bold]Modèle GGUF[/bold] : [yellow]{model_repo}[/yellow] ([green]{model_file}[/green])\n"
+            f"• [bold]HF Token[/bold] : {token_status}\n"
             f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
             f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}",
             border_style="cyan",
@@ -179,7 +188,7 @@ def _execute_run_pipeline(
         bundles_to_compile.append(bundle)
 
     if bundles_to_compile:
-        compiler_engine = LocalLLMCardCompiler(fast=fast)
+        compiler_engine = LocalLLMCardCompiler(fast=fast, hf_token=hf_token)
         with console.status(
             f"[bold magenta]Étape 3a : Téléchargement / vérification de {model_file} et chargement en RAM/VRAM (Metal)...[/bold magenta]"
         ):
@@ -312,6 +321,12 @@ def run_command(
         "--limit",
         help="Nombre maximum de cartes à traiter en mode standard.",
     ),
+    hf_token: Optional[str] = typer.Option(
+        None,
+        "--hf-token",
+        envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
+        help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     _execute_run_pipeline(
@@ -322,6 +337,7 @@ def run_command(
         fast=fast,
         force=force,
         limit=limit,
+        hf_token=hf_token,
     )
 
 
@@ -334,6 +350,12 @@ def compile_alias(
     fast: bool = typer.Option(False, "--fast"),
     force: bool = typer.Option(False, "--force"),
     limit: Optional[int] = typer.Option(None, "--limit"),
+    hf_token: Optional[str] = typer.Option(
+        None,
+        "--hf-token",
+        envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
+        help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     _execute_run_pipeline(
@@ -344,6 +366,7 @@ def compile_alias(
         fast=fast,
         force=force,
         limit=limit,
+        hf_token=hf_token,
     )
 
 

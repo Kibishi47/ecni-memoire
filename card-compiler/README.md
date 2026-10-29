@@ -34,6 +34,9 @@ card-compiler/
 chmod +x setup_mac_metal.sh
 ./setup_mac_metal.sh
 source .venv/bin/activate
+# Renseigne ton jeton Hugging Face dans .env (fichier ignoré par git)
+cp .env.example .env
+# Remplir HF_TOKEN=hf_... dans .env
 ```
 
 ## Utilisation du CLI
@@ -48,6 +51,7 @@ Options disponibles sur `run` (alias `compile`) :
 - `--mode test` (défaut) : Compile les 10 cartes stratégiques de référence (`TEST_CARD_IDS`).
 - `--mode standard` : Compile toutes les cartes légales au format Standard (`legal.standard == true`).
 - `--ids sv04-125,sv03-125` : Compile uniquement la liste d'identifiants fournie.
+- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer le téléchargement du modèle GGUF (peut aussi être configuré via `export HF_TOKEN="hf_..."`).
 - `--fast` : Utilise le modèle 7B (`Qwen/Qwen2.5-Coder-7B-Instruct-GGUF`) au lieu du 14B par défaut.
 - `--force` : Force la recompilation même si le fichier existe déjà dans `data/compiled_cards/`.
 
