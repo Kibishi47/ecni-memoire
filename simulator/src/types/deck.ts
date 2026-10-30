@@ -61,6 +61,7 @@ export interface ParsedDeck {
   isValid60: boolean
   hasAtLeastOneBasic: boolean
   isFullyResolved: boolean
+  isDatabaseLoaded: boolean
   unresolvedCount: number
   unresolvedCards: ParsedDeckEntry[]
   warnings: ParseWarning[]

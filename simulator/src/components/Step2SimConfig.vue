@@ -110,6 +110,7 @@ function updateSeedValue(val: number) {
 
 const isValidConfig = computed(() => {
   return (
+    props.deck.isDatabaseLoaded &&
     props.deck.isFullyResolved &&
     props.config.selectedOpponentIds.length >= 1 &&
     props.config.iterations >= 1 &&
@@ -150,11 +151,11 @@ const isValidConfig = computed(() => {
           </button>
           <button
             type="button"
-            :disabled="!isValidConfig || !deck.isFullyResolved"
+            :disabled="!isValidConfig || !deck.isFullyResolved || !deck.isDatabaseLoaded"
             @click="emit('launch-simulation')"
             class="rounded-lg border px-5 py-2.5 text-sm font-semibold transition"
             :class="
-              isValidConfig && deck.isFullyResolved
+              isValidConfig && deck.isFullyResolved && deck.isDatabaseLoaded
                 ? 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
                 : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
             "
@@ -164,13 +165,33 @@ const isValidConfig = computed(() => {
         </div>
       </div>
 
-      <!-- Bandeau de Blocage Critique si cartes non résolues -->
+      <!-- Bandeau de Blocage Critique si base de données vide -->
       <div
-        v-if="!deck.isFullyResolved"
+        v-if="!deck.isDatabaseLoaded"
         class="mt-4 rounded-xl border-2 border-red-400 bg-red-50 p-4 text-red-950 shadow-xs"
       >
         <div class="flex items-center gap-2 text-sm font-bold text-red-900">
-          <span class="text-lg">⚠️</span>
+          <svg class="h-5 w-5 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span>
+            Simulation impossible : la base de données cards_database.json est vide.
+          </span>
+        </div>
+        <p class="mt-1 text-xs text-red-700">
+          Exécutez <code class="font-mono bg-white px-1 py-0.5 rounded border border-red-300">npm run sync-cards</code> pour synchroniser la base compilée depuis <code class="font-mono">card-compiler/data/cards_database.json</code>.
+        </p>
+      </div>
+
+      <!-- Bandeau de Blocage Critique si cartes non résolues -->
+      <div
+        v-else-if="!deck.isFullyResolved"
+        class="mt-4 rounded-xl border-2 border-red-400 bg-red-50 p-4 text-red-950 shadow-xs"
+      >
+        <div class="flex items-center gap-2 text-sm font-bold text-red-900">
+          <svg class="h-5 w-5 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
           <span>
             Simulation impossible : {{ deck.unresolvedCount }} carte{{ deck.unresolvedCount > 1 ? 's' : '' }} de votre deck n'ont pas été trouvées dans la base de données.
           </span>
@@ -347,7 +368,7 @@ const isValidConfig = computed(() => {
           </div>
         </div>
 
-        <!-- 5. Ordre de jeu (Boutons Radio) -->
+        <!-- 5. Ordre de jeu (Sélection simple) -->
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <h3 class="text-xs font-bold uppercase tracking-wider text-slate-600">
             5. Ordre de jeu initial (Tour 1)
@@ -357,86 +378,62 @@ const isValidConfig = computed(() => {
           </p>
 
           <div class="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-            <label
-              class="flex cursor-pointer items-center gap-2.5 rounded-lg border p-3 text-xs font-semibold transition"
+            <button
+              type="button"
+              @click="patchConfig({ firstPlayerMode: 'PLAYER' })"
+              class="flex flex-col justify-between rounded-xl border p-3 text-left transition"
               :class="
                 config.firstPlayerMode === 'PLAYER'
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-white'
+                  ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
+                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-white'
               "
             >
-              <input
-                type="radio"
-                name="firstPlayerMode"
-                value="PLAYER"
-                :checked="config.firstPlayerMode === 'PLAYER'"
-                @change="patchConfig({ firstPlayerMode: 'PLAYER' })"
-                class="sr-only"
-              />
+              <span class="text-xs font-bold">Joueur 1 (1er à jouer)</span>
               <span
-                class="flex h-4 w-4 items-center justify-center rounded-full border"
-                :class="
-                  config.firstPlayerMode === 'PLAYER' ? 'border-white bg-white text-slate-900' : 'border-slate-400'
-                "
+                class="mt-1 text-[11px] leading-tight"
+                :class="config.firstPlayerMode === 'PLAYER' ? 'text-slate-300' : 'text-slate-500'"
               >
-                <span v-if="config.firstPlayerMode === 'PLAYER'" class="h-2 w-2 rounded-full bg-slate-900"></span>
+                Pas d'attaque T1, évolution T3
               </span>
-              <span>Joueur 1 (1er à jouer)</span>
-            </label>
+            </button>
 
-            <label
-              class="flex cursor-pointer items-center gap-2.5 rounded-lg border p-3 text-xs font-semibold transition"
+            <button
+              type="button"
+              @click="patchConfig({ firstPlayerMode: 'OPPONENT' })"
+              class="flex flex-col justify-between rounded-xl border p-3 text-left transition"
               :class="
                 config.firstPlayerMode === 'OPPONENT'
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-white'
+                  ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
+                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-white'
               "
             >
-              <input
-                type="radio"
-                name="firstPlayerMode"
-                value="OPPONENT"
-                :checked="config.firstPlayerMode === 'OPPONENT'"
-                @change="patchConfig({ firstPlayerMode: 'OPPONENT' })"
-                class="sr-only"
-              />
+              <span class="text-xs font-bold">Joueur 2 (2d à jouer)</span>
               <span
-                class="flex h-4 w-4 items-center justify-center rounded-full border"
-                :class="
-                  config.firstPlayerMode === 'OPPONENT' ? 'border-white bg-white text-slate-900' : 'border-slate-400'
-                "
+                class="mt-1 text-[11px] leading-tight"
+                :class="config.firstPlayerMode === 'OPPONENT' ? 'text-slate-300' : 'text-slate-500'"
               >
-                <span v-if="config.firstPlayerMode === 'OPPONENT'" class="h-2 w-2 rounded-full bg-slate-900"></span>
+                Attaque &amp; Supporter dès T2
               </span>
-              <span>Joueur 2 (2d à jouer)</span>
-            </label>
+            </button>
 
-            <label
-              class="flex cursor-pointer items-center gap-2.5 rounded-lg border p-3 text-xs font-semibold transition"
+            <button
+              type="button"
+              @click="patchConfig({ firstPlayerMode: 'RANDOM' })"
+              class="flex flex-col justify-between rounded-xl border p-3 text-left transition"
               :class="
                 config.firstPlayerMode === 'RANDOM'
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-white'
+                  ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
+                  : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-white'
               "
             >
-              <input
-                type="radio"
-                name="firstPlayerMode"
-                value="RANDOM"
-                :checked="config.firstPlayerMode === 'RANDOM'"
-                @change="patchConfig({ firstPlayerMode: 'RANDOM' })"
-                class="sr-only"
-              />
+              <span class="text-xs font-bold">Aléatoire (50 / 50)</span>
               <span
-                class="flex h-4 w-4 items-center justify-center rounded-full border"
-                :class="
-                  config.firstPlayerMode === 'RANDOM' ? 'border-white bg-white text-slate-900' : 'border-slate-400'
-                "
+                class="mt-1 text-[11px] leading-tight"
+                :class="config.firstPlayerMode === 'RANDOM' ? 'text-slate-300' : 'text-slate-500'"
               >
-                <span v-if="config.firstPlayerMode === 'RANDOM'" class="h-2 w-2 rounded-full bg-slate-900"></span>
+                Tirage au sort réglementaire
               </span>
-              <span>Aléatoire (Pile ou Face 50/50)</span>
-            </label>
+            </button>
           </div>
         </div>
       </div>
@@ -464,9 +461,12 @@ const isValidConfig = computed(() => {
 
           <div
             v-if="config.selectedOpponentIds.length === 0"
-            class="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs font-semibold text-red-800"
+            class="mt-3 flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-xs font-semibold text-red-800"
           >
-            ⚠️ Sélectionnez au moins 1 deck adverse pour autoriser le lancement de la simulation.
+            <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>Sélectionnez au moins 1 deck adverse pour autoriser le lancement de la simulation.</span>
           </div>
 
           <div class="mt-3 space-y-2.5">

@@ -1157,7 +1157,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
         actions.push({
           type: 'RETREAT_ACTIVE',
           targetBenchIndex: bIdx,
-          label: `Battre en retraite (${activeBoard.activePokemon!.card.identity.nameFr}, -${retreatCost}⚡) ➔ Promouvoir ${bPoke.card.identity.nameFr}`,
+          label: `Battre en retraite (${activeBoard.activePokemon!.card.identity.nameFr}, -${retreatCost} NRJ) ➔ Promouvoir ${bPoke.card.identity.nameFr}`,
         })
       })
     }

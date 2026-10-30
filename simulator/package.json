@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "sync-cards": "node scripts/syncCardDatabase.mjs",
+    "prebuild": "npm run sync-cards",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
+    "pretest": "npm run sync-cards",
     "test": "vitest run"
   },
   "dependencies": {

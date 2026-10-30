@@ -201,7 +201,10 @@ function formatRoleLabel(role: string): string {
                       : 'bg-red-600 text-white'
                   "
                 >
-                  {{ validatedDeck.isValid60 ? '✓' : '!' }}
+                  <svg v-if="validatedDeck.isValid60" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span v-else>!</span>
                 </span>
                 <div>
                   <h3
@@ -251,13 +254,32 @@ function formatRoleLabel(role: string): string {
               </li>
             </ul>
 
-            <!-- Bandeau de Blocage Critique si cartes non résolues dans la base -->
+            <!-- Bandeau de Blocage Critique si base de données vide ou cartes non résolues -->
             <div
-              v-if="!validatedDeck.isFullyResolved"
+              v-if="!validatedDeck.isDatabaseLoaded"
               class="mt-3 rounded-lg border-2 border-red-400 bg-red-50 p-3.5 text-red-950"
             >
               <div class="flex items-center gap-2 text-xs font-bold text-red-900">
-                <span class="text-base">⚠️</span>
+                <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>
+                  Simulation impossible : la base de données cards_database.json est vide ou introuvable.
+                </span>
+              </div>
+              <p class="mt-1 text-[11px] text-red-700">
+                Synchronisez les modèles de cartes compilés en exécutant <code class="font-mono bg-white px-1 py-0.5 rounded border border-red-300">npm run sync-cards</code>.
+              </p>
+            </div>
+
+            <div
+              v-else-if="!validatedDeck.isFullyResolved"
+              class="mt-3 rounded-lg border-2 border-red-400 bg-red-50 p-3.5 text-red-950"
+            >
+              <div class="flex items-center gap-2 text-xs font-bold text-red-900">
+                <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
                 <span>
                   Simulation impossible : {{ validatedDeck.unresolvedCount }} carte{{ validatedDeck.unresolvedCount > 1 ? 's' : '' }} de votre deck n'ont pas été trouvées dans la base de données.
                 </span>

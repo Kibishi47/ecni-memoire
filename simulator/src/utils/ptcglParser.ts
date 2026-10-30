@@ -10,7 +10,7 @@ import type { CardFilter, EngineCardModel } from '../types/cardModel'
 import { inferFormat, isCardLine, isSectionLine, isTotalLine, splitCardTokens } from './lines'
 import { detectBasicEnergy, isEnergyCardName } from './energy'
 import { lookupSetMapping } from '../data/ptcglSetMapping'
-import { matchesCardFilter, resolveCardModel } from '../data/cardCatalog'
+import { hasCompiledCardData, matchesCardFilter, resolveCardModel } from '../data/cardCatalog'
 
 export function padLocalNumber(rawNumber: string): string {
   const trimmed = rawNumber.trim()
@@ -328,9 +328,10 @@ export function computeDeckSummary(
 
   const totalCards = pokemonCount + trainerCount + energyCount
   const uniqueIds = new Set(activeCards.map((c) => c.cardId))
+  const isDatabaseLoaded = hasCompiledCardData()
   const unresolvedCards = activeCards.filter((c) => !c.isResolved)
   const unresolvedCount = unresolvedCards.reduce((sum, c) => sum + c.quantity, 0)
-  const isFullyResolved = unresolvedCount === 0
+  const isFullyResolved = isDatabaseLoaded && unresolvedCount === 0
 
   const warnings = [...baseWarnings]
   if (declaredTotal !== undefined && declaredTotal !== totalCards && baseWarnings.length === 0) {
@@ -348,9 +349,13 @@ export function computeDeckSummary(
       message: `Aucun Pokémon de Base détecté dans la liste (au moins 1 Pokémon BASIC est obligatoire).`,
     })
   }
-  if (!isFullyResolved) {
+  if (!isDatabaseLoaded) {
     warnings.push({
-      message: `⚠️ Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données.`,
+      message: `Simulation impossible : la base de données cards_database.json ne contient aucune carte compilée. Synchronisez les modèles de cartes pour autoriser le lancement.`,
+    })
+  } else if (!isFullyResolved) {
+    warnings.push({
+      message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données.`,
     })
   }
 
@@ -368,6 +373,7 @@ export function computeDeckSummary(
     isValid60: totalCards === 60 && basicPokemonCount >= 1 && isFullyResolved,
     hasAtLeastOneBasic: basicPokemonCount >= 1,
     isFullyResolved,
+    isDatabaseLoaded,
     unresolvedCount,
     unresolvedCards,
     warnings,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parsePtcglDecklist } from './ptcglParser'
 import { exportDeckToPtcgl } from './ptcglExporter'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
-import { UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
+import { getCompiledCardsCount, hasCompiledCardData, UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
 
 describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
   it('charge correctement cards_database.json et fallbackCardModels.ts', () => {
@@ -80,6 +80,13 @@ Dresseurs: 35
     expect(reParsed.pokemonCount).toBe(original.pokemonCount)
     expect(reParsed.trainerCount).toBe(original.trainerCount)
     expect(reParsed.energyCount).toBe(original.energyCount)
+  })
+
+  it('détecte la présence des modèles compilés de cards_database.json', () => {
+    expect(hasCompiledCardData()).toBe(true)
+    expect(getCompiledCardsCount()).toBeGreaterThanOrEqual(1)
+    const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    expect(parsed.isDatabaseLoaded).toBe(true)
   })
 })
 
