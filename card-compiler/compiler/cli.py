@@ -44,7 +44,11 @@ from compiler.llm_engine import (
 )
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import EngineCardModel
-from compiler.tcgdex_fetcher import TEST_CARD_IDS, TCGdexFetcher
+from compiler.tcgdex_fetcher import (
+    TEST_CARD_IDS,
+    FetcherProvider,
+    TCGdexFetcher,
+)
 
 app = typer.Typer(
     name="pokemon-tcg-compiler",
@@ -111,6 +115,7 @@ def _execute_run_pipeline(
     test_flag: bool,
     standard_flag: bool,
     ids: Optional[str],
+    provider: FetcherProvider,
     tier: ModelTier,
     fast: bool,
     force: bool,
@@ -153,6 +158,7 @@ def _execute_run_pipeline(
         Panel.fit(
             f"[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]\n"
             f"• [bold]Mode[/bold] : {mode_label}\n"
+            f"• [bold]Fournisseur TCGdex[/bold] : [bold green]{provider.value.upper()}[/bold green] (SDK Python par défaut)\n"
             f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{model_repo}[/yellow] ([green]{model_file}[/green])\n"
             f"• [bold]HF Token[/bold] : {token_status}\n"
             f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
@@ -161,7 +167,7 @@ def _execute_run_pipeline(
         )
     )
 
-    fetcher = TCGdexFetcher(data_dir=data_dir)
+    fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
 
     with console.status("[bold blue]Étape 1 & 2 : Récupération de l'index global TCGdex et des données brutes FR/EN...[/bold blue]"):
         bundles = asyncio.run(
@@ -325,6 +331,12 @@ def run_command(
         "--ids",
         help="Liste d'identifiants TCGdex séparés par des virgules (ex: 'sv04-125,sv03-125').",
     ),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
+    ),
     tier: ModelTier = typer.Option(
         ModelTier.qwen3,
         "--tier",
@@ -359,6 +371,7 @@ def run_command(
         test_flag=test_flag,
         standard_flag=standard_flag,
         ids=ids,
+        provider=provider,
         tier=tier,
         fast=fast,
         force=force,
@@ -373,6 +386,12 @@ def compile_alias(
     test_flag: bool = typer.Option(False, "--test"),
     standard_flag: bool = typer.Option(False, "--standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
+    ),
     tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t"),
     fast: bool = typer.Option(False, "--fast"),
     force: bool = typer.Option(False, "--force"),
@@ -390,6 +409,7 @@ def compile_alias(
         test_flag=test_flag,
         standard_flag=standard_flag,
         ids=ids,
+        provider=provider,
         tier=tier,
         fast=fast,
         force=force,
