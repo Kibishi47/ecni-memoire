@@ -97,7 +97,7 @@ export function computePokemonThreatScore(
   // Bonus de rôle stratégique sur le plateau
   if (role === 'MAIN_ATTACKER') score += 45
   else if (role === 'TUTOR_ENGINE_POKEMON') score += 55
-  else if (role === 'CONSISTENCY_DRAW_POKEMON') score += 35
+  else if (role === 'DRAW_ENGINE_POKEMON') score += 35
   else if (role === 'ENERGY_ACCELERATOR') score += 40
 
   // Valeur des énergies attachées jusqu'au coût d'attaque principal

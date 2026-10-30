@@ -1,0 +1,1069 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import type { EngineCardModel } from '../types/cardModel'
+import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
+import type { DeckCardContributionItem, SimulationMetricsSummary } from '../types/simulator'
+import { getAllCatalogModels, normalizeCardNameForMatch } from '../data/cardCatalog'
+import { exportDeckToPtcgl } from '../utils/ptcglExporter'
+import DebugInspectorPanel from './DebugInspectorPanel.vue'
+
+const props = defineProps<{
+  baselineDeck: ParsedDeck
+  editableDeck: ParsedDeck
+  baselineSummary: SimulationMetricsSummary | null
+  currentSummary: SimulationMetricsSummary | null
+  isSimulating: boolean
+  progressCompleted: number
+  progressTotal: number
+  progressElapsedMs: number
+  isDebugMode: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'adjust-card-qty', cardId: string, delta: number): void
+  (e: 'remove-card', cardId: string): void
+  (e: 'add-catalog-card', model: EngineCardModel): void
+  (e: 'rerun-and-compare'): void
+  (e: 'promote-current-as-baseline'): void
+  (e: 'reset-to-baseline'): void
+  (e: 'back-step2'): void
+}>()
+
+const catalogSearchQuery = ref('')
+const showExportPanel = ref(false)
+const exportLang = ref<'fr' | 'en'>('fr')
+const copiedFeedback = ref(false)
+
+const allCatalogModels = getAllCatalogModels()
+
+const filteredCatalogModels = computed<EngineCardModel[]>(() => {
+  const q = normalizeCardNameForMatch(catalogSearchQuery.value)
+  if (!q) return allCatalogModels.slice(0, 12)
+  return allCatalogModels
+    .filter((m) => {
+      const hay = normalizeCardNameForMatch(
+        `${m.identity.nameFr} ${m.identity.nameEn || ''} ${m.cardId} ${m.subCategory} ${m.strategicEvaluator.primaryRole}`,
+      )
+      return hay.includes(q)
+    })
+    .slice(0, 15)
+})
+
+const progressPercent = computed(() => {
+  if (props.progressTotal <= 0) return 0
+  return Math.min(100, Math.round((props.progressCompleted / props.progressTotal) * 100))
+})
+
+// Calcul des différences de cartes entre Deck Original (baselineDeck) et Deck Courant (editableDeck)
+const cardDiffItems = computed<DeckCardContributionItem[]>(() => {
+  const map = new Map<
+    string,
+    {
+      cardId: string
+      nameFr: string
+      category: 'pokemon' | 'trainer' | 'energy'
+      oldQty: number
+      newQty: number
+    }
+  >()
+
+  for (const c of props.baselineDeck.cards) {
+    const existing = map.get(c.cardId)
+    if (existing) {
+      existing.oldQty += c.quantity
+    } else {
+      map.set(c.cardId, {
+        cardId: c.cardId,
+        nameFr: c.nameFr,
+        category: c.category,
+        oldQty: c.quantity,
+        newQty: 0,
+      })
+    }
+  }
+
+  for (const c of props.editableDeck.cards) {
+    const existing = map.get(c.cardId)
+    if (existing) {
+      existing.newQty += c.quantity
+    } else {
+      map.set(c.cardId, {
+        cardId: c.cardId,
+        nameFr: c.nameFr,
+        category: c.category,
+        oldQty: 0,
+        newQty: c.quantity,
+      })
+    }
+  }
+
+  const diffs: DeckCardContributionItem[] = []
+  for (const item of map.values()) {
+    const delta = item.newQty - item.oldQty
+    if (delta !== 0) {
+      diffs.push({
+        ...item,
+        deltaQty: delta,
+      })
+    }
+  }
+  return diffs.sort((a, b) => a.deltaQty - b.deltaQty)
+})
+
+const hasComparisonRun = computed(() => {
+  return (
+    props.baselineSummary !== null &&
+    props.currentSummary !== null &&
+    props.baselineSummary !== props.currentSummary
+  )
+})
+
+function getCardDeltaAgainstBaseline(cardId: string): number {
+  const found = cardDiffItems.value.find((d) => d.cardId === cardId)
+  return found ? found.deltaQty : 0
+}
+
+const editablePokemons = computed<ParsedDeckEntry[]>(() =>
+  props.editableDeck.cards.filter((c) => c.category === 'pokemon'),
+)
+const editableTrainers = computed<ParsedDeckEntry[]>(() =>
+  props.editableDeck.cards.filter((c) => c.category === 'trainer'),
+)
+const editableEnergies = computed<ParsedDeckEntry[]>(() =>
+  props.editableDeck.cards.filter((c) => c.category === 'energy'),
+)
+
+const exportedPtcglText = computed(() => {
+  return exportDeckToPtcgl(props.editableDeck.cards, {
+    lang: exportLang.value,
+    format: 'ptcgl',
+    includeTotalCards: true,
+  })
+})
+
+async function copyExportedDeck() {
+  try {
+    await navigator.clipboard.writeText(exportedPtcglText.value)
+    copiedFeedback.value = true
+    setTimeout(() => {
+      copiedFeedback.value = false
+    }, 2000)
+  } catch {
+    copiedFeedback.value = false
+  }
+}
+
+function downloadExportedDeckTxt() {
+  const blob = new Blob([exportedPtcglText.value], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `pokesim-deck-60-${exportLang.value}.txt`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(2)} s`
+}
+
+function formatSignedDelta(delta: number, suffix = ''): string {
+  const rounded = Math.round(delta * 100) / 100
+  if (rounded > 0) return `+${rounded}${suffix}`
+  return `${rounded}${suffix}`
+}
+
+function getBaselineMatchupWinRate(opponentId: string): number | null {
+  if (!props.baselineSummary) return null
+  const m = props.baselineSummary.matchupBreakdown.find((x) => x.opponentId === opponentId)
+  return m ? m.winRate : null
+}
+</script>
+
+<template>
+  <section class="space-y-6">
+    <!-- En-tête de l'Étape 3 & Actions rapides -->
+    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <span
+            class="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-700"
+          >
+            ÉTAPE 3 &amp; 4 — TABLEAU DE BORD &amp; COMPARATEUR A/B
+          </span>
+          <h2 class="mt-2 text-xl font-bold text-slate-900">
+            Résultats de Simulation, Atelier d'Édition A/B &amp; Export PTCGL
+          </h2>
+          <p class="mt-1 text-sm text-slate-600">
+            Analysez les 8 indicateurs de performance, ajustez vos ratios de cartes (verrou strict 60 cartes) et comparez l'écart statistique ($\Delta$) face au deck original.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            @click="emit('back-step2')"
+            class="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            ← Paramètres de Simulation
+          </button>
+
+          <button
+            type="button"
+            @click="showExportPanel = !showExportPanel"
+            class="rounded-lg border border-slate-300 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200"
+          >
+            {{ showExportPanel ? 'Masquer Export PTCGL' : 'Exporter le deck courant (PTCGL)' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Barre de progression en temps réel pendant l'exécution Web Workers -->
+      <div
+        v-if="isSimulating"
+        class="mt-4 rounded-xl border border-slate-900 bg-slate-900 p-4 text-white"
+      >
+        <div class="flex items-center justify-between text-xs font-semibold">
+          <span class="flex items-center gap-2">
+            <span class="h-2.5 w-2.5 animate-ping rounded-full bg-emerald-400"></span>
+            Simulation Multi-Workers 3-Ply en cours...
+          </span>
+          <span class="font-mono">
+            {{ progressCompleted }} / {{ progressTotal }} parties ({{ progressPercent }}%) —
+            {{ formatDuration(progressElapsedMs) }}
+          </span>
+        </div>
+        <div class="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-slate-700">
+          <div
+            class="h-full rounded-full bg-emerald-400 transition-all duration-150"
+            :style="{ width: `${progressPercent}%` }"
+          ></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tiroir d'Export au Format PTCGL (Copie 1-clic & Téléchargement .txt) -->
+    <div
+      v-if="showExportPanel"
+      class="rounded-xl border border-slate-300 bg-white p-5 shadow-xs"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">
+            Exporter le Deck Courant au Format Pokémon TCG Live (PTCGL)
+          </h3>
+          <p class="text-xs text-slate-500">
+            Liste de {{ editableDeck.totalCards }} cartes groupée par <code class="font-mono">Pokémon</code>,
+            <code class="font-mono">Trainer</code> et <code class="font-mono">Energy</code>.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            <button
+              type="button"
+              @click="exportLang = 'fr'"
+              class="rounded-md px-2.5 py-1 font-semibold"
+              :class="exportLang === 'fr' ? 'bg-slate-900 text-white' : 'text-slate-600'"
+            >
+              Noms FR
+            </button>
+            <button
+              type="button"
+              @click="exportLang = 'en'"
+              class="rounded-md px-2.5 py-1 font-semibold"
+              :class="exportLang === 'en' ? 'bg-slate-900 text-white' : 'text-slate-600'"
+            >
+              Noms EN (PTCGL Standard)
+            </button>
+          </div>
+
+          <button
+            type="button"
+            @click="copyExportedDeck"
+            class="rounded-lg border border-slate-900 bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+          >
+            {{ copiedFeedback ? '✓ Copié dans le presse-papiers !' : 'Copier 1-clic (Presse-papiers)' }}
+          </button>
+
+          <button
+            type="button"
+            @click="downloadExportedDeckTxt"
+            class="rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-800 transition hover:bg-slate-50"
+          >
+            Télécharger .txt
+          </button>
+        </div>
+      </div>
+
+      <pre
+        class="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3.5 font-mono text-xs leading-relaxed text-slate-800"
+      >{{ exportedPtcglText }}</pre>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- SECTION A : LES 8 INDICATEURS OBLIGATOIRES (AVEC DELTAS SI COMPARAISON) -->
+    <!-- ======================================================================= -->
+    <div v-if="currentSummary" class="space-y-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <!-- KPI 4 : Win Rate Global (%) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Win Rate Global
+            </span>
+            <span
+              v-if="hasComparisonRun && baselineSummary"
+              class="rounded px-2 py-0.5 font-mono text-xs font-bold"
+              :class="
+                currentSummary.globalWinRate - baselineSummary.globalWinRate > 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : currentSummary.globalWinRate - baselineSummary.globalWinRate < 0
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-slate-100 text-slate-700'
+              "
+            >
+              Δ {{ formatSignedDelta(currentSummary.globalWinRate - baselineSummary.globalWinRate, '%') }}
+            </span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span
+              class="font-mono text-3xl font-bold"
+              :class="
+                currentSummary.globalWinRate >= 55
+                  ? 'text-emerald-600'
+                  : currentSummary.globalWinRate >= 45
+                    ? 'text-slate-900'
+                    : 'text-red-600'
+              "
+            >
+              {{ currentSummary.globalWinRate.toFixed(1) }}%
+            </span>
+            <span v-if="hasComparisonRun && baselineSummary" class="font-mono text-xs text-slate-400">
+              (Réf: {{ baselineSummary.globalWinRate.toFixed(1) }}%)
+            </span>
+          </div>
+          <p class="mt-1 font-mono text-xs text-slate-500">
+            {{ currentSummary.wins }}V – {{ currentSummary.losses }}D – {{ currentSummary.draws }}E
+          </p>
+        </div>
+
+        <!-- KPI 1, 2 & 3 : Temps d'exécution, Parties simulées (X) & Débit (parties/sec) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Volume &amp; Vitesse Moteur
+            </span>
+            <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-700">
+              {{ currentSummary.gamesPerSecond }} parties/s
+            </span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="font-mono text-3xl font-bold text-slate-900">
+              {{ currentSummary.totalGamesSimulated }}
+            </span>
+            <span class="text-xs font-semibold text-slate-500">parties simulées ($X$)</span>
+          </div>
+          <p class="mt-1 font-mono text-xs text-slate-500">
+            Temps total : <strong>{{ formatDuration(currentSummary.totalDurationMs) }}</strong> (Moy. {{ currentSummary.avgTurnsPlayed }}t)
+          </p>
+        </div>
+
+        <!-- KPI 6 : Mulligans (Total & % de parties avec >= 1 mulligan) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Mulligans à l'Ouverture
+            </span>
+            <span
+              v-if="hasComparisonRun && baselineSummary"
+              class="rounded px-2 py-0.5 font-mono text-xs font-bold"
+              :class="
+                currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate < 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate > 0
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-slate-100 text-slate-700'
+              "
+            >
+              Δ {{ formatSignedDelta(currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate, '%') }}
+            </span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="font-mono text-3xl font-bold text-slate-900">
+              {{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%
+            </span>
+            <span class="font-mono text-xs text-slate-500">
+              ({{ currentSummary.totalPlayerMulligans }} mulligans totaux)
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">
+            {{ currentSummary.gamesWithMulliganCount }} partie(s) ayant subi ≥ 1 mulligan
+          </p>
+        </div>
+
+        <!-- KPI 7 & 8 : Récompenses (Prizes) moyennes gagnées (Joueur vs Adversaire sur 6.00) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Récompenses Moyennes (/6.00)
+            </span>
+            <span
+              v-if="hasComparisonRun && baselineSummary"
+              class="rounded px-2 py-0.5 font-mono text-xs font-bold"
+              :class="
+                currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon > 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon < 0
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-slate-100 text-slate-700'
+              "
+            >
+              ΔJ {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
+            </span>
+          </div>
+          <div class="mt-2 grid grid-cols-2 gap-2 border-b border-slate-100 pb-2">
+            <div>
+              <div class="text-[10px] font-bold uppercase text-emerald-700">Gagnées (Joueur)</div>
+              <div class="font-mono text-xl font-bold text-emerald-700">
+                {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }}
+                <span class="text-xs font-normal text-slate-400">/ 6.00</span>
+              </div>
+            </div>
+            <div>
+              <div class="text-[10px] font-bold uppercase text-rose-700">Concédées (Adv.)</div>
+              <div class="font-mono text-xl font-bold text-rose-700">
+                {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }}
+                <span class="text-xs font-normal text-slate-400">/ 6.00</span>
+              </div>
+            </div>
+          </div>
+          <p class="mt-1.5 font-mono text-[11px] text-slate-500">
+            Différentiel net :
+            <strong>
+              {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon) }}
+            </strong>
+            Prize(s) / match
+          </p>
+        </div>
+      </div>
+
+      <!-- KPI 5 : Win Rate détaillé par Deck Affronté -->
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">
+              Win Rate Détaillé par Deck Méta Affronté
+            </h3>
+            <p class="text-xs text-slate-500">
+              Performance face à chaque archétype sélectionné (IA 3-Ply des deux côtés)
+            </p>
+          </div>
+          <div class="flex items-center gap-3 font-mono text-xs text-slate-500">
+            <span>Setup Banc T1 (≥2) : <strong>{{ currentSummary.turn1BenchSetupRate }}%</strong></span>
+            <span>•</span>
+            <span>Attaquant Prêt T2 : <strong>{{ currentSummary.turn2AttackerReadyRate }}%</strong></span>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div
+            v-for="m in currentSummary.matchupBreakdown"
+            :key="m.opponentId"
+            class="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-slate-900">{{ m.opponentName }}</span>
+                  <span class="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+                    {{ m.archetypeTag }}
+                  </span>
+                </div>
+                <div class="mt-0.5 font-mono text-[11px] text-slate-500">
+                  {{ m.gamesPlayed }} parties ({{ m.wins }}V – {{ m.losses }}D – {{ m.draws }}E) • Prizes : {{ m.avgPlayerPrizesWon.toFixed(2) }} vs {{ m.avgOpponentPrizesWon.toFixed(2) }}
+                </div>
+              </div>
+
+              <div class="text-right font-mono">
+                <div class="flex items-center justify-end gap-1.5">
+                  <span
+                    class="text-lg font-bold"
+                    :class="
+                      m.winRate >= 55
+                        ? 'text-emerald-600'
+                        : m.winRate >= 45
+                          ? 'text-slate-900'
+                          : 'text-red-600'
+                    "
+                  >
+                    {{ m.winRate.toFixed(1) }}%
+                  </span>
+                  <span
+                    v-if="hasComparisonRun && getBaselineMatchupWinRate(m.opponentId) !== null"
+                    class="rounded px-1.5 py-0.5 text-[11px] font-bold"
+                    :class="
+                      m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-200 text-slate-700'
+                    "
+                  >
+                    {{ formatSignedDelta(m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0), '%') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+              <div
+                class="h-full rounded-full transition-all"
+                :class="
+                  m.winRate >= 55
+                    ? 'bg-emerald-500'
+                    : m.winRate >= 45
+                      ? 'bg-amber-500'
+                      : 'bg-red-500'
+                "
+                :style="{ width: `${Math.min(100, m.winRate)}%` }"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- SECTION B : PANNEAU DE COMPARAISON STATISTIQUE A/B (ORIGINAL VS COURANT)-->
+    <!-- ======================================================================= -->
+    <div
+      v-if="hasComparisonRun && baselineSummary && currentSummary"
+      class="rounded-2xl border-2 border-slate-900 bg-white p-5 shadow-xs"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3.5">
+        <div>
+          <span class="rounded bg-slate-900 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
+            COMPARAISON A/B AVANT / APRÈS
+          </span>
+          <h3 class="mt-1.5 text-base font-bold text-slate-900">
+            Deck Original (Baseline) vs Deck Courant Modifié
+          </h3>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            @click="emit('promote-current-as-baseline')"
+            class="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
+          >
+            Définir le deck courant comme nouvelle référence
+          </button>
+          <button
+            type="button"
+            @click="emit('reset-to-baseline')"
+            class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+          >
+            Réinitialiser au deck original
+          </button>
+        </div>
+      </div>
+
+      <!-- Badges des cartes modifiées (-1 X / +1 Y) -->
+      <div class="mt-3.5">
+        <div class="text-xs font-bold uppercase tracking-wider text-slate-500">
+          Modifications apportées à la liste (Diff A/B) :
+        </div>
+        <div v-if="cardDiffItems.length > 0" class="mt-2 flex flex-wrap gap-2">
+          <span
+            v-for="diff in cardDiffItems"
+            :key="diff.cardId"
+            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-xs font-bold"
+            :class="
+              diff.deltaQty > 0
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : 'border-red-300 bg-red-50 text-red-800'
+            "
+          >
+            <span>{{ diff.deltaQty > 0 ? `+${diff.deltaQty}` : diff.deltaQty }}</span>
+            <span class="font-sans font-semibold">{{ diff.nameFr }}</span>
+            <span class="text-[10px] opacity-75">({{ diff.oldQty }} ➔ {{ diff.newQty }})</span>
+          </span>
+        </div>
+        <p v-else class="mt-1 text-xs text-slate-500">
+          Aucune différence de carte entre les deux listes.
+        </p>
+      </div>
+
+      <!-- Tableau comparatif côte à côte avec badges Delta -->
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full border-collapse text-left text-xs">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase text-slate-500">
+              <th class="px-3 py-2.5">Indicateur</th>
+              <th class="px-3 py-2.5">Deck Original (Baseline)</th>
+              <th class="px-3 py-2.5">Deck Courant Modifié</th>
+              <th class="px-3 py-2.5">Écart (Δ)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 font-mono">
+            <tr>
+              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Win Rate Global</td>
+              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.globalWinRate.toFixed(1) }}%</td>
+              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.globalWinRate.toFixed(1) }}%</td>
+              <td class="px-3 py-2.5">
+                <span
+                  class="rounded px-2 py-0.5 font-bold"
+                  :class="
+                    currentSummary.globalWinRate - baselineSummary.globalWinRate > 0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : currentSummary.globalWinRate - baselineSummary.globalWinRate < 0
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-slate-100 text-slate-600'
+                  "
+                >
+                  {{ baselineSummary.globalWinRate.toFixed(1) }}% ➔ {{ currentSummary.globalWinRate.toFixed(1) }}% ({{ formatSignedDelta(currentSummary.globalWinRate - baselineSummary.globalWinRate, '%') }})
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Taux de Mulligan</td>
+              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
+              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
+              <td class="px-3 py-2.5">
+                <span
+                  class="rounded px-2 py-0.5 font-bold"
+                  :class="
+                    currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate < 0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate > 0
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-slate-100 text-slate-600'
+                  "
+                >
+                  {{ formatSignedDelta(currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate, '%') }}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Prizes Moyens Gagnés (Joueur)</td>
+              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
+              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
+              <td class="px-3 py-2.5">
+                <span
+                  class="rounded px-2 py-0.5 font-bold"
+                  :class="
+                    currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon > 0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon < 0
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-slate-100 text-slate-600'
+                  "
+                >
+                  {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Prizes Moyens Concédés (Adv.)</td>
+              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
+              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
+              <td class="px-3 py-2.5">
+                <span
+                  class="rounded px-2 py-0.5 font-bold"
+                  :class="
+                    currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon < 0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon > 0
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-slate-100 text-slate-600'
+                  "
+                >
+                  {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- SECTION C : ÉDITEUR DE DECK INTERACTIF (VERROU STRICT 60 CARTES)        -->
+    <!-- ======================================================================= -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+      <!-- Barre de contrôle de l'Éditeur & Verrou 60 Cartes -->
+      <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
+        <div>
+          <h3 class="text-base font-bold text-slate-900">
+            Atelier d'Édition Interactif du Deck &amp; Relance Comparative A/B
+          </h3>
+          <p class="mt-0.5 text-xs text-slate-500">
+            Ajustez les quantités avec <code class="font-mono">[-]</code> / <code class="font-mono">[+]</code> ou ajoutez une carte du catalogue. Le deck doit compter exactement <strong>60 cartes</strong> pour relancer la simulation.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Compteur dynamique strict Total : XX / 60 cartes -->
+          <div
+            class="flex items-center gap-2 rounded-xl border px-3.5 py-2 font-mono text-sm font-bold"
+            :class="
+              editableDeck.totalCards === 60 && editableDeck.hasAtLeastOneBasic
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : 'border-red-300 bg-red-50 text-red-800'
+            "
+          >
+            <span>Total : {{ editableDeck.totalCards }} / 60 cartes</span>
+            <span
+              v-if="editableDeck.totalCards !== 60"
+              class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white"
+            >
+              {{
+                editableDeck.totalCards < 60
+                  ? `Manque ${60 - editableDeck.totalCards}`
+                  : `Excédent +${editableDeck.totalCards - 60}`
+              }}
+            </span>
+          </div>
+
+          <button
+            v-if="cardDiffItems.length > 0"
+            type="button"
+            @click="emit('reset-to-baseline')"
+            class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            Réinitialiser au deck original
+          </button>
+
+          <!-- Bouton Relancer la simulation & Comparer (strictement disabled si != 60 cartes) -->
+          <button
+            type="button"
+            :disabled="
+              editableDeck.totalCards !== 60 || !editableDeck.hasAtLeastOneBasic || isSimulating
+            "
+            @click="emit('rerun-and-compare')"
+            class="rounded-xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm"
+            :class="
+              editableDeck.totalCards === 60 && editableDeck.hasAtLeastOneBasic && !isSimulating
+                ? 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+            "
+          >
+            Relancer la simulation &amp; Comparer
+          </button>
+        </div>
+      </div>
+
+      <!-- Changements en attente avant relance -->
+      <div
+        v-if="cardDiffItems.length > 0"
+        class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+      >
+        <span class="font-semibold text-slate-600">Modifications par rapport au Deck Original :</span>
+        <span
+          v-for="d in cardDiffItems"
+          :key="d.cardId"
+          class="rounded px-2 py-0.5 font-mono text-[11px] font-bold"
+          :class="
+            d.deltaQty > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+          "
+        >
+          {{ d.deltaQty > 0 ? `+${d.deltaQty}` : d.deltaQty }} {{ d.nameFr }}
+        </span>
+      </div>
+
+      <!-- Grille des 3 colonnes d'édition (Pokémon / Dresseurs / Énergies) -->
+      <div class="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <!-- Colonne Pokémon -->
+        <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+          <div class="mb-2.5 flex items-center justify-between border-b border-slate-200 pb-2">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Pokémon ({{ editableDeck.pokemonCount }})
+            </h4>
+            <span class="font-mono text-[11px] text-slate-500">
+              Bases: {{ editableDeck.basicPokemonCount }}
+            </span>
+          </div>
+
+          <ul class="space-y-1.5">
+            <li
+              v-for="card in editablePokemons"
+              :key="card.cardId"
+              class="flex items-center justify-between gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-xs"
+              :class="
+                getCardDeltaAgainstBaseline(card.cardId) !== 0
+                  ? 'border-slate-900 shadow-2xs'
+                  : 'border-slate-200'
+              "
+            >
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate font-semibold text-slate-900">{{ card.nameFr }}</span>
+                  <span
+                    v-if="getCardDeltaAgainstBaseline(card.cardId) !== 0"
+                    class="rounded px-1 font-mono text-[10px] font-bold"
+                    :class="
+                      getCardDeltaAgainstBaseline(card.cardId) > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-red-100 text-red-800'
+                    "
+                  >
+                    {{
+                      getCardDeltaAgainstBaseline(card.cardId) > 0
+                        ? `+${getCardDeltaAgainstBaseline(card.cardId)}`
+                        : getCardDeltaAgainstBaseline(card.cardId)
+                    }}
+                  </span>
+                </div>
+                <div class="font-mono text-[10px] text-slate-400">
+                  {{ card.cardId }} • {{ card.subCategory }}
+                </div>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Diminuer la quantité"
+                  @click="emit('adjust-card-qty', card.cardId, -1)"
+                  class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200"
+                >
+                  -
+                </button>
+                <span class="w-6 text-center font-mono text-xs font-bold text-slate-900">
+                  {{ card.quantity }}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Augmenter la quantité"
+                  :disabled="card.quantity >= 4"
+                  @click="emit('adjust-card-qty', card.cardId, 1)"
+                  class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  aria-label="Supprimer la carte"
+                  @click="emit('remove-card', card.cardId)"
+                  class="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  title="Retirer du deck"
+                >
+                  ×
+                </button>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Colonne Dresseurs -->
+        <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+          <div class="mb-2.5 flex items-center justify-between border-b border-slate-200 pb-2">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Dresseurs ({{ editableDeck.trainerCount }})
+            </h4>
+            <span class="font-mono text-[11px] text-slate-500">Max 4 / nom</span>
+          </div>
+
+          <ul class="space-y-1.5">
+            <li
+              v-for="card in editableTrainers"
+              :key="card.cardId"
+              class="flex items-center justify-between gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-xs"
+              :class="
+                getCardDeltaAgainstBaseline(card.cardId) !== 0
+                  ? 'border-slate-900 shadow-2xs'
+                  : 'border-slate-200'
+              "
+            >
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate font-semibold text-slate-900">{{ card.nameFr }}</span>
+                  <span
+                    v-if="getCardDeltaAgainstBaseline(card.cardId) !== 0"
+                    class="rounded px-1 font-mono text-[10px] font-bold"
+                    :class="
+                      getCardDeltaAgainstBaseline(card.cardId) > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-red-100 text-red-800'
+                    "
+                  >
+                    {{
+                      getCardDeltaAgainstBaseline(card.cardId) > 0
+                        ? `+${getCardDeltaAgainstBaseline(card.cardId)}`
+                        : getCardDeltaAgainstBaseline(card.cardId)
+                    }}
+                  </span>
+                </div>
+                <div class="font-mono text-[10px] text-slate-400">
+                  {{ card.cardId }} • {{ card.subCategory }}
+                </div>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Diminuer la quantité"
+                  @click="emit('adjust-card-qty', card.cardId, -1)"
+                  class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200"
+                >
+                  -
+                </button>
+                <span class="w-6 text-center font-mono text-xs font-bold text-slate-900">
+                  {{ card.quantity }}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Augmenter la quantité"
+                  :disabled="card.quantity >= 4"
+                  @click="emit('adjust-card-qty', card.cardId, 1)"
+                  class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  aria-label="Supprimer la carte"
+                  @click="emit('remove-card', card.cardId)"
+                  class="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  title="Retirer du deck"
+                >
+                  ×
+                </button>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Colonne Énergies & Ajout depuis le Catalogue -->
+        <div class="space-y-4">
+          <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+            <div class="mb-2.5 flex items-center justify-between border-b border-slate-200 pb-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Énergies ({{ editableDeck.energyCount }})
+              </h4>
+              <span class="font-mono text-[11px] text-slate-500">Base: illimité</span>
+            </div>
+
+            <ul class="space-y-1.5">
+              <li
+                v-for="card in editableEnergies"
+                :key="card.cardId"
+                class="flex items-center justify-between gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-xs"
+                :class="
+                  getCardDeltaAgainstBaseline(card.cardId) !== 0
+                    ? 'border-slate-900 shadow-2xs'
+                    : 'border-slate-200'
+                "
+              >
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate font-semibold text-slate-900">{{ card.nameFr }}</span>
+                    <span
+                      v-if="getCardDeltaAgainstBaseline(card.cardId) !== 0"
+                      class="rounded px-1 font-mono text-[10px] font-bold"
+                      :class="
+                        getCardDeltaAgainstBaseline(card.cardId) > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-red-100 text-red-800'
+                      "
+                    >
+                      {{
+                        getCardDeltaAgainstBaseline(card.cardId) > 0
+                          ? `+${getCardDeltaAgainstBaseline(card.cardId)}`
+                          : getCardDeltaAgainstBaseline(card.cardId)
+                      }}
+                    </span>
+                  </div>
+                  <div class="font-mono text-[10px] text-slate-400">
+                    {{ card.cardId }}
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Diminuer la quantité"
+                    @click="emit('adjust-card-qty', card.cardId, -1)"
+                    class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200"
+                  >
+                    -
+                  </button>
+                  <span class="w-6 text-center font-mono text-xs font-bold text-slate-900">
+                    {{ card.quantity }}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Augmenter la quantité"
+                    :disabled="card.subCategory === 'SPECIAL_ENERGY' && card.quantity >= 4"
+                    @click="emit('adjust-card-qty', card.cardId, 1)"
+                    class="flex h-6 w-6 items-center justify-center rounded border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Supprimer la carte"
+                    @click="emit('remove-card', card.cardId)"
+                    class="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    title="Retirer du deck"
+                  >
+                    ×
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Barre de recherche pour ajouter une nouvelle carte depuis le catalogue compilé -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+            <label for="catalog-search" class="block text-xs font-bold uppercase tracking-wider text-slate-700">
+              Ajouter une carte depuis le Catalogue Compilé
+            </label>
+            <input
+              id="catalog-search"
+              v-model="catalogSearchQuery"
+              type="text"
+              placeholder="Rechercher : Mashynn, Poffin, Favianos, sv04-125..."
+              class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-slate-900 focus:outline-none"
+            />
+
+            <ul class="mt-2.5 max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+              <li
+                v-for="model in filteredCatalogModels"
+                :key="model.cardId"
+                class="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs hover:bg-slate-50"
+              >
+                <div class="min-w-0">
+                  <div class="truncate font-semibold text-slate-800">
+                    {{ model.identity.nameFr }}
+                  </div>
+                  <div class="font-mono text-[10px] text-slate-400">
+                    {{ model.cardId }} • {{ model.subCategory }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  @click="emit('add-catalog-card', model)"
+                  class="shrink-0 rounded border border-slate-900 bg-slate-900 px-2 py-1 font-mono text-[10px] font-bold text-white hover:bg-slate-700"
+                >
+                  + Ajouter
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- SECTION D : INSPECTEUR GRANULAIRE DÉBLOQUÉ EN MODE DEBUG (?debug=true)  -->
+    <!-- ======================================================================= -->
+    <DebugInspectorPanel
+      v-if="isDebugMode && currentSummary"
+      :traced-games="currentSummary.tracedGames"
+    />
+  </section>
+</template>

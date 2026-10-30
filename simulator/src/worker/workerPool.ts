@@ -40,8 +40,8 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
       desc = {
         id: oppMeta.id,
         name: oppMeta.name,
-        archetypeTag: oppMeta.archetypeTag,
-        accentColor: oppMeta.accentColor,
+        archetypeTag: oppMeta.archetypeBadge,
+        accentColor: oppMeta.badgeColor,
         models: expandParsedDeckToModels(parsed),
       }
       cachedOpponentDescriptors.set(oppMeta.id, desc)
