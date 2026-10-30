@@ -27,26 +27,28 @@ async function copyClean() {
 </script>
 
 <template>
-  <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+  <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col gap-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h3 class="text-base font-bold text-white flex items-center gap-2">
-          <Sparkles class="w-4 h-4 text-amber-400" />
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <Sparkles class="w-4 h-4 text-amber-500" />
           <span>Deckliste Épurée (Sans Codes de Set ni Numéros)</span>
         </h3>
-        <p class="text-xs text-slate-400">
+        <p class="text-xs text-slate-500">
           Idéal pour partager une liste lisible sur Discord, dans un article ou un rapport sans les identifiants techniques.
         </p>
       </div>
 
       <div class="flex items-center gap-2">
-        <div class="inline-flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+        <div class="inline-flex bg-slate-100 p-1 rounded-lg border border-slate-200">
           <button
             type="button"
             @click="lang = 'fr'"
             :class="[
-              'px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer',
-              lang === 'fr' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              'px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer',
+              lang === 'fr'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60 font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             ]"
           >
             Noms FR
@@ -55,8 +57,10 @@ async function copyClean() {
             type="button"
             @click="lang = 'en'"
             :class="[
-              'px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer',
-              lang === 'en' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              'px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer',
+              lang === 'en'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60 font-semibold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
             ]"
           >
             Noms EN
@@ -66,15 +70,15 @@ async function copyClean() {
         <button
           type="button"
           @click="copyClean"
-          class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition cursor-pointer"
         >
-          <Check v-if="copied" class="w-4 h-4 text-emerald-300" />
-          <Copy v-else class="w-4 h-4" />
+          <Check v-if="copied" class="w-3.5 h-3.5 text-white" />
+          <Copy v-else class="w-3.5 h-3.5" />
           <span>{{ copied ? 'Copié !' : 'Copier le texte épuré' }}</span>
         </button>
       </div>
     </div>
 
-    <pre class="w-full rounded-xl bg-slate-950 border border-slate-800 p-4 text-xs sm:text-sm font-mono text-slate-200 leading-relaxed select-all">{{ cleanText }}</pre>
+    <pre class="w-full rounded-lg bg-slate-900 border border-slate-800 p-4 text-xs sm:text-sm font-mono text-slate-100 leading-relaxed select-all">{{ cleanText }}</pre>
   </div>
 </template>

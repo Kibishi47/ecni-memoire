@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Database, Sparkles, Layers, Code2 } from 'lucide-vue-next'
+import { Database, Layers, Code2 } from 'lucide-vue-next'
 
 defineProps<{
   totalSets: number
@@ -9,50 +9,47 @@ defineProps<{
 </script>
 
 <template>
-  <header class="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md sticky top-0 z-30">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-      <div class="flex items-center gap-3.5">
-        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 p-0.5 shadow-lg shadow-indigo-500/20">
-          <div class="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-            <Code2 class="w-6 h-6 text-indigo-400" />
-          </div>
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <!-- Logo & App Title -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
+          <Code2 class="w-5 h-5" />
         </div>
         <div>
-          <div class="flex items-center gap-2.5">
-            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white">
+          <div class="flex items-center space-x-2">
+            <h1 class="font-bold text-base text-slate-900 tracking-tight">
               PokéParser Studio
             </h1>
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-              <Sparkles class="w-3 h-3" />
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
               POC #5
             </span>
           </div>
-          <p class="text-xs sm:text-sm text-slate-400">
-            Extracteur d'IDs TCGdex (<code class="text-indigo-300 font-mono">sv01-166</code>), modificateur de ratios & exportateur PTCGL
+          <p class="text-xs text-slate-500 hidden sm:block">
+            Extracteur d'IDs TCGdex (<code class="font-mono text-slate-700">sv01-166</code>), modificateur de ratios & exportateur PTCGL
           </p>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
-        <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/70 text-slate-300">
-          <Database class="w-3.5 h-3.5 text-emerald-400" />
-          <span>Mapping TCGdex :</span>
-          <strong class="text-white font-semibold">{{ totalSets }} extensions</strong>
+      <!-- Quick status badges -->
+      <div class="flex items-center space-x-2 sm:space-x-3 text-xs">
+        <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 font-medium">
+          <Database class="w-3.5 h-3.5 text-blue-600" />
+          <span>{{ totalSets }} extensions TCGdex</span>
         </div>
 
-        <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/70 text-slate-300">
-          <Layers class="w-3.5 h-3.5 text-indigo-400" />
-          <span>Cartes uniques :</span>
-          <strong class="text-white font-semibold">{{ uniqueCards }}</strong>
-          <span class="text-slate-500">|</span>
-          <strong
+        <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-medium">
+          <Layers class="w-3.5 h-3.5 text-slate-500" />
+          <span>{{ uniqueCards }} cartes</span>
+          <span class="text-slate-300">•</span>
+          <span
             :class="[
               'font-mono font-bold',
-              totalCards === 60 ? 'text-emerald-400' : totalCards > 60 ? 'text-rose-400' : 'text-amber-400'
+              totalCards === 60 ? 'text-emerald-600' : totalCards > 60 ? 'text-rose-600' : 'text-amber-600'
             ]"
           >
             {{ totalCards }}/60
-          </strong>
+          </span>
         </div>
       </div>
     </div>

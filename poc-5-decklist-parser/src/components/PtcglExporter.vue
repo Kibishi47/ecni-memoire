@@ -59,22 +59,24 @@ function handleApplyToInput() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-5">
+  <div class="flex flex-col gap-4">
     <!-- Options d'export PTCGL -->
-    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div class="flex flex-wrap items-center gap-4">
         <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Globe class="w-3.5 h-3.5 text-indigo-400" />
+          <label class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <Globe class="w-3.5 h-3.5 text-blue-600" />
             Langue d'export PTCGL
           </label>
-          <div class="inline-flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <div class="inline-flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button
               type="button"
               @click="exportLang = 'fr'"
               :class="[
-                'px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer',
-                exportLang === 'fr' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                'px-3 py-1.5 rounded-md text-xs font-medium transition cursor-pointer',
+                exportLang === 'fr'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
               ]"
             >
               Français (Pokémon / Dresseurs / Énergies)
@@ -83,8 +85,10 @@ function handleApplyToInput() {
               type="button"
               @click="exportLang = 'en'"
               :class="[
-                'px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer',
-                exportLang === 'en' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                'px-3 py-1.5 rounded-md text-xs font-medium transition cursor-pointer',
+                exportLang === 'en'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
               ]"
             >
               English (Pokémon / Trainer / Energy)
@@ -92,13 +96,13 @@ function handleApplyToInput() {
           </div>
         </div>
 
-        <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer mt-4 sm:mt-5">
+        <label class="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer mt-4 sm:mt-5">
           <input
             v-model="includeTotal"
             type="checkbox"
-            class="rounded border-slate-700 bg-slate-900 text-indigo-600"
+            class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
           />
-          <span>Inclure <code class="font-mono text-indigo-300">Total Cards: {{ totalCards }}</code></span>
+          <span>Inclure <code class="font-mono text-slate-800">Total Cards: {{ totalCards }}</code></span>
         </label>
       </div>
 
@@ -106,7 +110,7 @@ function handleApplyToInput() {
         <button
           type="button"
           @click="handleApplyToInput"
-          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-xs transition cursor-pointer"
         >
           <RefreshCw class="w-3.5 h-3.5" />
           <span>{{ applied ? 'Appliqué !' : 'Remplacer l\'entrée' }}</span>
@@ -115,31 +119,31 @@ function handleApplyToInput() {
         <button
           type="button"
           @click="handleCopy"
-          class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition cursor-pointer"
         >
-          <Check v-if="copied" class="w-4 h-4 text-emerald-300" />
-          <Copy v-else class="w-4 h-4" />
+          <Check v-if="copied" class="w-3.5 h-3.5 text-white" />
+          <Copy v-else class="w-3.5 h-3.5" />
           <span>{{ copied ? 'Deckliste PTCGL copiée !' : 'Copier pour PTCGL' }}</span>
         </button>
 
         <button
           type="button"
           @click="handleDownload"
-          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-xs transition cursor-pointer"
         >
-          <Download class="w-4 h-4" />
+          <Download class="w-3.5 h-3.5" />
           <span>.txt</span>
         </button>
       </div>
     </div>
 
     <!-- Texte PTCGL généré -->
-    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col gap-3">
-      <div class="flex items-center justify-between text-xs text-slate-400">
+    <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col gap-3">
+      <div class="flex items-center justify-between text-xs text-slate-500">
         <span>Format prêt à être importé dans Pokémon TCG Live ou Limitless :</span>
-        <span class="font-mono text-slate-300">{{ totalCards }} cartes</span>
+        <span class="font-mono font-semibold text-slate-900">{{ totalCards }} cartes</span>
       </div>
-      <pre class="w-full rounded-xl bg-slate-950 border border-slate-800 p-4 text-xs sm:text-sm font-mono text-slate-100 leading-relaxed overflow-x-auto select-all">{{ exportedText }}</pre>
+      <pre class="w-full rounded-lg bg-slate-900 border border-slate-800 p-4 text-xs sm:text-sm font-mono text-slate-100 leading-relaxed overflow-x-auto select-all">{{ exportedText }}</pre>
     </div>
   </div>
 </template>
