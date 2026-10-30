@@ -54,7 +54,7 @@ const CARD_ID_ALIASES: Record<string, string> = {
 const byNormalizedName = new Map<string, { model: EngineCardModel; source: 'compiled_db' | 'fallback_registry' }>()
 
 // Indexation initiale
-for (const [id, model] of Object.entries(FALLBACK_CARD_MODELS)) {
+for (const model of Object.values(FALLBACK_CARD_MODELS)) {
   const normFr = normalizeCardNameForMatch(model.identity.nameFr)
   byNormalizedName.set(normFr, { model, source: 'fallback_registry' })
   if (model.identity.nameEn) {
@@ -67,7 +67,7 @@ for (const [id, model] of Object.entries(FALLBACK_CARD_MODELS)) {
   byNormalizedName.set(normFr.replace(/\s+ex$/, ' ex'), { model, source: 'fallback_registry' })
 }
 
-for (const [id, model] of Object.entries(compiledDb.cards)) {
+for (const model of Object.values(compiledDb.cards)) {
   const normFr = normalizeCardNameForMatch(model.identity.nameFr)
   byNormalizedName.set(normFr, { model, source: 'compiled_db' })
   if (model.identity.nameEn) {
