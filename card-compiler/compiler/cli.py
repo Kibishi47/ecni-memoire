@@ -43,7 +43,8 @@ from compiler.llm_engine import (
     ModelTier,
 )
 from compiler.post_processor import sanitize_and_enrich_card
-from compiler.schemas import EngineCardModel
+from compiler.schemas import CardSubCategory, EngineCardModel
+from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import (
     TEST_CARD_IDS,
     FetcherProvider,
@@ -187,13 +188,27 @@ def _execute_run_pipeline(
         console.print("[yellow]Aucune carte à compiler.[/yellow]")
         return
 
-    # Séparation entre cartes déjà compilées (batch resume) et cartes nécessitant l'inférence LLM
+    # Séparation entre cartes statiques, cartes déjà compilées (batch resume) et cartes nécessitant l'inférence LLM
     bundles_to_compile = []
     compiled_results: List[EngineCardModel] = []
     skipped_ids: set[str] = set()
+    static_energy_ids: set[str] = set()
 
     for bundle in bundles:
         out_path = compiled_dir / f"{bundle.card_id}.json"
+
+        # 1. Court-circuit déterministe pour les Énergies de Base (0 token, 0s, 0 hallucination)
+        if is_basic_energy(bundle):
+            static_model = build_basic_energy_model(bundle)
+            out_path.write_text(
+                json.dumps(static_model.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            compiled_results.append(static_model)
+            static_energy_ids.add(bundle.card_id)
+            continue
+
+        # 2. Séparation entre cartes déjà compilées (batch resume) et cartes nécessitant l'inférence LLM
         if out_path.exists() and not force:
             try:
                 existing_model = EngineCardModel.model_validate_json(out_path.read_text(encoding="utf-8"))
@@ -208,6 +223,11 @@ def _execute_run_pipeline(
             except Exception:
                 pass
         bundles_to_compile.append(bundle)
+
+    if static_energy_ids:
+        console.print(
+            f"[bold cyan]⚡ {len(static_energy_ids)} Énergie(s) de Base court-circuitée(s) instantanément (0 token, 0.00s).[/bold cyan]"
+        )
 
     if bundles_to_compile:
         compiler_engine = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
@@ -245,9 +265,13 @@ def _execute_run_pipeline(
                 )
                 compiled_results.append(engine_card)
                 progress.advance(task_id)
-    else:
+    elif not static_energy_ids:
         console.print(
             "[green]✓[/green] Toutes les cartes cibles sont déjà compilées et valides (utilisez [bold]--force[/bold] pour recompiler)."
+        )
+    else:
+        console.print(
+            "[green]✓[/green] Inférence LLM non requise : toutes les cartes sont valides ou court-circuitées statiquement."
         )
 
     # Consolidation dans data/cards_database.json (filtrée sur les cartes du mode test si mode == test)
@@ -275,22 +299,33 @@ def _execute_run_pipeline(
     table.add_column("Temps (s)", justify="right", style="cyan")
 
     for model in compiled_results:
-        primitives: List[str] = []
-        for action in model.playableActions:
-            for eff in action.effects:
-                primitives.append(eff.primitive.value)
-        primitives_str = ", ".join(primitives) if primitives else "—"
-
-        dead_reasons = [cond.reason.value for cond in model.strategicEvaluator.inGameDeadCardConditions]
-        dead_str = ", ".join(dead_reasons) if dead_reasons else "—"
-
-        elapsed_s = (
-            f"{model.compilationMetadata.compilationTimeSeconds:.2f}s"
-            if model.compilationMetadata
-            else "—"
+        is_static = (
+            model.cardId in static_energy_ids
+            or (model.compilationMetadata and model.compilationMetadata.modelRepoId == "STATIC_DETERMINISTIC")
+            or model.subCategory == CardSubCategory.BASIC_ENERGY
         )
-        if model.cardId in skipped_ids:
-            elapsed_s = f"{elapsed_s} (cache)"
+
+        if is_static:
+            primitives_str = "[cyan]⚡ STATIQUE (Skip LLM)[/cyan]"
+            dead_str = "—"
+            elapsed_s = "0.00s"
+        else:
+            primitives: List[str] = []
+            for action in model.playableActions:
+                for eff in action.effects:
+                    primitives.append(eff.primitive.value)
+            primitives_str = ", ".join(primitives) if primitives else "—"
+
+            dead_reasons = [cond.reason.value for cond in model.strategicEvaluator.inGameDeadCardConditions]
+            dead_str = ", ".join(dead_reasons) if dead_reasons else "—"
+
+            elapsed_s = (
+                f"{model.compilationMetadata.compilationTimeSeconds:.2f}s"
+                if model.compilationMetadata
+                else "—"
+            )
+            if model.cardId in skipped_ids:
+                elapsed_s = f"{elapsed_s} (cache)"
 
         display_name = model.identity.nameFr
         if model.identity.nameEn and model.identity.nameEn.lower() != model.identity.nameFr.lower():

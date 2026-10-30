@@ -39,6 +39,7 @@ from compiler.schemas import (
     EngineCardModel,
     LLMCompiledCardPart,
 )
+from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
 
@@ -713,6 +714,9 @@ class LocalLLMCardCompiler:
         max_tokens: int = 2560,
     ) -> EngineCardModel:
         """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`."""
+        if is_basic_energy(bundle):
+            return build_basic_energy_model(bundle)
+
         self.load_model_in_memory()
 
         user_prompt = build_user_prompt(bundle)
