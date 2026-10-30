@@ -75,13 +75,6 @@ export function parsePtcglDecklist(text: string): ParsedDeck {
       rawLine: trimmed,
     })
 
-    if (!resolved.isMapped && split.setCode) {
-      warnings.push({
-        line: lineNum,
-        message: `Extension "${split.setCode}" non répertoriée dans la table officielle (fallback "${resolved.setId}").`,
-      })
-    }
-
     cards.push(resolved)
   }
 

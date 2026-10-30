@@ -66,6 +66,45 @@ Energy: 11
     expect(water.cardId).toBe('sve-003')
   })
 
+  it('gère parfaitement les séries Mega Evolution (ASC, POR, MEG) et futures sans aucun warning', () => {
+    const raw = `
+Pokémon: 4
+2 Mega Dragonite ex ASC 152
+1 Mega Eelektross ex ASC 61
+1 Meowth ex POR 62
+Trainer: 3
+2 Lillie's Determination MEG 120
+1 Poké Pad POR 110
+1 Carte Future Inconnue FUT 42
+`
+    const deck = parsePtcglDecklist(raw)
+    expect(deck.totalCards).toBe(8)
+    // Aucun warning d'extension manquante
+    expect(deck.warnings).toHaveLength(0)
+
+    const dragonite = deck.cards[0]!
+    expect(dragonite.setId).toBe('me02.5')
+    expect(dragonite.cardId).toBe('me02.5-152')
+    expect(dragonite.imageUrl).toBe('https://assets.tcgdex.net/fr/me/me02.5/152')
+
+    const eelektross = deck.cards[1]!
+    expect(eelektross.setId).toBe('me02.5')
+    expect(eelektross.cardId).toBe('me02.5-061')
+
+    const meowth = deck.cards[2]!
+    expect(meowth.setId).toBe('me03')
+    expect(meowth.cardId).toBe('me03-062')
+
+    const lillie = deck.cards[3]!
+    expect(lillie.setId).toBe('me01')
+    expect(lillie.cardId).toBe('me01-120')
+
+    // Anticipation future : code inconnu résolu proprement en fallback sans warning
+    const futureCard = deck.cards[5]!
+    expect(futureCard.setId).toBe('fut')
+    expect(futureCard.cardId).toBe('fut-042')
+  })
+
   it('analyse un deck complet de 60 cartes et permet de modifier les ratios puis de réexporter au format PTCGL', () => {
     const preset = SAMPLE_DECKS[0]!
     const deck = parsePtcglDecklist(preset.ptcglText)
