@@ -31,8 +31,8 @@ const baselineDeck = ref<ParsedDeck>(initialParsed)
 const editableDeck = ref<ParsedDeck>(parsePtcglDecklist(defaultRawPtcglText))
 
 const simConfig = ref<SimulationConfig>({
-  iterations: 50,
-  maxTurns: 18,
+  iterations: 100,
+  maxTurns: 15,
   maxBranches: 20,
   selectedOpponentIds: META_OPPONENT_DECKS.map((d) => d.id),
   firstPlayerMode: 'RANDOM',
