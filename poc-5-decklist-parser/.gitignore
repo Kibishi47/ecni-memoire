@@ -3,3 +3,7 @@ dist
 dist-ssr
 *.local
 .DS_Store
+
+# Table de correspondance générée automatiquement
+src/data/mapping_ptcgl_to_tcgdex.json
+

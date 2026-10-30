@@ -4,9 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/generate-mapping.ts",
     "dev": "vite",
+    "prebuild": "node scripts/generate-mapping.ts",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
+    "pretest": "node scripts/generate-mapping.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "generate-mapping": "node scripts/generate-mapping.ts"
