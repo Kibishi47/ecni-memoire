@@ -47,6 +47,7 @@ const baselineSummary = ref<SimulationMetricsSummary | null>(null)
 const currentSummary = ref<SimulationMetricsSummary | null>(null)
 
 const isSimulating = ref<boolean>(false)
+const simulationError = ref<string | null>(null)
 const progressCompleted = ref<number>(0)
 const progressTotal = ref<number>(0)
 const progressElapsedMs = ref<number>(0)
@@ -115,7 +116,8 @@ function handleUpdateConfig(updated: SimulationConfig) {
 }
 
 async function executeInitialSimulation() {
-  if (!baselineDeck.value.isValid60 || isSimulating.value) return
+  if (!baselineDeck.value.isValid60 || !baselineDeck.value.isFullyResolved || isSimulating.value) return
+  simulationError.value = null
   currentStep.value = 3
   isSimulating.value = true
   progressCompleted.value = 0
@@ -134,6 +136,9 @@ async function executeInitialSimulation() {
     )
     baselineSummary.value = summary
     currentSummary.value = summary
+  } catch (err) {
+    simulationError.value = err instanceof Error ? err.message : String(err)
+    console.error('Erreur lors de la simulation initiale :', err)
   } finally {
     isSimulating.value = false
   }
@@ -143,11 +148,13 @@ async function executeComparisonSimulation() {
   if (
     editableDeck.value.totalCards !== 60 ||
     !editableDeck.value.hasAtLeastOneBasic ||
+    !editableDeck.value.isFullyResolved ||
     isSimulating.value
   ) {
     return
   }
 
+  simulationError.value = null
   isSimulating.value = true
   progressCompleted.value = 0
   progressTotal.value = simConfig.value.iterations
@@ -167,6 +174,9 @@ async function executeComparisonSimulation() {
       baselineSummary.value = summary
     }
     currentSummary.value = summary
+  } catch (err) {
+    simulationError.value = err instanceof Error ? err.message : String(err)
+    console.error('Erreur lors de la simulation comparative :', err)
   } finally {
     isSimulating.value = false
   }
@@ -245,6 +255,29 @@ function handleResetToBaseline() {
       @toggle-debug="toggleDebugMode"
     />
 
+    <!-- Bannière d'Erreur si une exception survient pendant la simulation -->
+    <div
+      v-if="simulationError"
+      class="mx-auto mt-4 max-w-7xl px-4 sm:px-6"
+    >
+      <div class="flex items-center justify-between gap-3 rounded-xl border-2 border-red-400 bg-red-50 p-4 text-red-950 shadow-xs">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">❌</span>
+          <div>
+            <div class="text-sm font-bold text-red-900">Une erreur est survenue pendant l'exécution de la simulation</div>
+            <div class="mt-0.5 font-mono text-xs text-red-800">{{ simulationError }}</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          @click="simulationError = null"
+          class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 shadow-2xs hover:bg-red-50"
+        >
+          Fermer l'alerte
+        </button>
+      </div>
+    </div>
+
     <!-- Contenu Principal par Étape -->
     <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <Step1DeckImport
@@ -258,6 +291,7 @@ function handleResetToBaseline() {
       <Step2SimConfig
         v-else-if="currentStep === 2"
         :config="simConfig"
+        :deck="baselineDeck"
         :is-debug-mode="isDebugMode"
         :max-hardware-workers="maxHardwareWorkers"
         @update-config="handleUpdateConfig"

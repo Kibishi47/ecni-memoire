@@ -154,7 +154,10 @@ export class SimulationWorkerPool {
             const data = event.data
             if (!data) return
 
-            if (data.type === 'SHARD_PROGRESS') {
+            if (data.type === 'PROGRESS') {
+              progressByShard.set(data.workerId, data.completedChunk)
+              reportAggregatedProgress()
+            } else if (data.type === 'SHARD_PROGRESS') {
               progressByShard.set(data.shardId, data.completedInShard)
               reportAggregatedProgress()
             } else if (data.type === 'SHARD_COMPLETE') {
@@ -162,7 +165,12 @@ export class SimulationWorkerPool {
               reportAggregatedProgress()
               worker.terminate()
               resolve(data.result)
+            } else if (data.type === 'ERROR') {
+              console.error('[WorkerPool ERROR]:', data.message, data.stack)
+              worker.terminate()
+              reject(new Error(data.message))
             } else if (data.type === 'SHARD_ERROR') {
+              console.error('[WorkerPool SHARD_ERROR]:', data.error)
               worker.terminate()
               reject(new Error(data.error))
             }
