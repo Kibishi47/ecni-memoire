@@ -305,11 +305,52 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
     </div>
 
     <!-- ======================================================================= -->
-    <!-- SECTION A : LES 8 INDICATEURS OBLIGATOIRES (AVEC DELTAS SI COMPARAISON) -->
+    <!-- SECTION A : TABLEAU DE BORD STATISTIQUE (LES 8 INDICATEURS CLÉS)        -->
     <!-- ======================================================================= -->
     <div v-if="currentSummary" class="space-y-4">
+      <!-- 1. Bandeau de performance système -->
+      <div class="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 shadow-xs">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 font-mono text-lg font-bold text-white shadow-xs"
+            >
+              ⚡
+            </div>
+            <div>
+              <div class="text-[11px] font-bold uppercase tracking-wider text-indigo-800">
+                Bandeau de Performance Système &amp; Vitesse Moteur
+              </div>
+              <div class="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-semibold text-slate-900">
+                <span>
+                  Temps d'exécution exact :
+                  <strong class="font-mono text-indigo-900">{{ formatDuration(currentSummary.totalDurationMs) }}</strong>
+                </span>
+                <span class="text-indigo-300">•</span>
+                <span>
+                  Parties réelles terminées :
+                  <strong class="font-mono text-slate-900">{{ currentSummary.totalGamesSimulated.toLocaleString('fr-FR') }}</strong>
+                </span>
+                <span class="text-indigo-300">•</span>
+                <span>
+                  Débit moyen :
+                  <strong class="font-mono text-indigo-900">{{ currentSummary.gamesPerSecond.toLocaleString('fr-FR') }} parties / seconde</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="rounded-lg border border-indigo-200 bg-white px-3 py-1 font-mono text-xs text-indigo-900 shadow-2xs">
+              Moy. tours / match : <strong>{{ currentSummary.avgTurnsPlayed }}t</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Indicateurs de Victoire & Régularité (Grandes cartes KPI) -->
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <!-- KPI 4 : Win Rate Global (%) -->
+        <!-- KPI 1 : Win Rate Global (%) -->
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div class="flex items-center justify-between">
             <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -333,10 +374,10 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             <span
               class="font-mono text-3xl font-bold"
               :class="
-                currentSummary.globalWinRate >= 55
+                currentSummary.globalWinRate >= 50
                   ? 'text-emerald-600'
                   : currentSummary.globalWinRate >= 45
-                    ? 'text-slate-900'
+                    ? 'text-amber-600'
                     : 'text-red-600'
               "
             >
@@ -351,33 +392,15 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           </p>
         </div>
 
-        <!-- KPI 1, 2 & 3 : Temps d'exécution, Parties simulées (X) & Débit (parties/sec) -->
+        <!-- KPI 2 : Taux de Mulligan (Main sans Pokémon de Base) -->
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Volume &amp; Vitesse Moteur
-            </span>
-            <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-700">
-              {{ currentSummary.gamesPerSecond }} parties/s
-            </span>
-          </div>
-          <div class="mt-2 flex items-baseline gap-2">
-            <span class="font-mono text-3xl font-bold text-slate-900">
-              {{ currentSummary.totalGamesSimulated }}
-            </span>
-            <span class="text-xs font-semibold text-slate-500">parties simulées ($X$)</span>
-          </div>
-          <p class="mt-1 font-mono text-xs text-slate-500">
-            Temps total : <strong>{{ formatDuration(currentSummary.totalDurationMs) }}</strong> (Moy. {{ currentSummary.avgTurnsPlayed }}t)
-          </p>
-        </div>
-
-        <!-- KPI 6 : Mulligans (Total & % de parties avec >= 1 mulligan) -->
-        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Mulligans à l'Ouverture
-            </span>
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Taux de Mulligan
+              </span>
+              <span class="block text-[10px] text-slate-400">Main sans Pokémon de Base</span>
+            </div>
             <span
               v-if="hasComparisonRun && baselineSummary"
               class="rounded px-2 py-0.5 font-mono text-xs font-bold"
@@ -397,20 +420,23 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
               {{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%
             </span>
             <span class="font-mono text-xs text-slate-500">
-              ({{ currentSummary.totalPlayerMulligans }} mulligans totaux)
+              ({{ currentSummary.totalPlayerMulligans }} totaux)
             </span>
           </div>
           <p class="mt-1 text-xs text-slate-500">
-            {{ currentSummary.gamesWithMulliganCount }} partie(s) ayant subi ≥ 1 mulligan
+            {{ currentSummary.gamesWithMulliganCount }} partie(s) avec au moins un mulligan
           </p>
         </div>
 
-        <!-- KPI 7 & 8 : Récompenses (Prizes) moyennes gagnées (Joueur vs Adversaire sur 6.00) -->
+        <!-- KPI 3 : Prizes Moyen Joueur -->
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Récompenses Moyennes (/6.00)
-            </span>
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Prizes Moyen Joueur
+              </span>
+              <span class="block text-[10px] text-emerald-600 font-semibold">Récompenses prises / match</span>
+            </div>
             <span
               v-if="hasComparisonRun && baselineSummary"
               class="rounded px-2 py-0.5 font-mono text-xs font-bold"
@@ -422,44 +448,67 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                     : 'bg-slate-100 text-slate-700'
               "
             >
-              ΔJ {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
+              Δ {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
             </span>
           </div>
-          <div class="mt-2 grid grid-cols-2 gap-2 border-b border-slate-100 pb-2">
-            <div>
-              <div class="text-[10px] font-bold uppercase text-emerald-700">Gagnées (Joueur)</div>
-              <div class="font-mono text-xl font-bold text-emerald-700">
-                {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }}
-                <span class="text-xs font-normal text-slate-400">/ 6.00</span>
-              </div>
-            </div>
-            <div>
-              <div class="text-[10px] font-bold uppercase text-rose-700">Concédées (Adv.)</div>
-              <div class="font-mono text-xl font-bold text-rose-700">
-                {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }}
-                <span class="text-xs font-normal text-slate-400">/ 6.00</span>
-              </div>
-            </div>
+          <div class="mt-2 flex items-baseline gap-1.5">
+            <span class="font-mono text-3xl font-bold text-emerald-600">
+              {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }}
+            </span>
+            <span class="text-sm font-semibold text-slate-400">/ 6.00</span>
           </div>
-          <p class="mt-1.5 font-mono text-[11px] text-slate-500">
+          <p class="mt-1 text-xs text-slate-500">
             Différentiel net :
-            <strong>
+            <strong :class="currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon >= 0 ? 'text-emerald-700' : 'text-rose-700'">
               {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon) }}
             </strong>
-            Prize(s) / match
+          </p>
+        </div>
+
+        <!-- KPI 4 : Prizes Moyen Adversaire -->
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Prizes Moyen Adversaire
+              </span>
+              <span class="block text-[10px] text-rose-600 font-semibold">Récompenses concédées</span>
+            </div>
+            <span
+              v-if="hasComparisonRun && baselineSummary"
+              class="rounded px-2 py-0.5 font-mono text-xs font-bold"
+              :class="
+                currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon < 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon > 0
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-slate-100 text-slate-700'
+              "
+            >
+              Δ {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
+            </span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-1.5">
+            <span class="font-mono text-3xl font-bold text-rose-600">
+              {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }}
+            </span>
+            <span class="text-sm font-semibold text-slate-400">/ 6.00</span>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">
+            Objectif : concéder &lt; 3.00 par partie
           </p>
         </div>
       </div>
 
-      <!-- KPI 5 : Win Rate détaillé par Deck Affronté -->
+      <!-- 3. Tableau des Matchups Affrontés (Détail par Deck) -->
       <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
             <h3 class="text-sm font-bold text-slate-900">
-              Win Rate Détaillé par Deck Méta Affronté
+              Tableau des Matchups Affrontés (Détail par Deck)
             </h3>
             <p class="text-xs text-slate-500">
-              Performance face à chaque archétype sélectionné (IA 3-Ply des deux côtés)
+              Détail de la performance face à chaque deck adverse sélectionné (IA 3-Ply des deux côtés)
             </p>
           </div>
           <div class="flex items-center gap-3 font-mono text-xs text-slate-500">
@@ -469,70 +518,90 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           </div>
         </div>
 
-        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div
-            v-for="m in currentSummary.matchupBreakdown"
-            :key="m.opponentId"
-            class="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <div class="flex items-center gap-2">
-                  <span class="text-xs font-bold text-slate-900">{{ m.opponentName }}</span>
-                  <span class="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
-                    {{ m.archetypeTag }}
-                  </span>
-                </div>
-                <div class="mt-0.5 font-mono text-[11px] text-slate-500">
-                  {{ m.gamesPlayed }} parties ({{ m.wins }}V – {{ m.losses }}D – {{ m.draws }}E) • Prizes : {{ m.avgPlayerPrizesWon.toFixed(2) }} vs {{ m.avgOpponentPrizesWon.toFixed(2) }}
-                </div>
-              </div>
+        <div class="mt-4 overflow-x-auto">
+          <table class="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase text-slate-500">
+                <th class="px-3.5 py-2.5">Nom du Deck Adverse</th>
+                <th class="px-3.5 py-2.5">Parties Jouées</th>
+                <th class="px-3.5 py-2.5">Victoires / Défaites</th>
+                <th class="px-3.5 py-2.5">Win Rate (%)</th>
+                <th class="px-3.5 py-2.5">Prizes Moyens (J vs Adv)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr
+                v-for="m in currentSummary.matchupBreakdown"
+                :key="m.opponentId"
+                class="hover:bg-slate-50/80 transition"
+              >
+                <!-- Nom du Deck Adverse -->
+                <td class="px-3.5 py-3">
+                  <div class="flex items-center gap-2">
+                    <span class="font-semibold text-slate-900">{{ m.opponentName }}</span>
+                    <span class="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+                      {{ m.archetypeTag }}
+                    </span>
+                  </div>
+                </td>
 
-              <div class="text-right font-mono">
-                <div class="flex items-center justify-end gap-1.5">
-                  <span
-                    class="text-lg font-bold"
-                    :class="
-                      m.winRate >= 55
-                        ? 'text-emerald-600'
-                        : m.winRate >= 45
-                          ? 'text-slate-900'
-                          : 'text-red-600'
-                    "
-                  >
-                    {{ m.winRate.toFixed(1) }}%
-                  </span>
-                  <span
-                    v-if="hasComparisonRun && getBaselineMatchupWinRate(m.opponentId) !== null"
-                    class="rounded px-1.5 py-0.5 text-[11px] font-bold"
-                    :class="
-                      m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) > 0
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) < 0
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-slate-200 text-slate-700'
-                    "
-                  >
-                    {{ formatSignedDelta(m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0), '%') }}
-                  </span>
-                </div>
-              </div>
-            </div>
+                <!-- Parties Jouées -->
+                <td class="px-3.5 py-3 font-mono text-slate-700">
+                  {{ m.gamesPlayed }}
+                </td>
 
-            <div class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-              <div
-                class="h-full rounded-full transition-all"
-                :class="
-                  m.winRate >= 55
-                    ? 'bg-emerald-500'
-                    : m.winRate >= 45
-                      ? 'bg-amber-500'
-                      : 'bg-red-500'
-                "
-                :style="{ width: `${Math.min(100, m.winRate)}%` }"
-              ></div>
-            </div>
-          </div>
+                <!-- Victoires / Défaites -->
+                <td class="px-3.5 py-3 font-mono text-slate-700">
+                  <span class="font-bold text-emerald-700">{{ m.wins }}V</span> –
+                  <span class="font-bold text-rose-700">{{ m.losses }}D</span>
+                  <span v-if="m.draws > 0"> – <span class="text-slate-500">{{ m.draws }}E</span></span>
+                </td>
+
+                <!-- Win Rate (%) + Jauge Visuelle Horizontale -->
+                <td class="px-3.5 py-3">
+                  <div class="flex items-center gap-3">
+                    <span
+                      class="font-mono text-sm font-bold"
+                      :class="m.winRate >= 50 ? 'text-emerald-600' : 'text-rose-600'"
+                    >
+                      {{ m.winRate.toFixed(1) }}%
+                    </span>
+
+                    <span
+                      v-if="hasComparisonRun && getBaselineMatchupWinRate(m.opponentId) !== null"
+                      class="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                      :class="
+                        m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0) < 0
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-slate-200 text-slate-700'
+                      "
+                    >
+                      {{ formatSignedDelta(m.winRate - (getBaselineMatchupWinRate(m.opponentId) ?? 0), '%') }}
+                    </span>
+
+                    <!-- Jauge visuelle horizontale : vert si >= 50%, rouge si < 50% -->
+                    <div class="h-2 w-28 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        class="h-full rounded-full transition-all duration-300"
+                        :class="m.winRate >= 50 ? 'bg-emerald-500' : 'bg-rose-500'"
+                        :style="{ width: `${Math.min(100, Math.max(0, m.winRate))}%` }"
+                      ></div>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Prizes Moyens -->
+                <td class="px-3.5 py-3 font-mono text-xs">
+                  <span class="font-bold text-emerald-700">{{ m.avgPlayerPrizesWon.toFixed(2) }}</span>
+                  <span class="text-slate-400"> vs </span>
+                  <span class="font-bold text-rose-700">{{ m.avgOpponentPrizesWon.toFixed(2) }}</span>
+                  <span class="text-[10px] text-slate-400"> / 6.00</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
