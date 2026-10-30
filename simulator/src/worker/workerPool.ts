@@ -54,12 +54,32 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
 
 export class SimulationWorkerPool {
   private activeWorkers: Worker[] = []
+  private rejectCurrentRun?: ((reason?: unknown) => void) | null
+  private isCancelled = false
+  public isRunning = false
+  public status: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'ERROR' = 'IDLE'
 
   public terminateAll(): void {
     for (const w of this.activeWorkers) {
-      w.terminate()
+      try {
+        w.terminate()
+      } catch {
+        // Silently ignore termination errors
+      }
     }
     this.activeWorkers = []
+  }
+
+  public cancelSimulation(): void {
+    if (!this.isRunning) return
+    this.isCancelled = true
+    this.status = 'CANCELLED'
+    this.isRunning = false
+    this.terminateAll()
+    if (this.rejectCurrentRun) {
+      this.rejectCurrentRun(new Error('Simulation annulée par l\'utilisateur'))
+      this.rejectCurrentRun = null
+    }
   }
 
   public async runSimulation(
@@ -68,6 +88,9 @@ export class SimulationWorkerPool {
     onProgress?: (completedGames: number, totalGames: number, elapsedMs: number) => void,
   ): Promise<SimulationMetricsSummary> {
     this.terminateAll()
+    this.isCancelled = false
+    this.status = 'RUNNING'
+    this.isRunning = true
 
     const startTime = performance.now()
     const totalGames = Math.max(1, config.iterations)
@@ -77,8 +100,18 @@ export class SimulationWorkerPool {
         : DEFAULT_BASE_SEED
 
     if (!hasCompiledCardData()) {
+      this.status = 'ERROR'
+      this.isRunning = false
       throw new Error(
         'Simulation impossible : la base de données cards_database.json est vide. Synchronisez les modèles de cartes avec npm run sync-cards.',
+      )
+    }
+
+    if (!playerDeck.isFullyResolved) {
+      this.status = 'ERROR'
+      this.isRunning = false
+      throw new Error(
+        `Simulation bloquée : ${playerDeck.unresolvedCount} carte(s) absente(s) de cards_database.json`,
       )
     }
 
@@ -122,25 +155,52 @@ export class SimulationWorkerPool {
       nextStart += countForShard
     }
 
-    // Fallback synchrone/asynchrone si `Worker` n'est pas disponible (ex: environnement Node/Vitest)
+    // Fallback asynchrone si `Worker` n'est pas disponible (ex: environnement Node/Vitest)
     if (typeof Worker === 'undefined') {
-      const shardResults: SimulationShardResult[] = []
-      let completedSoFar = 0
-      for (const shardIn of shardsInput) {
-        const res = runSimulationShard(shardIn, (inShard) => {
-          if (onProgress) {
-            onProgress(
-              completedSoFar + inShard,
-              totalGames,
-              Math.round(performance.now() - startTime),
-            )
+      return new Promise<SimulationMetricsSummary>((resolve, reject) => {
+        this.rejectCurrentRun = reject
+        setTimeout(() => {
+          if (this.isCancelled) {
+            reject(new Error('Simulation annulée par l\'utilisateur'))
+            return
           }
-        })
-        completedSoFar += shardIn.gameCount
-        shardResults.push(res)
-      }
-      const totalDurationMs = performance.now() - startTime
-      return mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs)
+          try {
+            const shardResults: SimulationShardResult[] = []
+            let completedSoFar = 0
+            for (const shardIn of shardsInput) {
+              if (this.isCancelled) {
+                reject(new Error('Simulation annulée par l\'utilisateur'))
+                return
+              }
+              const res = runSimulationShard(shardIn, (inShard) => {
+                if (onProgress) {
+                  onProgress(
+                    completedSoFar + inShard,
+                    totalGames,
+                    Math.round(performance.now() - startTime),
+                  )
+                }
+              })
+              completedSoFar += shardIn.gameCount
+              shardResults.push(res)
+            }
+            if (this.isCancelled) {
+              reject(new Error('Simulation annulée par l\'utilisateur'))
+              return
+            }
+            const totalDurationMs = performance.now() - startTime
+            this.status = 'COMPLETED'
+            this.isRunning = false
+            resolve(mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs))
+          } catch (err) {
+            this.status = 'ERROR'
+            this.isRunning = false
+            reject(err)
+          } finally {
+            this.rejectCurrentRun = null
+          }
+        }, 0)
+      })
     }
 
     // Exécution parallèle via Web Workers natifs
@@ -201,12 +261,27 @@ export class SimulationWorkerPool {
         }),
     )
 
-    try {
-      const shardResults = await Promise.all(shardPromises)
-      const totalDurationMs = performance.now() - startTime
-      return mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs)
-    } finally {
-      this.terminateAll()
-    }
+    return new Promise<SimulationMetricsSummary>(async (resolve, reject) => {
+      this.rejectCurrentRun = reject
+      try {
+        const shardResults = await Promise.all(shardPromises)
+        if (this.isCancelled) {
+          reject(new Error('Simulation annulée par l\'utilisateur'))
+          return
+        }
+        const totalDurationMs = performance.now() - startTime
+        this.status = 'COMPLETED'
+        resolve(mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs))
+      } catch (err) {
+        if (this.status !== 'CANCELLED') {
+          this.status = 'ERROR'
+        }
+        reject(err)
+      } finally {
+        this.isRunning = false
+        this.rejectCurrentRun = null
+        this.terminateAll()
+      }
+    })
   }
 }

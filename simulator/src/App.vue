@@ -48,6 +48,8 @@ const currentSummary = ref<SimulationMetricsSummary | null>(null)
 
 const isSimulating = ref<boolean>(false)
 const simulationError = ref<string | null>(null)
+const cancelNotice = ref<string | null>(null)
+let cancelNoticeTimeout: ReturnType<typeof setTimeout> | null = null
 const progressCompleted = ref<number>(0)
 const progressTotal = ref<number>(0)
 const progressElapsedMs = ref<number>(0)
@@ -64,6 +66,17 @@ const liveThroughput = computed(() => {
 })
 
 const workerPool = new SimulationWorkerPool()
+
+function handleCancelSimulation() {
+  workerPool.cancelSimulation()
+  isSimulating.value = false
+  simulationError.value = null
+  cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+  if (cancelNoticeTimeout) clearTimeout(cancelNoticeTimeout)
+  cancelNoticeTimeout = setTimeout(() => {
+    cancelNotice.value = null
+  }, 4500)
+}
 
 function detectDebugModeFromUrl() {
   if (typeof window === 'undefined') return
@@ -150,8 +163,13 @@ async function executeInitialSimulation() {
     baselineSummary.value = summary
     currentSummary.value = summary
   } catch (err) {
-    simulationError.value = err instanceof Error ? err.message : String(err)
-    console.error('Erreur lors de la simulation initiale :', err)
+    if (err instanceof Error && err.message.includes('annulée')) {
+      cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+      simulationError.value = null
+    } else {
+      simulationError.value = err instanceof Error ? err.message : String(err)
+      console.error('Erreur lors de la simulation initiale :', err)
+    }
   } finally {
     isSimulating.value = false
   }
@@ -190,8 +208,13 @@ async function executeComparisonSimulation() {
     }
     currentSummary.value = summary
   } catch (err) {
-    simulationError.value = err instanceof Error ? err.message : String(err)
-    console.error('Erreur lors de la simulation comparative :', err)
+    if (err instanceof Error && err.message.includes('annulée')) {
+      cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+      simulationError.value = null
+    } else {
+      simulationError.value = err instanceof Error ? err.message : String(err)
+      console.error('Erreur lors de la simulation comparative :', err)
+    }
   } finally {
     isSimulating.value = false
   }
@@ -307,6 +330,13 @@ function handleResetToBaseline() {
             <span>Débit : ~{{ liveThroughput.toLocaleString('fr-FR') }} parties/sec</span>
             <span>•</span>
             <span>Temps écoulé : {{ (progressElapsedMs / 1000).toFixed(1) }} s</span>
+            <button
+              type="button"
+              @click="handleCancelSimulation"
+              class="rounded-lg border border-rose-600 bg-rose-600 px-3 py-1 text-xs font-bold text-white shadow-xs transition hover:bg-rose-700 active:bg-rose-800"
+            >
+              Annuler la simulation
+            </button>
           </div>
         </div>
 
@@ -317,6 +347,28 @@ function handleResetToBaseline() {
             :style="{ width: `${progressPercent}%` }"
           ></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Information discrète lors de l'annulation d'une simulation -->
+    <div
+      v-if="cancelNotice"
+      class="mx-auto mt-4 max-w-7xl px-4 sm:px-6"
+    >
+      <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white p-3.5 text-slate-700 shadow-xs">
+        <div class="flex items-center gap-2 text-xs font-medium">
+          <svg class="h-4 w-4 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{{ cancelNotice }}</span>
+        </div>
+        <button
+          type="button"
+          @click="cancelNotice = null"
+          class="text-xs text-slate-400 hover:text-slate-600"
+        >
+          Fermer
+        </button>
       </div>
     </div>
 
@@ -363,9 +415,12 @@ function handleResetToBaseline() {
         :deck="baselineDeck"
         :is-debug-mode="isDebugMode"
         :max-hardware-workers="maxHardwareWorkers"
+        :is-simulating="isSimulating"
+        :progress-percent="progressPercent"
         @update-config="handleUpdateConfig"
         @back-step1="currentStep = 1"
         @launch-simulation="executeInitialSimulation"
+        @cancel-simulation="handleCancelSimulation"
       />
 
       <Step3DashboardAndComparator
@@ -383,6 +438,7 @@ function handleResetToBaseline() {
         @remove-card="handleRemoveCard"
         @add-catalog-card="handleAddCatalogCard"
         @rerun-and-compare="executeComparisonSimulation"
+        @cancel-simulation="handleCancelSimulation"
         @promote-current-as-baseline="handlePromoteCurrentAsBaseline"
         @reset-to-baseline="handleResetToBaseline"
         @back-step2="currentStep = 2"

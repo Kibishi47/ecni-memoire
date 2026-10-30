@@ -129,6 +129,31 @@ function formatRoleLabel(role: string): string {
         </div>
       </div>
 
+      <!-- Bouton d'accès direct au Deck 100 % Compatible -->
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-300 bg-emerald-50/80 p-3.5 shadow-2xs">
+        <div class="flex items-center gap-2">
+          <svg class="h-5 w-5 shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div>
+            <div class="text-xs font-bold text-emerald-950">
+              Deck de Test 100 % Compatible avec <code class="font-mono">cards_database.json</code>
+            </div>
+            <p class="text-[11px] text-emerald-800">
+              Composé exclusivement des 11 cartes compilées (Ire-Foudre-ex, Favianos-ex, Pepper, Mashynn, Hyper Ball...) et d'énergies de base.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          @click="loadSampleDeck('meta_test_compatible')"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-800 active:bg-emerald-900"
+        >
+          <span>Charger un Deck de Test 100 % Compatible (11 cartes compilées + Énergies de base)</span>
+          <span>→</span>
+        </button>
+      </div>
+
       <!-- Grille principale : Éditeur Texte PTCGL (Gauche) + Résumé de Validation & Synergies (Droite) -->
       <div class="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-12">
         <!-- Colonne Gauche : Zone de texte PTCGL -->

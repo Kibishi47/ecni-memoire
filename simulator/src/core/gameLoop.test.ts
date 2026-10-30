@@ -51,4 +51,30 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
     expect(summary1.avgPlayerPrizesWon).toBe(summary2.avgPlayerPrizesWon)
     expect(summary1.avgOpponentPrizesWon).toBe(summary2.avgOpponentPrizesWon)
   })
+
+  it('cancels simulation immediately and sets status to CANCELLED', async () => {
+    const playerDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const pool = new SimulationWorkerPool()
+
+    const config = {
+      iterations: 50,
+      maxTurns: 14,
+      maxBranches: 8 as const,
+      selectedOpponentIds: [META_OPPONENT_DECKS[0]!.id],
+      firstPlayerMode: 'RANDOM' as const,
+      debugMode: false,
+      workerCount: 2,
+      fixedSeed: 42,
+      perturbationType: 'NONE' as const,
+      perturbationTurn: 3,
+    }
+
+    const simPromise = pool.runSimulation(playerDeck, config)
+    expect(pool.isRunning).toBe(true)
+    pool.cancelSimulation()
+    expect(pool.isRunning).toBe(false)
+    expect(pool.status).toBe('CANCELLED')
+
+    await expect(simPromise).rejects.toThrow('Simulation annulée par l\'utilisateur')
+  })
 })

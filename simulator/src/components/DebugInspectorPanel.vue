@@ -100,7 +100,7 @@ function formatWinReason(reason: string | null): string {
             INSPECTEUR ?debug=true
           </span>
           <h3 class="text-base font-bold text-slate-900">
-            Inspection Granulaire : Partie ➔ Timeline par Tour ➔ Branches 3-Ply ($T \rightarrow T_{\text{adv}} \rightarrow T+1$)
+            Inspection Granulaire : Partie → Timeline par Tour → Branches 3-Ply ($T \rightarrow T_{\text{adv}} \rightarrow T+1$)
           </h3>
         </div>
         <p class="mt-1 text-xs text-slate-500">
@@ -679,7 +679,7 @@ function formatWinReason(reason: string | null): string {
                     {{ actLabel }}
                   </span>
                   <span v-if="aIdx < branch.actions.length - 1" class="font-mono text-xs text-slate-400">
-                    ➔
+                    →
                   </span>
                 </template>
               </div>
