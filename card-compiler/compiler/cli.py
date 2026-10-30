@@ -3,6 +3,7 @@
 Commandes disponibles :
 - `python -m compiler.cli run` (alias `compile`) : Exécute le pipeline complet (TCGdex -> Llama GBNF -> Disque)
   avec support de `--mode test|standard`, `--test`, `--standard`, `--ids`, `--fast`, `--force`.
+- `python -m compiler.cli count` : Compte le nombre de cartes déjà compilées dans `data/compiled_cards/` (options `--details` et `--quiet`).
 - `python -m compiler.cli inspect <card_id>` : Affiche avec coloration syntaxique JSON et panneaux Rich
   le modèle complet généré dans `data/compiled_cards/<card_id>.json`.
 - `python -m compiler.cli stats` (alias `validate`) : Vérifie l'intégrité Pydantic V2 de tous les fichiers JSON
@@ -702,6 +703,111 @@ def _execute_stats_validation() -> None:
 
     if invalid_files:
         raise typer.Exit(code=1)
+
+
+@app.command("count")
+def count_command(
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Affiche uniquement le nombre entier de cartes compilées (idéal pour les scripts bash).",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        "-d",
+        help="Affiche la liste détaillée des cartes compilées avec leurs noms et catégories.",
+    ),
+) -> None:
+    """Compte et résume le nombre de cartes Pokémon déjà compilées dans `data/compiled_cards/`."""
+    data_dir = get_data_dir()
+    compiled_dir = data_dir / "compiled_cards"
+    json_files = sorted(compiled_dir.glob("*.json"))
+    total_count = len(json_files)
+
+    if quiet:
+        console.print(str(total_count))
+        return
+
+    if total_count == 0:
+        console.print(
+            f"[yellow]Aucune carte compilée trouvée dans [bold]{compiled_dir}[/bold] (0 carte).[/yellow]\n"
+            "Pour lancer la compilation, exécutez : [cyan]python -m compiler.cli run --mode test[/cyan]"
+        )
+        return
+
+    categories_counter: Counter[str] = Counter()
+    cards_summary: List[Dict[str, str]] = []
+
+    for fpath in json_files:
+        card_id = fpath.stem
+        card_name = "Inconnu"
+        category = "Inconnu"
+        sub_category = ""
+        model_name = ""
+        try:
+            with open(fpath, "r", encoding="utf-8") as jf:
+                data = json.load(jf)
+                identity = data.get("identity") or {}
+                card_name = identity.get("nameFr") or identity.get("nameEn") or card_id
+                category = data.get("category", "Inconnu")
+                sub_category = data.get("subCategory", "")
+                meta = data.get("compilationMetadata") or {}
+                model_name = meta.get("modelFilename") or meta.get("modelRepoId") or ""
+        except Exception:
+            pass
+
+        categories_counter[category] += 1
+        cards_summary.append({
+            "id": card_id,
+            "name": card_name,
+            "category": f"{category} / {sub_category}" if sub_category else category,
+            "model": model_name,
+        })
+
+    db_path = data_dir / "cards_database.json"
+    db_count = 0
+    if db_path.exists():
+        try:
+            with open(db_path, "r", encoding="utf-8") as df:
+                db_data = json.load(df)
+                if isinstance(db_data, dict):
+                    db_count = len(db_data.get("cards", {}))
+                elif isinstance(db_data, list):
+                    db_count = len(db_data)
+        except Exception:
+            pass
+
+    repartition_str = ", ".join(f"[bold cyan]{cnt}[/bold cyan] {cat}" for cat, cnt in categories_counter.items())
+    db_line = f"\n• [bold]Base consolidée ([cyan]cards_database.json[/cyan])[/bold] : {db_count} carte(s)" if db_path.exists() else ""
+
+    console.print(
+        Panel.fit(
+            f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
+            f"• [bold]Dossier de stockage[/bold] : [cyan]{compiled_dir}[/cyan]\n"
+            f"• [bold]Répartition par catégorie[/bold] : {repartition_str}"
+            f"{db_line}",
+            title="[bold green]Corpus de Cartes Compilées[/bold green]",
+            border_style="green",
+        )
+    )
+
+    if details:
+        table = Table(
+            title=f"Détail des {total_count} Cartes Compilées",
+            header_style="bold cyan",
+            show_lines=False,
+        )
+        table.add_column("ID", style="bold yellow")
+        table.add_column("Nom", style="white")
+        table.add_column("Catégorie", style="cyan")
+        table.add_column("Généré par", style="magenta")
+
+        for c in cards_summary:
+            table.add_row(c["id"], c["name"], c["category"], c["model"] or "—")
+
+        console.print(table)
 
 
 @app.command("stats")
