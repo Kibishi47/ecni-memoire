@@ -216,7 +216,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             @click="showExportPanel = !showExportPanel"
             class="rounded-lg border border-slate-300 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200"
           >
-            {{ showExportPanel ? 'Masquer Export PTCGL' : 'Exporter le deck courant (PTCGL)' }}
+            {{ showExportPanel ? '✕ Masquer Export PTCGL' : '📋 Exporter la Variante (PTCGL)' }}
           </button>
         </div>
       </div>
@@ -253,7 +253,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <h3 class="text-sm font-bold text-slate-900">
-            Exporter le Deck Courant au Format Pokémon TCG Live (PTCGL)
+            Exporter la Variante Active au Format Pokémon TCG Live (PTCGL)
           </h3>
           <p class="text-xs text-slate-500">
             Liste de {{ editableDeck.totalCards }} cartes groupée par <code class="font-mono">Pokémon</code>,
@@ -607,196 +607,43 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
     </div>
 
     <!-- ======================================================================= -->
-    <!-- SECTION B : PANNEAU DE COMPARAISON STATISTIQUE A/B (ORIGINAL VS COURANT)-->
+    <!-- SECTION B : ATELIER D'OPTIMISATION A/B (MODIFICATION & COMPARAISON)    -->
     <!-- ======================================================================= -->
-    <div
-      v-if="hasComparisonRun && baselineSummary && currentSummary"
-      class="rounded-2xl border-2 border-slate-900 bg-white p-5 shadow-xs"
-    >
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3.5">
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
+      <!-- 1. En-tête de la section -->
+      <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <span class="rounded bg-slate-900 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
-            COMPARAISON A/B AVANT / APRÈS
-          </span>
-          <h3 class="mt-1.5 text-base font-bold text-slate-900">
-            Deck Original (Baseline) vs Deck Courant Modifié
-          </h3>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            @click="emit('promote-current-as-baseline')"
-            class="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
-          >
-            Définir le deck courant comme nouvelle référence
-          </button>
-          <button
-            type="button"
-            @click="emit('reset-to-baseline')"
-            class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-          >
-            Réinitialiser au deck original
-          </button>
-        </div>
-      </div>
-
-      <!-- Badges des cartes modifiées (-1 X / +1 Y) -->
-      <div class="mt-3.5">
-        <div class="text-xs font-bold uppercase tracking-wider text-slate-500">
-          Modifications apportées à la liste (Diff A/B) :
-        </div>
-        <div v-if="cardDiffItems.length > 0" class="mt-2 flex flex-wrap gap-2">
-          <span
-            v-for="diff in cardDiffItems"
-            :key="diff.cardId"
-            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-xs font-bold"
-            :class="
-              diff.deltaQty > 0
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                : 'border-red-300 bg-red-50 text-red-800'
-            "
-          >
-            <span>{{ diff.deltaQty > 0 ? `+${diff.deltaQty}` : diff.deltaQty }}</span>
-            <span class="font-sans font-semibold">{{ diff.nameFr }}</span>
-            <span class="text-[10px] opacity-75">({{ diff.oldQty }} ➔ {{ diff.newQty }})</span>
-          </span>
-        </div>
-        <p v-else class="mt-1 text-xs text-slate-500">
-          Aucune différence de carte entre les deux listes.
-        </p>
-      </div>
-
-      <!-- Tableau comparatif côte à côte avec badges Delta -->
-      <div class="mt-4 overflow-x-auto">
-        <table class="w-full border-collapse text-left text-xs">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase text-slate-500">
-              <th class="px-3 py-2.5">Indicateur</th>
-              <th class="px-3 py-2.5">Deck Original (Baseline)</th>
-              <th class="px-3 py-2.5">Deck Courant Modifié</th>
-              <th class="px-3 py-2.5">Écart (Δ)</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100 font-mono">
-            <tr>
-              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Win Rate Global</td>
-              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.globalWinRate.toFixed(1) }}%</td>
-              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.globalWinRate.toFixed(1) }}%</td>
-              <td class="px-3 py-2.5">
-                <span
-                  class="rounded px-2 py-0.5 font-bold"
-                  :class="
-                    currentSummary.globalWinRate - baselineSummary.globalWinRate > 0
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : currentSummary.globalWinRate - baselineSummary.globalWinRate < 0
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-slate-100 text-slate-600'
-                  "
-                >
-                  {{ baselineSummary.globalWinRate.toFixed(1) }}% ➔ {{ currentSummary.globalWinRate.toFixed(1) }}% ({{ formatSignedDelta(currentSummary.globalWinRate - baselineSummary.globalWinRate, '%') }})
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Taux de Mulligan</td>
-              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
-              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
-              <td class="px-3 py-2.5">
-                <span
-                  class="rounded px-2 py-0.5 font-bold"
-                  :class="
-                    currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate < 0
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate > 0
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-slate-100 text-slate-600'
-                  "
-                >
-                  {{ formatSignedDelta(currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate, '%') }}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Prizes Moyens Gagnés (Joueur)</td>
-              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
-              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
-              <td class="px-3 py-2.5">
-                <span
-                  class="rounded px-2 py-0.5 font-bold"
-                  :class="
-                    currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon > 0
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon < 0
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-slate-100 text-slate-600'
-                  "
-                >
-                  {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td class="px-3 py-2.5 font-sans font-semibold text-slate-900">Prizes Moyens Concédés (Adv.)</td>
-              <td class="px-3 py-2.5 text-slate-600">{{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
-              <td class="px-3 py-2.5 font-bold text-slate-900">{{ currentSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
-              <td class="px-3 py-2.5">
-                <span
-                  class="rounded px-2 py-0.5 font-bold"
-                  :class="
-                    currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon < 0
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon > 0
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-slate-100 text-slate-600'
-                  "
-                >
-                  {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ======================================================================= -->
-    <!-- SECTION C : ÉDITEUR DE DECK INTERACTIF (VERROU STRICT 60 CARTES)        -->
-    <!-- ======================================================================= -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-      <!-- Barre de contrôle de l'Éditeur & Verrou 60 Cartes -->
-      <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
-          <h3 class="text-base font-bold text-slate-900">
-            Atelier d'Édition Interactif du Deck &amp; Relance Comparative A/B
-          </h3>
-          <p class="mt-0.5 text-xs text-slate-500">
-            Ajustez les quantités avec <code class="font-mono">[-]</code> / <code class="font-mono">[+]</code> ou ajoutez une carte du catalogue. Le deck doit compter exactement <strong>60 cartes</strong> pour relancer la simulation.
+          <div class="flex items-center gap-2">
+            <span class="rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 font-mono text-xs font-bold text-indigo-700">
+              OPTIMISATION DU DECK
+            </span>
+          </div>
+          <h2 class="mt-2 text-xl font-bold text-slate-900">
+            🧪 Atelier d'Optimisation A/B
+          </h2>
+          <p class="mt-1 text-sm text-slate-600">
+            Ajustez les ratios de vos cartes pour mesurer l'impact immédiat sur votre Win Rate par rapport au deck original.
           </p>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Compteur dynamique strict Total : XX / 60 cartes -->
-          <div
-            class="flex items-center gap-2 rounded-xl border px-3.5 py-2 font-mono text-sm font-bold"
-            :class="
-              editableDeck.totalCards === 60 && editableDeck.hasAtLeastOneBasic
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                : 'border-red-300 bg-red-50 text-red-800'
-            "
+        <div class="flex flex-wrap items-center gap-2.5">
+          <!-- 4. Export de la Variante -->
+          <button
+            type="button"
+            @click="showExportPanel = !showExportPanel"
+            class="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 shadow-2xs transition hover:bg-slate-50"
           >
-            <span>Total : {{ editableDeck.totalCards }} / 60 cartes</span>
-            <span
-              v-if="editableDeck.totalCards !== 60"
-              class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white"
-            >
-              {{
-                editableDeck.totalCards < 60
-                  ? `Manque ${60 - editableDeck.totalCards}`
-                  : `Excédent +${editableDeck.totalCards - 60}`
-              }}
-            </span>
-          </div>
+            {{ showExportPanel ? '✕ Masquer Export PTCGL' : '📋 Exporter la Variante (PTCGL)' }}
+          </button>
+
+          <button
+            v-if="hasComparisonRun"
+            type="button"
+            @click="emit('promote-current-as-baseline')"
+            class="rounded-lg border border-emerald-600 bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-2xs transition hover:bg-emerald-700"
+          >
+            Définir la variante comme nouvelle référence
+          </button>
 
           <button
             v-if="cardDiffItems.length > 0"
@@ -804,44 +651,263 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             @click="emit('reset-to-baseline')"
             class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
           >
-            Réinitialiser au deck original
-          </button>
-
-          <!-- Bouton Relancer la simulation & Comparer (strictement disabled si != 60 cartes) -->
-          <button
-            type="button"
-            :disabled="
-              editableDeck.totalCards !== 60 || !editableDeck.hasAtLeastOneBasic || isSimulating
-            "
-            @click="emit('rerun-and-compare')"
-            class="rounded-xl border px-4 py-2.5 text-xs font-bold transition sm:text-sm"
-            :class="
-              editableDeck.totalCards === 60 && editableDeck.hasAtLeastOneBasic && !isSimulating
-                ? 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
-                : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-            "
-          >
-            Relancer la simulation &amp; Comparer
+            Réinitialiser au deck référence
           </button>
         </div>
       </div>
 
-      <!-- Changements en attente avant relance -->
+      <!-- 3. Affichage comparatif côte à côte (Delta Δ) si au moins une comparaison a été lancée -->
       <div
-        v-if="cardDiffItems.length > 0"
-        class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+        v-if="hasComparisonRun && baselineSummary && currentSummary"
+        class="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-4"
       >
-        <span class="font-semibold text-slate-600">Modifications par rapport au Deck Original :</span>
-        <span
-          v-for="d in cardDiffItems"
-          :key="d.cardId"
-          class="rounded px-2 py-0.5 font-mono text-[11px] font-bold"
-          :class="
-            d.deltaQty > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-          "
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 pb-3">
+          <div>
+            <span class="rounded bg-indigo-600 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
+              RÉSULTATS DE COMPARAISON A/B
+            </span>
+            <h3 class="mt-1 text-base font-bold text-slate-900">
+              Deck Référence (Baseline) vs Variante Active
+            </h3>
+          </div>
+          <div class="text-xs font-mono text-indigo-900">
+            Écart statistique mesuré sur {{ currentSummary.totalGamesSimulated }} parties
+          </div>
+        </div>
+
+        <!-- Résumé des modifications de composition (Diff A/B) -->
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Résumé des modifications de composition :
+          </div>
+          <div v-if="cardDiffItems.length > 0" class="mt-2 flex flex-wrap gap-2">
+            <span
+              v-for="diff in cardDiffItems"
+              :key="diff.cardId"
+              class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-xs font-bold shadow-2xs"
+              :class="
+                diff.deltaQty > 0
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-red-300 bg-red-50 text-red-800'
+              "
+            >
+              <span>{{ diff.deltaQty > 0 ? `+${diff.deltaQty}` : diff.deltaQty }}</span>
+              <span class="font-sans font-semibold">{{ diff.nameFr }}</span>
+              <span class="text-[10px] opacity-75">({{ diff.oldQty }} ➔ {{ diff.newQty }})</span>
+            </span>
+          </div>
+          <p v-else class="mt-1 text-xs text-slate-500">
+            Aucune modification de cartes par rapport au Deck Référence.
+          </p>
+        </div>
+
+        <!-- Tableau comparatif clair présentant : Indicateur | Deck Référence | Variante Active | Écart (Delta Δ) -->
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table class="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase text-slate-500">
+                <th class="px-4 py-3">Indicateur</th>
+                <th class="px-4 py-3">Deck Référence</th>
+                <th class="px-4 py-3">Variante Active</th>
+                <th class="px-4 py-3">Écart (Delta Δ)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono">
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Win Rate Global</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.globalWinRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.globalWinRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.globalWinRate - baselineSummary.globalWinRate > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.globalWinRate - baselineSummary.globalWinRate < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.globalWinRate - baselineSummary.globalWinRate, '%') }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.globalWinRate.toFixed(1) }}% ➔ {{ currentSummary.globalWinRate.toFixed(1) }}%)</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Taux de Mulligan</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate < 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate > 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate, '%') }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}% ➔ {{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%)</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Prizes Moyens Gagnés (Joueur)</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.avgPlayerPrizesWon.toFixed(2) }} / 6.00</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} ➔ {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }})</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Prizes Moyens Concédés (Adv.)</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.avgOpponentPrizesWon.toFixed(2) }} / 6.00</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon < 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon > 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} ➔ {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }})</span>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 2. Mécanique de comparaison : Barre de statut & Verrou strict 60 cartes -->
+      <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="rounded bg-slate-200 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                Deck Référence (Baseline) : 60 cartes
+              </span>
+              <span class="text-slate-300">➔</span>
+              <span class="rounded bg-indigo-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-800">
+                Variante Active : {{ editableDeck.totalCards }} / 60 cartes
+              </span>
+            </div>
+            <p class="mt-1 text-xs text-slate-600">
+              Modifiez la composition ci-dessous puis lancez la simulation comparative pour mesurer le différentiel.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Compteur dynamique strict : XX / 60 cartes -->
+            <div
+              class="flex items-center gap-2 rounded-xl border px-3.5 py-2 font-mono text-sm font-bold shadow-2xs"
+              :class="
+                editableDeck.totalCards === 60 && editableDeck.hasAtLeastOneBasic && editableDeck.isFullyResolved
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-red-300 bg-red-50 text-red-800'
+              "
+            >
+              <span>Total : {{ editableDeck.totalCards }} / 60 cartes</span>
+              <span
+                v-if="editableDeck.totalCards !== 60"
+                class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white"
+              >
+                {{
+                  editableDeck.totalCards < 60
+                    ? `Manque ${60 - editableDeck.totalCards}`
+                    : `Excédent +${editableDeck.totalCards - 60}`
+                }}
+              </span>
+            </div>
+
+            <!-- Bouton [Simuler la Variante & Comparer] (strictement disabled si != 60 cartes) -->
+            <button
+              type="button"
+              :disabled="
+                editableDeck.totalCards !== 60 ||
+                !editableDeck.hasAtLeastOneBasic ||
+                !editableDeck.isFullyResolved ||
+                isSimulating
+              "
+              @click="emit('rerun-and-compare')"
+              class="rounded-xl border px-5 py-2.5 text-xs font-bold transition shadow-xs sm:text-sm"
+              :class="
+                editableDeck.totalCards === 60 &&
+                editableDeck.hasAtLeastOneBasic &&
+                editableDeck.isFullyResolved &&
+                !isSimulating
+                  ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700'
+                  : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+              "
+            >
+              Simuler la Variante &amp; Comparer
+            </button>
+          </div>
+        </div>
+
+        <!-- Alerte obligatoire si total != 60 -->
+        <div
+          v-if="editableDeck.totalCards !== 60"
+          class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
         >
-          {{ d.deltaQty > 0 ? `+${d.deltaQty}` : d.deltaQty }} {{ d.nameFr }}
-        </span>
+          <span class="text-base">⚠️</span>
+          <span>Le deck doit contenir exactement 60 cartes pour lancer une comparaison (actuellement : {{ editableDeck.totalCards }} cartes).</span>
+        </div>
+
+        <!-- Alerte si aucun Pokémon de Base -->
+        <div
+          v-else-if="!editableDeck.hasAtLeastOneBasic"
+          class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
+        >
+          <span class="text-base">⚠️</span>
+          <span>Le deck doit contenir au moins 1 Pokémon de Base pour lancer une comparaison.</span>
+        </div>
+
+        <!-- Alerte si une carte ajoutée n'est pas résolue -->
+        <div
+          v-else-if="!editableDeck.isFullyResolved"
+          class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
+        >
+          <span class="text-base">⚠️</span>
+          <span>Simulation impossible : {{ editableDeck.unresolvedCount }} carte(s) ajoutée(s) ne sont pas résolues dans la base de données.</span>
+        </div>
+
+        <!-- Résumé rapide des modifications en attente (avant relance) si pas encore de comparaison -->
+        <div
+          v-if="cardDiffItems.length > 0 && !hasComparisonRun"
+          class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs"
+        >
+          <span class="font-semibold text-slate-600">Modifications par rapport au Deck Référence :</span>
+          <span
+            v-for="d in cardDiffItems"
+            :key="d.cardId"
+            class="rounded px-2 py-0.5 font-mono text-[11px] font-bold"
+            :class="
+              d.deltaQty > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+            "
+          >
+            {{ d.deltaQty > 0 ? `+${d.deltaQty}` : d.deltaQty }} {{ d.nameFr }}
+          </span>
+        </div>
       </div>
 
       <!-- Grille des 3 colonnes d'édition (Pokémon / Dresseurs / Énergies) -->
