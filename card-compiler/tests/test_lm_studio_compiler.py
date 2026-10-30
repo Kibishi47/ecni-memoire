@@ -45,6 +45,60 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIn("2222", ssh_cmd)
         self.assertIn("ai-user@gpu-node.internal", ssh_cmd)
 
+    def test_ssh_with_password_using_sshpass(self):
+        with patch("compiler.lm_studio_compiler._find_sshpass", return_value="/usr/bin/sshpass"):
+            compiler = LMStudioCardCompiler(
+                ssh_host="gpu-node.internal",
+                ssh_user="remoteuser",
+                ssh_password="mypassword123",
+            )
+            self.assertEqual(compiler.ssh_password, "mypassword123")
+
+            cmd = compiler._build_ssh_base_command()
+            self.assertEqual(cmd[0], "/usr/bin/sshpass")
+            self.assertEqual(cmd[1], "-e")
+            self.assertEqual(cmd[2], "ssh")
+            self.assertIn("BatchMode=no", " ".join(cmd))
+            self.assertIn("PreferredAuthentications=password,keyboard-interactive,publickey", " ".join(cmd))
+            self.assertIn("PubkeyAuthentication=no", " ".join(cmd))
+
+            env = compiler._get_ssh_env()
+            self.assertEqual(env["SSHPASS"], "mypassword123")
+            compiler.close()
+
+    def test_ssh_with_password_fallback_askpass(self):
+        with patch("compiler.lm_studio_compiler._find_sshpass", return_value=None):
+            compiler = LMStudioCardCompiler(
+                ssh_host="gpu-node.internal",
+                ssh_user="remoteuser",
+                ssh_password="askpass_secret",
+            )
+            self.assertEqual(compiler.ssh_password, "askpass_secret")
+
+            cmd = compiler._build_ssh_base_command()
+            self.assertEqual(cmd[0], "ssh")
+            self.assertIn("BatchMode=no", " ".join(cmd))
+
+            env = compiler._get_ssh_env()
+            self.assertEqual(env["SSHPASS"], "askpass_secret")
+            self.assertEqual(env.get("SSH_ASKPASS_REQUIRE"), "force")
+            askpass_path = env.get("SSH_ASKPASS")
+            self.assertIsNotNone(askpass_path)
+            self.assertTrue(Path(askpass_path).exists())
+
+            # Le nettoyage à la fermeture doit supprimer le script temporaire
+            compiler.close()
+            self.assertFalse(Path(askpass_path).exists())
+
+    def test_create_compiler_engine_with_ssh_password(self):
+        engine = create_compiler_engine(
+            provider=LLMProvider.lm_studio,
+            ssh_password="cli_passed_password",
+        )
+        self.assertIsInstance(engine, LMStudioCardCompiler)
+        self.assertEqual(engine.ssh_password, "cli_passed_password")
+        engine.close()
+
     def test_remote_model_defaults_to_qwen_27b_in_normal_mode(self):
         # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler Qwen3.8-27B par défaut
         with patch.dict("os.environ", {}, clear=True):
