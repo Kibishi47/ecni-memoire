@@ -1,10 +1,70 @@
 import type { MetaOpponentDeck } from '../types/deck'
 
+export const COMPATIBLE_TEST_DECK_PTCGL = `Pokémon: 6
+4 Ire-Foudre-ex TEF 123
+2 Favianos-ex SFA 38
+
+Dresseurs: 28
+4 Pepper SVI 166
+4 Mashynn PAL 185
+4 Hyper Ball SVI 196
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
+4 Super Bonbon PAF 125
+4 Attrape-Riposte PAR 160
+
+Énergies: 26
+15 Énergie Combat de base SVE 6
+11 Énergie Électrik de base SVE 4
+
+Total Cards: 60`
+
+export const COMPATIBLE_TEST_DECK_VARIANT_PTCGL = `Pokémon: 6
+2 Ire-Foudre-ex TEF 123
+4 Favianos-ex SFA 38
+
+Dresseurs: 28
+4 Pepper SVI 166
+4 Mashynn PAL 185
+4 Hyper Ball SVI 196
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
+4 Super Bonbon PAF 125
+4 Attrape-Riposte PAR 160
+
+Énergies: 26
+11 Énergie Combat de base SVE 6
+15 Énergie Électrik de base SVE 4
+
+Total Cards: 60`
+
 /**
- * Les 4 decks méta complets de 60 cartes requis pour les affrontements (et disponibles en chargement rapide).
- * Chaque liste totalise exactement 60 cartes et toutes ses cartes sont résolues dans le catalogue `EngineCardModel`.
+ * Les decks méta adverses pour les affrontements.
+ * Les deux premiers decks sont 100 % compatibles avec les 11 cartes compilées de cards_database.json et les énergies natives.
  */
 export const META_OPPONENT_DECKS: MetaOpponentDeck[] = [
+  {
+    id: 'meta_test_compatible',
+    name: 'Ire-Foudre-ex / Favianos-ex (Miroir Compilé 100 %)',
+    archetypeBadge: 'Turbo Compilé',
+    strategySubtitle: 'Deck 100 % compatible avec les 11 modèles de cards_database.json',
+    description:
+      'Deck de référence composé exclusivement des 11 cartes compilées dans cards_database.json et d\'énergies de base natives.',
+    keyThreats: ['Ire-Foudre-ex (Tempête Éclats)', 'Favianos-ex', 'Attrape-Riposte'],
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    ptcglText: COMPATIBLE_TEST_DECK_PTCGL,
+  },
+  {
+    id: 'meta_test_compatible_variant',
+    name: 'Ire-Foudre-ex / Favianos-ex (Variante Compilée 100 %)',
+    archetypeBadge: 'Contre-Attaque Compilée',
+    strategySubtitle: 'Variante 100 % compatible axée Favianos-ex et énergies Électrik',
+    description:
+      'Variante adverse composée exclusivement des modèles compilés dans cards_database.json et d\'énergies natives.',
+    keyThreats: ['Favianos-ex (Pioche)', 'Ire-Foudre-ex', 'Mashynn'],
+    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    ptcglText: COMPATIBLE_TEST_DECK_VARIANT_PTCGL,
+  },
   {
     id: 'meta_charizard_pidgeot',
     name: 'Dracaufeu-ex / Roucarnage-ex',

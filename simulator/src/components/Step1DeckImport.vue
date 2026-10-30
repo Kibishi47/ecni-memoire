@@ -51,9 +51,9 @@ const compiledDbCount = computed(() =>
     .reduce((sum, c) => sum + c.quantity, 0),
 )
 
-const fallbackRegistryCount = computed(() =>
+const nativeEnergyCount = computed(() =>
   props.validatedDeck.cards
-    .filter((c) => c.resolvedFromSource === 'fallback_registry')
+    .filter((c) => c.resolvedFromSource === 'native_basic_energy')
     .reduce((sum, c) => sum + c.quantity, 0),
 )
 
@@ -221,11 +221,11 @@ function formatRoleLabel(role: string): string {
                     class="text-xs"
                     :class="validatedDeck.isValid60 ? 'text-emerald-800' : 'text-red-800'"
                   >
-                    {{ validatedDeck.uniqueCardCount }} références distinctes résolues ({{
+                    {{ validatedDeck.uniqueCardCount }} références distinctes ({{
                       compiledDbCount
                     }}
                     cartes issues de <code class="font-mono">cards_database.json</code> +
-                    {{ fallbackRegistryCount }} du registre <code class="font-mono">EngineCardModel</code>).
+                    {{ nativeEnergyCount }} Énergies de base natives).
                   </p>
                 </div>
               </div>
@@ -285,7 +285,7 @@ function formatRoleLabel(role: string): string {
                 </span>
               </div>
               <p class="mt-1 text-[11px] text-red-700">
-                Chaque carte doit être présente dans <code class="font-mono">cards_database.json</code> ou le registre <code class="font-mono">fallbackCardModels</code> pour exécuter le moteur de règles.
+                Chaque carte hors Énergie de base doit être présente dans <code class="font-mono">cards_database.json</code> pour exécuter le moteur de règles.
               </p>
               <div class="mt-2.5 flex flex-wrap gap-1.5">
                 <span
@@ -453,10 +453,18 @@ function formatRoleLabel(role: string): string {
                 :class="
                   card.resolvedFromSource === 'compiled_db'
                     ? 'font-semibold text-emerald-600'
-                    : 'text-slate-400'
+                    : card.resolvedFromSource === 'native_basic_energy'
+                    ? 'font-semibold text-sky-600'
+                    : 'font-semibold text-red-500'
                 "
               >
-                {{ card.resolvedFromSource === 'compiled_db' ? 'DB Compilée' : 'Modèle Standard' }}
+                {{
+                  card.resolvedFromSource === 'compiled_db'
+                    ? 'DB Compilée'
+                    : card.resolvedFromSource === 'native_basic_energy'
+                    ? 'Énergie Native'
+                    : 'Non Résolue'
+                }}
               </div>
             </div>
           </li>

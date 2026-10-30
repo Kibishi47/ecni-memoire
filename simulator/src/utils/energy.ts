@@ -1,4 +1,5 @@
 import type { DeckFormat } from '../types/deck'
+import type { EngineCardModel } from '../types/cardModel'
 
 export interface BasicEnergyInfo {
   code: string
@@ -17,6 +18,7 @@ export const BASIC_ENERGIES: BasicEnergyInfo[] = [
   { code: 'F', nameEn: 'Basic {F} Energy', nameFr: 'Énergie Combat de base', energyTypeFr: 'Combat', sveNumber: '6' },
   { code: 'D', nameEn: 'Basic {D} Energy', nameFr: 'Énergie Obscurité de base', energyTypeFr: 'Obscurité', sveNumber: '7' },
   { code: 'M', nameEn: 'Basic {M} Energy', nameFr: 'Énergie Métal de base', energyTypeFr: 'Métal', sveNumber: '8' },
+  { code: 'Y', nameEn: 'Basic {Y} Energy', nameFr: 'Énergie Fée de base', energyTypeFr: 'Fée', sveNumber: '9' },
 ]
 
 const ENERGY_TYPE_MAP: Record<string, BasicEnergyInfo> = {
@@ -48,6 +50,10 @@ const ENERGY_TYPE_MAP: Record<string, BasicEnergyInfo> = {
   m: BASIC_ENERGIES[7]!,
   metal: BASIC_ENERGIES[7]!,
   métal: BASIC_ENERGIES[7]!,
+  y: BASIC_ENERGIES[8]!,
+  fairy: BASIC_ENERGIES[8]!,
+  fée: BASIC_ENERGIES[8]!,
+  fee: BASIC_ENERGIES[8]!,
 }
 
 const ENERGY_TRAINER_NAMES = [
@@ -86,7 +92,7 @@ export function isEnergyCardName(name: string): boolean {
     lower.includes('energy') ||
     lower.includes('énergie') ||
     lower.includes('energie') ||
-    /\{[grwlpfdm]\}/i.test(name)
+    /\{[grwlpfdmy]\}/i.test(name)
   )
 }
 
@@ -105,8 +111,8 @@ export function detectBasicEnergy(name: string, number?: string): BasicEnergyInf
   if (
     lower.includes('basic') ||
     lower.includes('de base') ||
-    /^(?:grass|fire|water|lightning|psychic|fighting|darkness|metal)\s+energy$/i.test(lower.trim()) ||
-    /^énergie\s+(?:plante|feu|eau|électrik|electrik|électrique|psy|combat|obscurité|obscurite|métal|metal)$/i.test(
+    /^(?:grass|fire|water|lightning|psychic|fighting|darkness|metal|fairy)\s+energy$/i.test(lower.trim()) ||
+    /^énergie\s+(?:plante|feu|eau|électrik|electrik|électrique|psy|combat|obscurité|obscurite|métal|metal|fée|fee)$/i.test(
       lower.trim(),
     )
   ) {
@@ -119,11 +125,64 @@ export function detectBasicEnergy(name: string, number?: string): BasicEnergyInf
 
   if (number && (lower.includes('basic') || lower.includes('de base'))) {
     const num = parseInt(number, 10)
-    if (num >= 1 && num <= 8) return BASIC_ENERGIES[num - 1]
-    if (num >= 9 && num <= 16) return BASIC_ENERGIES[num - 9]
+    if (num >= 1 && num <= 9) return BASIC_ENERGIES[num - 1]
+    if (num >= 10 && num <= 18) return BASIC_ENERGIES[num - 10]
   }
 
   return undefined
+}
+
+export function createNativeBasicEnergyModel(
+  energyTypeOrName: string,
+  customCardId?: string,
+  setName?: string,
+  localId?: string,
+): EngineCardModel {
+  const info =
+    detectBasicEnergy(energyTypeOrName) ||
+    ENERGY_TYPE_MAP[energyTypeOrName.toLowerCase().trim()] || {
+      code: 'C',
+      nameEn: 'Basic Energy',
+      nameFr: 'Énergie de base',
+      energyTypeFr: 'Incolore',
+      sveNumber: '1',
+    }
+
+  const locId = (localId || info.sveNumber).padStart(3, '0')
+  const cardId = customCardId || `sve-${locId}`
+
+  return {
+    cardId,
+    identity: {
+      cardId,
+      nameFr: info.nameFr,
+      nameEn: info.nameEn,
+      setId: 'sve',
+      setName: setName || 'Écarlate et Violet Énergie',
+      localId: locId,
+      category: 'ENERGY',
+      subCategory: 'BASIC_ENERGY',
+      regulationMark: 'G',
+      legalStandard: true,
+      legalExpanded: true,
+      rarity: 'Commune',
+      imageUrl: `https://assets.tcgdex.net/fr/sv/sve/${locId}`,
+      rawRulesText: [`[Énergie FR] Fournit 1 Énergie ${info.energyTypeFr} ({${info.code}}).`],
+    },
+    pokemonStats: null,
+    category: 'ENERGY',
+    subCategory: 'BASIC_ENERGY',
+    playableActions: [],
+    strategicEvaluator: {
+      primaryRole: 'RESOURCE_ENERGY',
+      intrinsicBaseScore: 68,
+      turnPhaseWeights: { turn1: 1.5, turn2: 1.4, turn3: 1.2, turn4Plus: 1.0 },
+      decklistSynergyRequirements: [],
+      inGameDeadCardConditions: [],
+      discardPriorityWhenDead: 65,
+      holdForNextTurnBonus: 18,
+    },
+  }
 }
 
 export function formatEnergyName(name: string, format: DeckFormat, lang: 'fr' | 'en' = 'fr'): string {

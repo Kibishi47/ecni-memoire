@@ -6,7 +6,6 @@
  */
 
 import rawDatabase from './cards_database.json'
-import { FALLBACK_CARD_MODELS } from './fallbackCardModels'
 import type {
   CardCategory,
   CardFilter,
@@ -14,7 +13,7 @@ import type {
   ConsolidatedCardsDatabase,
   EngineCardModel,
 } from '../types/cardModel'
-import { detectBasicEnergy, isEnergyCardName } from '../utils/energy'
+import { BASIC_ENERGIES, createNativeBasicEnergyModel, detectBasicEnergy, isEnergyCardName } from '../utils/energy'
 
 const compiledDb = (rawDatabase || {}) as unknown as ConsolidatedCardsDatabase
 const compiledCards: Record<string, EngineCardModel> =
@@ -38,44 +37,21 @@ export function normalizeCardNameForMatch(name: string): string {
     .trim()
 }
 
-// Catalogue consolidé : `cards_database.json` est prioritaire, complété par `FALLBACK_CARD_MODELS`
+// Catalogue consolidé : la SEULE source de vérité autorisée est `cards_database.json`
 export const UNIFIED_CARD_REGISTRY: Record<string, EngineCardModel> = {
-  ...FALLBACK_CARD_MODELS,
   ...compiledCards,
 }
 
-// Alias d'identifiants fréquents entre extensions PTCGL (ex: réimpressions ou promos)
+// Alias d'identifiants fréquents vers les modèles compilés de cards_database.json
 const CARD_ID_ALIASES: Record<string, string> = {
   'sv01-191': 'sv04-125', // Super Bonbon SVI 191 -> Modèle compilé sv04-125
-  'svp-056': 'sv03-125',  // Dracaufeu-ex Promo -> sv03-125
+  'svp-056': 'sv03-125', // Dracaufeu-ex Promo -> sv03-125
   'sv04.5-054': 'sv03-125', // Dracaufeu-ex PAF -> sv03-125
-  'sv03-026': 'sv03.5-004', // Salamèche OBF -> Salamèche
-  'sv04.5-007': 'sv03.5-004', // Salamèche PAF -> Salamèche
-  'sv04.5-008': 'sv03-027', // Reptincel PAF -> Reptincel
-  'sv03-162': 'sv03.5-016', // Roucool OBF -> Roucool
-  'sv01-084': 'swsh10-060', // Tarsal SVI -> Tarsal
-  'me02.5-142': 'sv06.5-038', // Favianos-ex ASC -> Favianos-ex
-  'me02.5-196': 'sv06.5-061', // Civière Nocturne ASC -> Civière Nocturne
-  'me01-114': 'sv02-172', // Ordres du Boss MEG -> Ordres du Boss
-  'me01-132': 'sv01-189', // Recherches Professorales -> sv01-189
   'sv05-144': 'sv05-144', // Poffin Copain-Copain / Poffin Pote-Pote
+  'me02.5-142': 'sv06.5-038', // Favianos-ex ASC -> Favianos-ex
 }
 
-const byNormalizedName = new Map<string, { model: EngineCardModel; source: 'compiled_db' | 'fallback_registry' }>()
-
-// Indexation initiale
-for (const model of Object.values(FALLBACK_CARD_MODELS)) {
-  const normFr = normalizeCardNameForMatch(model.identity.nameFr)
-  byNormalizedName.set(normFr, { model, source: 'fallback_registry' })
-  if (model.identity.nameEn) {
-    byNormalizedName.set(normalizeCardNameForMatch(model.identity.nameEn), {
-      model,
-      source: 'fallback_registry',
-    })
-  }
-  // Variantes avec/sans tiret avant "ex"
-  byNormalizedName.set(normFr.replace(/\s+ex$/, ' ex'), { model, source: 'fallback_registry' })
-}
+const byNormalizedName = new Map<string, { model: EngineCardModel; source: 'compiled_db' }>()
 
 for (const model of Object.values(compiledCards)) {
   const normFr = normalizeCardNameForMatch(model.identity.nameFr)
@@ -88,19 +64,11 @@ for (const model of Object.values(compiledCards)) {
   }
 }
 
-// Synonymes bilingues courants (ex: "Poffin Pote-Pote" <-> "Poffin Copain-Copain", "Canne Ordinaire" <-> "Méga Canne")
+// Synonymes bilingues courants ciblant exclusivement les modèles compilés
 const NAME_SYNONYMS: Record<string, string> = {
   'poffin pote pote': 'sv05-144',
   'poffin copain copain': 'sv05-144',
   'buddy buddy poffin': 'sv05-144',
-  'canne ordinaire': 'sv02-188',
-  'mega canne': 'sv02-188',
-  'super rod': 'sv02-188',
-  'recherche professorale': 'sv01-189',
-  'recherches professorales': 'sv01-189',
-  'professors research': 'sv01-189',
-  'ordres du boss': 'sv02-172',
-  'bosss orders': 'sv02-172',
   'dracaufeu ex': 'sv03-125',
   'charizard ex': 'sv03-125',
   'roucarnage ex': 'sv03-164',
@@ -109,16 +77,18 @@ const NAME_SYNONYMS: Record<string, string> = {
   'raging bolt ex': 'sv05-123',
   'favianos ex': 'sv06.5-038',
   'fezandipiti ex': 'sv06.5-038',
-  'ogerpon masque turquoise ex': 'sv06-025',
-  'ogerpon ex': 'sv06-025',
-  'teal mask ogerpon ex': 'sv06-025',
-  'lanssorien ex': 'sv06-130',
-  'dragapult ex': 'sv06-130',
-  'gardevoir ex': 'sv01-086',
-  'tapatoes ex': 'sv02-169',
-  'squawkabilly ex': 'sv02-169',
-  'pelage sable ex': 'sv04-123',
-  'sandy shocks ex': 'sv04-123',
+  'super bonbon': 'sv04-125',
+  'rare candy': 'sv04-125',
+  'faiblo ball': 'sv01-181',
+  'nest ball': 'sv01-181',
+  'hyper ball': 'sv01-196',
+  'ultra ball': 'sv01-196',
+  'mashynn': 'sv02-185',
+  'iono': 'sv02-185',
+  'pepper': 'sv01-166',
+  'arven': 'sv01-166',
+  'attrape riposte': 'sv04-160',
+  'counter catcher': 'sv04-160',
 }
 
 export function resolveCardModel(params: {
@@ -132,57 +102,43 @@ export function resolveCardModel(params: {
   imageUrl?: string
 }): {
   model: EngineCardModel
-  source: 'compiled_db' | 'fallback_registry' | 'synthesized'
+  source: 'compiled_db' | 'native_basic_energy' | 'unresolved'
 } {
   const { cardId, unpaddedCardId, rawName } = params
 
   // 1. Correspondance directe par ID dans `cards_database.json`
-  if (compiledDb.cards[cardId]) {
+  if (compiledDb.cards && compiledDb.cards[cardId]) {
     return { model: structuredClone(compiledDb.cards[cardId]!), source: 'compiled_db' }
   }
   const aliasedId = CARD_ID_ALIASES[cardId] || (unpaddedCardId ? CARD_ID_ALIASES[unpaddedCardId] : undefined)
-  if (aliasedId && compiledDb.cards[aliasedId]) {
+  if (aliasedId && compiledDb.cards && compiledDb.cards[aliasedId]) {
     return { model: structuredClone(compiledDb.cards[aliasedId]!), source: 'compiled_db' }
   }
 
-  // 2. Correspondance directe par ID dans `fallbackCardModels.ts`
-  if (FALLBACK_CARD_MODELS[cardId]) {
-    return { model: structuredClone(FALLBACK_CARD_MODELS[cardId]!), source: 'fallback_registry' }
-  }
-  if (aliasedId && FALLBACK_CARD_MODELS[aliasedId]) {
-    return { model: structuredClone(FALLBACK_CARD_MODELS[aliasedId]!), source: 'fallback_registry' }
-  }
-
-  // 3. Vérification si c'est une énergie de base
+  // 2. Exception native absolue pour les Énergies de Base (pas besoin d'être dans cards_database.json)
   const basicEnergy = detectBasicEnergy(rawName, params.localId)
-  if (basicEnergy) {
-    const sveId = `sve-${basicEnergy.sveNumber.padStart(3, '0')}`
-    if (FALLBACK_CARD_MODELS[sveId]) {
-      return { model: structuredClone(FALLBACK_CARD_MODELS[sveId]!), source: 'fallback_registry' }
-    }
+  if (basicEnergy || (params.categoryHint === 'energy' && detectBasicEnergy(rawName))) {
+    const nativeModel = createNativeBasicEnergyModel(rawName, cardId, params.setName, params.localId)
+    return { model: nativeModel, source: 'native_basic_energy' }
   }
 
-  // 4. Recherche par synonyme ou nom normalisé FR / EN
+  // 3. Recherche par synonyme direct dans cards_database.json
   const normName = normalizeCardNameForMatch(rawName)
   const synTargetId = NAME_SYNONYMS[normName]
-  if (synTargetId) {
-    if (compiledDb.cards[synTargetId]) {
-      return { model: structuredClone(compiledDb.cards[synTargetId]!), source: 'compiled_db' }
-    }
-    if (FALLBACK_CARD_MODELS[synTargetId]) {
-      return { model: structuredClone(FALLBACK_CARD_MODELS[synTargetId]!), source: 'fallback_registry' }
-    }
+  if (synTargetId && compiledDb.cards && compiledDb.cards[synTargetId]) {
+    return { model: structuredClone(compiledDb.cards[synTargetId]!), source: 'compiled_db' }
   }
 
+  // 4. Recherche par nom FR / EN normalisé dans cards_database.json
   const byNameHit = byNormalizedName.get(normName)
   if (byNameHit) {
-    return { model: structuredClone(byNameHit.model), source: byNameHit.source }
+    return { model: structuredClone(byNameHit.model), source: 'compiled_db' }
   }
 
-  // 5. Synthèse intelligente de secours garantissant qu'aucune carte exotique ne plante le moteur
+  // 5. Carte non résolue dans la base de données compilée
   return {
     model: synthesizeFallbackModel(params),
-    source: 'synthesized',
+    source: 'unresolved',
   }
 }
 
@@ -376,9 +332,10 @@ export function getAllCatalogModels(): EngineCardModel[] {
   for (const model of Object.values(compiledCards)) {
     map.set(model.cardId, model)
   }
-  for (const model of Object.values(FALLBACK_CARD_MODELS)) {
-    if (!map.has(model.cardId)) {
-      map.set(model.cardId, model)
+  for (const energy of BASIC_ENERGIES) {
+    const energyModel = createNativeBasicEnergyModel(energy.nameEn)
+    if (!map.has(energyModel.cardId)) {
+      map.set(energyModel.cardId, energyModel)
     }
   }
   return Array.from(map.values())

@@ -13,8 +13,8 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
       maxTurns: 14,
       maxBranches: 8 as const,
       selectedOpponentIds: [
+        META_OPPONENT_DECKS[0]!.id,
         META_OPPONENT_DECKS[1]!.id,
-        META_OPPONENT_DECKS[2]!.id,
       ],
       firstPlayerMode: 'RANDOM' as const,
       debugMode: true,

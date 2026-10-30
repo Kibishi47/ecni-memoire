@@ -156,10 +156,10 @@ export function buildDeckEntryFromTokens(input: {
     /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr)
   const isRadiant = /radieux|radiant/i.test(model.identity.nameFr)
   const isEx = Boolean(model.pokemonStats?.isRuleBox)
-  const isResolved = source === 'compiled_db' || source === 'fallback_registry'
+  const isResolved = source === 'compiled_db' || source === 'native_basic_energy'
   const unresolvedReason = isResolved
     ? undefined
-    : `Modèle compilé introuvable pour "${input.rawName}" (${cardId}) dans cards_database.json et fallbackCardModels`
+    : `Modèle compilé introuvable pour "${input.rawName}" (${cardId}) dans cards_database.json`
 
   return {
     uid: `${cardId}_${input.line}`,
@@ -225,7 +225,7 @@ export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number
     line: lineIndex,
     raw: `${quantity} ${model.identity.nameFr} ${mapping.ptcglCode} ${cleanNumber}`,
     model: structuredClone(model),
-    resolvedFromSource: model.compilationMetadata ? 'compiled_db' : 'fallback_registry',
+    resolvedFromSource: model.subCategory === 'BASIC_ENERGY' ? 'native_basic_energy' : 'compiled_db',
     isResolved: true,
   }
 }
@@ -355,7 +355,7 @@ export function computeDeckSummary(
     })
   } else if (!isFullyResolved) {
     warnings.push({
-      message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données.`,
+      message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données cards_database.json.`,
     })
   }
 

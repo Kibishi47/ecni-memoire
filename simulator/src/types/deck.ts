@@ -29,7 +29,7 @@ export interface ParsedDeckEntry {
   line: number
   raw: string
   model: EngineCardModel
-  resolvedFromSource: 'compiled_db' | 'fallback_registry' | 'synthesized'
+  resolvedFromSource: 'compiled_db' | 'native_basic_energy' | 'unresolved' | 'fallback_registry' | 'synthesized'
   isResolved: boolean
   unresolvedReason?: string
 }

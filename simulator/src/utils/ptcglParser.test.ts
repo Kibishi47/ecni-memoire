@@ -5,70 +5,93 @@ import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { getCompiledCardsCount, hasCompiledCardData, UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
 
 describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
-  it('charge correctement cards_database.json et fallbackCardModels.ts', () => {
+  it('charge correctement cards_database.json et gère les énergies de base nativement', () => {
     expect(UNIFIED_CARD_REGISTRY['sv04-125']).toBeDefined()
     expect(UNIFIED_CARD_REGISTRY['sv04-125']?.identity.nameFr).toBe('Super Bonbon')
     expect(UNIFIED_CARD_REGISTRY['sv03-125']?.identity.nameFr).toBe('Dracaufeu-ex')
     expect(UNIFIED_CARD_REGISTRY['sv03-164']?.identity.nameFr).toBe('Roucarnage-ex')
     expect(UNIFIED_CARD_REGISTRY['sv05-123']?.identity.nameFr).toBe('Ire-Foudre-ex')
     expect(UNIFIED_CARD_REGISTRY['sv06.5-038']?.identity.nameFr).toBe('Favianos-ex')
-    expect(UNIFIED_CARD_MODELS_COUNT()).toBeGreaterThanOrEqual(35)
+    expect(getCompiledCardsCount()).toBe(11)
   })
 
-  it('valide les 4 decks méta adverses à exactement 60 cartes sans carte synthétisée', () => {
-    expect(META_OPPONENT_DECKS.length).toBeGreaterThanOrEqual(4)
-    for (const metaDeck of META_OPPONENT_DECKS) {
-      const parsed = parsePtcglDecklist(metaDeck.ptcglText)
-      expect(parsed.totalCards).toBe(60)
-      expect(parsed.isValid60).toBe(true)
-      expect(parsed.hasAtLeastOneBasic).toBe(true)
-      expect(parsed.isFullyResolved).toBe(true)
-      expect(parsed.unresolvedCount).toBe(0)
-      expect(parsed.unresolvedCards.length).toBe(0)
-      expect(parsed.warnings.length).toBe(0)
-      const synthesized = parsed.cards.filter((c) => c.resolvedFromSource === 'synthesized')
-      expect(synthesized.length).toBe(0)
-    }
+  it('valide le deck de test 100 % compatible à 60 cartes avec énergies natives', () => {
+    const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    expect(parsed.totalCards).toBe(60)
+    expect(parsed.isValid60).toBe(true)
+    expect(parsed.hasAtLeastOneBasic).toBe(true)
+    expect(parsed.isFullyResolved).toBe(true)
+    expect(parsed.unresolvedCount).toBe(0)
+    expect(parsed.unresolvedCards.length).toBe(0)
+    expect(parsed.warnings.length).toBe(0)
+
+    const compiledCards = parsed.cards.filter((c) => c.resolvedFromSource === 'compiled_db')
+    const nativeEnergies = parsed.cards.filter((c) => c.resolvedFromSource === 'native_basic_energy')
+    expect(compiledCards.length).toBeGreaterThan(0)
+    expect(nativeEnergies.length).toBeGreaterThan(0)
   })
 
-  it('bloque la simulation si une carte est manquante dans la base de données', () => {
-    const textWithUnknown = `Pokémon: 18
-4 Salamèche MEW 4
-2 InconnuCardInexistante XYZ 999
-3 Dracaufeu-ex OBF 125
-2 Roucool MEW 16
-1 Roucoups OBF 163
-2 Roucarnage-ex OBF 164
-1 Favianos-ex SFA 38
-1 Motisma V CRZ 45
-1 Luminéon V BRS 40
-1 Mélofée OBF 80
+  it('résout nativement les 9 types d\'énergies de base', () => {
+    const text9Energies = `Pokémon: 6
+4 Ire-Foudre-ex TEF 123
+2 Favianos-ex SFA 38
 
-Dresseurs: 35
+Dresseurs: 28
 4 Pepper SVI 166
 4 Mashynn PAL 185
-3 Ordres du Boss PAL 172
-1 Plan du Professeur Turum PAR 171
-4 Poffin Copain-Copain TEF 144
 4 Hyper Ball SVI 196
-3 Faiblo Ball SVI 181
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
 4 Super Bonbon PAF 125
-2 Attrape-Riposte PAR 160
-2 Civière Nocturne SFA 61
-2 Méga Canne PAL 188
-1 Tampon Injuste TWM 165
-1 Ceinture Vitalité SVI 197
+4 Attrape-Riposte PAR 160
 
-Énergies: 7
-7 Énergie Feu de base SVE 2`
+Énergies: 26
+3 Énergie Plante de base SVE 1
+3 Énergie Feu de base SVE 2
+3 Énergie Eau de base SVE 3
+3 Énergie Électrik de base SVE 4
+3 Énergie Psy de base SVE 5
+3 Énergie Combat de base SVE 6
+3 Énergie Obscurité de base SVE 7
+3 Énergie Métal de base SVE 8
+2 Énergie Fée de base SVE 9
 
-    const parsed = parsePtcglDecklist(textWithUnknown)
+Total Cards: 60`
+
+    const parsed = parsePtcglDecklist(text9Energies)
+    expect(parsed.totalCards).toBe(60)
+    expect(parsed.isValid60).toBe(true)
+    expect(parsed.isFullyResolved).toBe(true)
+    expect(parsed.energyCount).toBe(26)
+  })
+
+  it('bloque strictement la simulation si au moins une carte hors énergie de base est absente de cards_database.json', () => {
+    const textWithMissing = `Pokémon: 6
+4 Ire-Foudre-ex TEF 123
+2 Salamèche MEW 4
+
+Dresseurs: 28
+4 Pepper SVI 166
+4 Mashynn PAL 185
+4 Hyper Ball SVI 196
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
+4 Super Bonbon PAF 125
+4 Attrape-Riposte PAR 160
+
+Énergies: 26
+15 Énergie Combat de base SVE 6
+11 Énergie Électrik de base SVE 4
+
+Total Cards: 60`
+
+    const parsed = parsePtcglDecklist(textWithMissing)
     expect(parsed.totalCards).toBe(60)
     expect(parsed.isFullyResolved).toBe(false)
-    expect(parsed.isValid60).toBe(false) // Bloqué car carte non résolue !
+    expect(parsed.isValid60).toBe(false) // Bloqué car Salamèche n'est pas dans cards_database.json !
     expect(parsed.unresolvedCount).toBe(2)
     expect(parsed.unresolvedCards.length).toBe(1)
-    expect(parsed.unresolvedCards[0]!.name).toBe('InconnuCardInexistante')
+    expect(parsed.unresolvedCards[0]!.name).toBe('Salamèche')
     expect(parsed.warnings.some((w) => w.message.includes('Simulation impossible'))).toBe(true)
   })
 
@@ -89,7 +112,3 @@ Dresseurs: 35
     expect(parsed.isDatabaseLoaded).toBe(true)
   })
 })
-
-function UNIFIED_CARD_MODELS_COUNT(): number {
-  return Object.keys(UNIFIED_CARD_REGISTRY).length
-}
