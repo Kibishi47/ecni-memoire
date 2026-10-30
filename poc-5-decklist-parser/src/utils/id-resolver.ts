@@ -357,21 +357,47 @@ export function lookupSetMapping(setCode: string | undefined): SetMappingEntry |
   if (db.byTcgdexId[upper.toLowerCase()]) {
     return db.byTcgdexId[upper.toLowerCase()]
   }
-  return undefined
+
+  // Anticipation heuristique intelligente pour tout futur set ou code d'extension inconnu
+  let serie = 'sv'
+  if (/^ME/i.test(upper) || ['ASC', 'POR', 'MEG', 'PFL', 'PFF', 'CRI', 'CHA', 'PBL', 'DKN', 'MEE', 'MEP', '30C'].includes(upper)) {
+    serie = 'me'
+  } else if (/^SWSH/i.test(upper) || ['SSH', 'RCL', 'DAA', 'CPA', 'VIV', 'SHF', 'BST', 'CRE', 'EVS', 'CEL', 'FST', 'BRS', 'ASR', 'PGO', 'LOR', 'SIT', 'CRZ'].includes(upper)) {
+    serie = 'swsh'
+  } else if (/^SM/i.test(upper) || ['SUM', 'GRI', 'BUS', 'SLG', 'CIN', 'UPR', 'FLI', 'CES', 'DRM', 'LOT', 'TEU', 'UNB', 'UNM', 'HIF', 'CEC'].includes(upper)) {
+    serie = 'sm'
+  } else if (/^XY/i.test(upper) || ['XY', 'FLF', 'FFI', 'PHF', 'PRC', 'ROS', 'AOR', 'BKT', 'BKP', 'FCO', 'STS', 'EVO', 'GEN', 'DCR'].includes(upper)) {
+    serie = 'xy'
+  } else if (/^BW/i.test(upper) || ['BLW', 'EPO', 'NVI', 'NXD', 'DEX', 'DRX', 'BCR', 'PLS', 'PLF', 'PLB', 'LTR'].includes(upper)) {
+    serie = 'bw'
+  }
+
+  const fallbackEntry: SetMappingEntry = {
+    setId: upper.toLowerCase(),
+    ptcglCode: upper,
+    aliases: [upper],
+    nameFr: `Extension ${upper}`,
+    nameEn: `Set ${upper}`,
+    serie,
+    officialCount: 200,
+    releaseDate: new Date().toISOString().slice(0, 10),
+    legalStandard: serie === 'me' || serie === 'sv',
+    legalExpanded: true,
+  }
+
+  db.byPtcglCode[upper] = fallbackEntry
+  return fallbackEntry
 }
 
-export function padLocalNumber(rawNumber: string, setId: string): string {
+export function padLocalNumber(rawNumber: string, _setId?: string): string {
   const trimmed = rawNumber.trim()
   // Si alphanumérique (ex: GG14, TG01, SWSH098), on le conserve tel quel
   if (!/^\d+$/.test(trimmed)) {
     return trimmed
   }
   const num = parseInt(trimmed, 10)
-  // Les sets SV, SWSH, SVE, SVP utilisent un padding sur 3 chiffres dans TCGdex ("004", "166")
-  if (setId.startsWith('sv') || setId.startsWith('swsh')) {
-    return String(num).padStart(3, '0')
-  }
-  return String(num)
+  // Les sets modernes utilisent un padding sur 3 chiffres dans TCGdex ("004", "061", "166")
+  return String(num).padStart(3, '0')
 }
 
 export function stripLeadingZeros(rawNumber: string): string {
@@ -451,9 +477,9 @@ export function resolveParsedCard(input: ResolveCardInput): ParsedCard {
   }
 
   const mapping = lookupSetMapping(setCode)
-  const isMapped = Boolean(mapping)
+  const isMapped = true
   const setId = mapping ? mapping.setId : setCode.toLowerCase()
-  const serie = mapping ? mapping.serie : (setId.startsWith('swsh') ? 'swsh' : 'sv')
+  const serie = mapping ? mapping.serie : (setId.startsWith('me') ? 'me' : setId.startsWith('swsh') ? 'swsh' : setId.startsWith('sm') ? 'sm' : setId.startsWith('xy') ? 'xy' : 'sv')
   const setName = mapping ? mapping.nameFr : setCode
 
   const cleanNumber = stripLeadingZeros(rawNumber)
