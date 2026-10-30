@@ -442,6 +442,7 @@ def run_command(
         FetcherProvider.sdk,
         "--provider",
         "-p",
+        envvar=["TCGDEX_PROVIDER"],
         help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
     ),
     llm_provider: LLMProvider = typer.Option(
@@ -522,6 +523,7 @@ def compile_alias(
         FetcherProvider.sdk,
         "--provider",
         "-p",
+        envvar=["TCGDEX_PROVIDER"],
         help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
     ),
     llm_provider: LLMProvider = typer.Option(
