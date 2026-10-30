@@ -127,7 +127,7 @@ def create_compiler_engine(
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
-        return LMStudioCardCompiler()
+        return LMStudioCardCompiler(tier=tier)
     return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token)
 
 
@@ -167,20 +167,20 @@ def _execute_run_pipeline(
     )
 
     if llm_provider == LLMProvider.lm_studio:
-        engine_preview = LMStudioCardCompiler()
+        engine_preview = LMStudioCardCompiler(tier=effective_tier)
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (Distant SSH / Local REST)[/bold cyan]"
         if engine_preview.ssh_host:
             llm_lines = (
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Distant via SSH)[/bold magenta]\n"
                 f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
                 f"• [bold]Tunnel SSH[/bold] : {'Actif (port local ' + str(engine_preview.local_port) + ' -> distant ' + str(engine_preview.remote_port) + ')' if engine_preview.use_tunnel else 'Désactivé (connexion directe)'}\n"
-                f"• [bold]Modèle configuré[/bold] : [yellow]{engine_preview.model_name or 'Auto-détecté via lms'}[/yellow]"
+                f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — Modèle distant : [cyan]{engine_preview.model_name}[/cyan]"
             )
         else:
             llm_lines = (
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Local REST)[/bold magenta]\n"
                 f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Modèle configuré[/bold] : [yellow]{engine_preview.model_name or 'Auto-détecté via lms'}[/yellow]"
+                f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — Modèle local : [cyan]{engine_preview.model_name}[/cyan]"
             )
     else:
         engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
