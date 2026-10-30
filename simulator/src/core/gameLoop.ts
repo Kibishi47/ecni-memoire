@@ -300,7 +300,18 @@ export function runSimulationShard(
       throw err
     }
 
-    if (onProgress && ((i + 1) % 2 === 0 || i === input.gameCount - 1)) {
+    const reportInterval =
+      input.gameCount >= 10000
+        ? 1000
+        : input.gameCount >= 2000
+          ? 500
+          : input.gameCount >= 500
+            ? 50
+            : input.gameCount >= 100
+              ? 10
+              : 2
+
+    if (onProgress && ((i + 1) % reportInterval === 0 || i === input.gameCount - 1)) {
       onProgress(i + 1)
     }
   }

@@ -52,6 +52,17 @@ const progressCompleted = ref<number>(0)
 const progressTotal = ref<number>(0)
 const progressElapsedMs = ref<number>(0)
 
+const progressPercent = computed(() => {
+  if (progressTotal.value <= 0) return 0
+  return Math.min(100, Math.round((progressCompleted.value / progressTotal.value) * 100))
+})
+
+const liveThroughput = computed(() => {
+  if (progressElapsedMs.value <= 0) return 0
+  const sec = progressElapsedMs.value / 1000
+  return Math.round(progressCompleted.value / sec)
+})
+
 const workerPool = new SimulationWorkerPool()
 
 function detectDebugModeFromUrl() {
@@ -254,6 +265,56 @@ function handleResetToBaseline() {
       @select-step="handleSelectStep"
       @toggle-debug="toggleDebugMode"
     />
+
+    <!-- BANDEAU DE PROGRESSION EN DIRECT (FEEDBACK VISUEL) -->
+    <div
+      v-if="isSimulating"
+      class="sticky top-[61px] z-30 border-b border-indigo-200 bg-indigo-50/95 text-indigo-900 shadow-sm backdrop-blur"
+    >
+      <div class="mx-auto max-w-7xl px-4 py-3 sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold sm:text-sm">
+          <div class="flex items-center gap-2.5">
+            <svg
+              class="h-5 w-5 animate-spin text-indigo-600 shrink-0"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8v8H4z"
+              ></path>
+            </svg>
+            <span>
+              Simulation en cours sur {{ simConfig.workerCount }} cœurs : {{ progressCompleted.toLocaleString('fr-FR') }} / {{ progressTotal.toLocaleString('fr-FR') }} parties ({{ progressPercent }} %)...
+            </span>
+          </div>
+
+          <div class="flex items-center gap-4 font-mono text-xs text-indigo-800">
+            <span>Débit : ~{{ liveThroughput.toLocaleString('fr-FR') }} parties/sec</span>
+            <span>•</span>
+            <span>Temps écoulé : {{ (progressElapsedMs / 1000).toFixed(1) }} s</span>
+          </div>
+        </div>
+
+        <!-- Barre de progression animée fluide -->
+        <div class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-indigo-200/80">
+          <div
+            class="h-2 rounded-full bg-indigo-600 transition-all duration-150"
+            :style="{ width: `${progressPercent}%` }"
+          ></div>
+        </div>
+      </div>
+    </div>
 
     <!-- Bannière d'Erreur si une exception survient pendant la simulation -->
     <div
