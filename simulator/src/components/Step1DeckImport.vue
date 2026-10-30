@@ -250,6 +250,32 @@ function formatRoleLabel(role: string): string {
                 {{ warn.message }}
               </li>
             </ul>
+
+            <!-- Bandeau de Blocage Critique si cartes non résolues dans la base -->
+            <div
+              v-if="!validatedDeck.isFullyResolved"
+              class="mt-3 rounded-lg border-2 border-red-400 bg-red-50 p-3.5 text-red-950"
+            >
+              <div class="flex items-center gap-2 text-xs font-bold text-red-900">
+                <span class="text-base">⚠️</span>
+                <span>
+                  Simulation impossible : {{ validatedDeck.unresolvedCount }} carte{{ validatedDeck.unresolvedCount > 1 ? 's' : '' }} de votre deck n'ont pas été trouvées dans la base de données.
+                </span>
+              </div>
+              <p class="mt-1 text-[11px] text-red-700">
+                Chaque carte doit être présente dans <code class="font-mono">cards_database.json</code> ou le registre <code class="font-mono">fallbackCardModels</code> pour exécuter le moteur de règles.
+              </p>
+              <div class="mt-2.5 flex flex-wrap gap-1.5">
+                <span
+                  v-for="unres in validatedDeck.unresolvedCards"
+                  :key="unres.uid"
+                  class="inline-flex items-center gap-1 rounded border border-red-300 bg-white px-2 py-0.5 font-mono text-xs font-bold text-red-700 shadow-2xs"
+                >
+                  <span class="rounded bg-red-100 px-1 py-0.5 text-[10px] text-red-800">[Inconnu]</span>
+                  {{ unres.quantity }}x {{ unres.name }} {{ unres.setCode }} {{ unres.number }}
+                </span>
+              </div>
+            </div>
           </div>
 
           <!-- Panneau d'Audit des Synergies (`decklistSynergyRequirements`) -->

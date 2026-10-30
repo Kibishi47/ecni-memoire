@@ -22,10 +22,54 @@ describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
       expect(parsed.totalCards).toBe(60)
       expect(parsed.isValid60).toBe(true)
       expect(parsed.hasAtLeastOneBasic).toBe(true)
+      expect(parsed.isFullyResolved).toBe(true)
+      expect(parsed.unresolvedCount).toBe(0)
+      expect(parsed.unresolvedCards.length).toBe(0)
       expect(parsed.warnings.length).toBe(0)
       const synthesized = parsed.cards.filter((c) => c.resolvedFromSource === 'synthesized')
       expect(synthesized.length).toBe(0)
     }
+  })
+
+  it('bloque la simulation si une carte est manquante dans la base de données', () => {
+    const textWithUnknown = `Pokémon: 18
+4 Salamèche MEW 4
+2 InconnuCardInexistante XYZ 999
+3 Dracaufeu-ex OBF 125
+2 Roucool MEW 16
+1 Roucoups OBF 163
+2 Roucarnage-ex OBF 164
+1 Favianos-ex SFA 38
+1 Motisma V CRZ 45
+1 Luminéon V BRS 40
+1 Mélofée OBF 80
+
+Dresseurs: 35
+4 Pepper SVI 166
+4 Mashynn PAL 185
+3 Ordres du Boss PAL 172
+1 Plan du Professeur Turum PAR 171
+4 Poffin Copain-Copain TEF 144
+4 Hyper Ball SVI 196
+3 Faiblo Ball SVI 181
+4 Super Bonbon PAF 125
+2 Attrape-Riposte PAR 160
+2 Civière Nocturne SFA 61
+2 Méga Canne PAL 188
+1 Tampon Injuste TWM 165
+1 Ceinture Vitalité SVI 197
+
+Énergies: 7
+7 Énergie Feu de base SVE 2`
+
+    const parsed = parsePtcglDecklist(textWithUnknown)
+    expect(parsed.totalCards).toBe(60)
+    expect(parsed.isFullyResolved).toBe(false)
+    expect(parsed.isValid60).toBe(false) // Bloqué car carte non résolue !
+    expect(parsed.unresolvedCount).toBe(2)
+    expect(parsed.unresolvedCards.length).toBe(1)
+    expect(parsed.unresolvedCards[0]!.name).toBe('InconnuCardInexistante')
+    expect(parsed.warnings.some((w) => w.message.includes('Simulation impossible'))).toBe(true)
   })
 
   it('exporte et réimporte fidèlement une decklist au format PTCGL', () => {

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { SimulationConfig } from '../types/simulator'
+import type { ParsedDeck } from '../types/deck'
 import type { MaxBranchesSetting } from '../core/evaluator'
 import type { DebugPerturbationType } from '../core/engine'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
 
 const props = defineProps<{
   config: SimulationConfig
+  deck: ParsedDeck
   isDebugMode: boolean
   maxHardwareWorkers: number
 }>()
@@ -108,9 +110,10 @@ function updateSeedValue(val: number) {
 
 const isValidConfig = computed(() => {
   return (
+    props.deck.isFullyResolved &&
     props.config.selectedOpponentIds.length >= 1 &&
     props.config.iterations >= 1 &&
-    props.config.maxTurns >= 4 &&
+    props.config.maxTurns >= 1 &&
     props.config.maxTurns <= 50
   )
 })
@@ -146,17 +149,43 @@ const isValidConfig = computed(() => {
           </button>
           <button
             type="button"
-            :disabled="!isValidConfig"
+            :disabled="!isValidConfig || !deck.isFullyResolved"
             @click="emit('launch-simulation')"
             class="rounded-lg border px-5 py-2.5 text-sm font-semibold transition"
             :class="
-              isValidConfig
+              isValidConfig && deck.isFullyResolved
                 ? 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
                 : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
             "
           >
-            Lancer la Simulation ({{ config.iterations }} parties) →
+            Lancer la Simulation ({{ config.iterations.toLocaleString('fr-FR') }} parties) →
           </button>
+        </div>
+      </div>
+
+      <!-- Bandeau de Blocage Critique si cartes non résolues -->
+      <div
+        v-if="!deck.isFullyResolved"
+        class="mt-4 rounded-xl border-2 border-red-400 bg-red-50 p-4 text-red-950 shadow-xs"
+      >
+        <div class="flex items-center gap-2 text-sm font-bold text-red-900">
+          <span class="text-lg">⚠️</span>
+          <span>
+            Simulation impossible : {{ deck.unresolvedCount }} carte{{ deck.unresolvedCount > 1 ? 's' : '' }} de votre deck n'ont pas été trouvées dans la base de données.
+          </span>
+        </div>
+        <p class="mt-1 text-xs text-red-700">
+          Chaque carte doit être présente dans <code class="font-mono">cards_database.json</code> ou le registre <code class="font-mono">fallbackCardModels</code> pour exécuter le moteur de règles.
+        </p>
+        <div class="mt-3 flex flex-wrap gap-1.5">
+          <span
+            v-for="unres in deck.unresolvedCards"
+            :key="unres.uid"
+            class="inline-flex items-center gap-1 rounded border border-red-300 bg-white px-2 py-0.5 font-mono text-xs font-bold text-red-700 shadow-2xs"
+          >
+            <span class="rounded bg-red-100 px-1 py-0.5 text-[10px] text-red-800">[Inconnu]</span>
+            {{ unres.quantity }}x {{ unres.name }} {{ unres.setCode }} {{ unres.number }}
+          </span>
         </div>
       </div>
     </div>

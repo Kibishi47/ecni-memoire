@@ -11,6 +11,12 @@ export type WorkerRequestMessage = {
 
 export type WorkerResponseMessage =
   | {
+      type: 'PROGRESS'
+      workerId: number
+      completedChunk: number
+      totalInWorker: number
+    }
+  | {
       type: 'SHARD_PROGRESS'
       shardId: number
       completedInShard: number
@@ -19,6 +25,11 @@ export type WorkerResponseMessage =
       type: 'SHARD_COMPLETE'
       shardId: number
       result: SimulationShardResult
+    }
+  | {
+      type: 'ERROR'
+      message: string
+      stack?: string
     }
   | {
       type: 'SHARD_ERROR'
@@ -38,6 +49,12 @@ ctx.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
   try {
     const result = runSimulationShard(msg.payload, (completedInShard) => {
       ctx.postMessage({
+        type: 'PROGRESS',
+        workerId: msg.payload.shardId,
+        completedChunk: completedInShard,
+        totalInWorker: msg.payload.gameCount,
+      })
+      ctx.postMessage({
         type: 'SHARD_PROGRESS',
         shardId: msg.payload.shardId,
         completedInShard,
@@ -50,10 +67,18 @@ ctx.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
       result,
     })
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? err.stack : undefined
+    console.error(`[simulation.worker ${msg.payload.shardId}] Exception:`, err)
+    ctx.postMessage({
+      type: 'ERROR',
+      message,
+      stack,
+    })
     ctx.postMessage({
       type: 'SHARD_ERROR',
       shardId: msg.payload.shardId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     })
   }
 }

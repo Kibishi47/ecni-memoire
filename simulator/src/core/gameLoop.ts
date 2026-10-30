@@ -278,18 +278,26 @@ export function runSimulationShard(
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
     const shouldTrace = globalGameIdx < MAX_TRACED_GAMES
 
-    const outcome = playFullGame(
-      input.playerDeckModels,
-      oppDeck,
-      globalGameIdx,
-      gameSeed,
-      input.config,
-      shouldTrace,
-    )
+    try {
+      const outcome = playFullGame(
+        input.playerDeckModels,
+        oppDeck,
+        globalGameIdx,
+        gameSeed,
+        input.config,
+        shouldTrace,
+      )
 
-    outcomes.push(outcome)
-    if (outcome.tracedGame) {
-      tracedGames.push(outcome.tracedGame)
+      outcomes.push(outcome)
+      if (outcome.tracedGame) {
+        tracedGames.push(outcome.tracedGame)
+      }
+    } catch (err) {
+      console.error(
+        `[gameLoop] Exception in game #${globalGameIdx + 1} (Seed: ${gameSeed}) vs ${oppDeck.name}:`,
+        err,
+      )
+      throw err
     }
 
     if (onProgress && ((i + 1) % 2 === 0 || i === input.gameCount - 1)) {

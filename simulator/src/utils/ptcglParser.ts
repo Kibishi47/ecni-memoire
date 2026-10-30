@@ -156,6 +156,10 @@ export function buildDeckEntryFromTokens(input: {
     /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr)
   const isRadiant = /radieux|radiant/i.test(model.identity.nameFr)
   const isEx = Boolean(model.pokemonStats?.isRuleBox)
+  const isResolved = source === 'compiled_db' || source === 'fallback_registry'
+  const unresolvedReason = isResolved
+    ? undefined
+    : `Modèle compilé introuvable pour "${input.rawName}" (${cardId}) dans cards_database.json et fallbackCardModels`
 
   return {
     uid: `${cardId}_${input.line}`,
@@ -184,6 +188,8 @@ export function buildDeckEntryFromTokens(input: {
     raw: input.rawLine,
     model,
     resolvedFromSource: source,
+    isResolved,
+    unresolvedReason,
   }
 }
 
@@ -220,6 +226,7 @@ export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number
     raw: `${quantity} ${model.identity.nameFr} ${mapping.ptcglCode} ${cleanNumber}`,
     model: structuredClone(model),
     resolvedFromSource: model.compilationMetadata ? 'compiled_db' : 'fallback_registry',
+    isResolved: true,
   }
 }
 
@@ -321,6 +328,9 @@ export function computeDeckSummary(
 
   const totalCards = pokemonCount + trainerCount + energyCount
   const uniqueIds = new Set(activeCards.map((c) => c.cardId))
+  const unresolvedCards = activeCards.filter((c) => !c.isResolved)
+  const unresolvedCount = unresolvedCards.reduce((sum, c) => sum + c.quantity, 0)
+  const isFullyResolved = unresolvedCount === 0
 
   const warnings = [...baseWarnings]
   if (declaredTotal !== undefined && declaredTotal !== totalCards && baseWarnings.length === 0) {
@@ -338,6 +348,11 @@ export function computeDeckSummary(
       message: `Aucun Pokémon de Base détecté dans la liste (au moins 1 Pokémon BASIC est obligatoire).`,
     })
   }
+  if (!isFullyResolved) {
+    warnings.push({
+      message: `⚠️ Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données.`,
+    })
+  }
 
   const synergyAudit = computeDeckSynergyAudit(activeCards)
 
@@ -350,8 +365,11 @@ export function computeDeckSummary(
     energyCount,
     basicPokemonCount,
     uniqueCardCount: uniqueIds.size,
-    isValid60: totalCards === 60 && basicPokemonCount >= 1,
+    isValid60: totalCards === 60 && basicPokemonCount >= 1 && isFullyResolved,
     hasAtLeastOneBasic: basicPokemonCount >= 1,
+    isFullyResolved,
+    unresolvedCount,
+    unresolvedCards,
     warnings,
     synergyAudit,
   }

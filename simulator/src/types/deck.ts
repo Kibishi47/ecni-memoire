@@ -30,6 +30,8 @@ export interface ParsedDeckEntry {
   raw: string
   model: EngineCardModel
   resolvedFromSource: 'compiled_db' | 'fallback_registry' | 'synthesized'
+  isResolved: boolean
+  unresolvedReason?: string
 }
 
 export interface ParseWarning {
@@ -58,6 +60,9 @@ export interface ParsedDeck {
   uniqueCardCount: number
   isValid60: boolean
   hasAtLeastOneBasic: boolean
+  isFullyResolved: boolean
+  unresolvedCount: number
+  unresolvedCards: ParsedDeckEntry[]
   warnings: ParseWarning[]
   synergyAudit: SynergyAuditItem[]
 }
