@@ -166,6 +166,8 @@ Avant de générer `category`, `subCategory`, `playableActions` et `strategicEva
 3. **Filtres exacts** (`maxHp: 70` pour Poffin, `energyType: "Feu"` quand le texte mentionne `Énergie {R}` / `Basic {R} Energy` / `Énergie Feu`, `subCategory: null` pour Hyper Ball qui cherche n'importe quel Pokémon, `targetFilter: null` pour Recherche Rapide qui cherche n'importe quelle carte).
 4. **Synergies de decklist et conditions de carte morte** en main ou dans le deck.
 
+IMPORTANT : Reste synthétique et concis dans `reasoningAnalysis` (environ 100 à 250 mots au total, sans verbiage ni répétitions). L'analyse doit servir de tremplin logique direct sans consommer inutilement de tokens.
+
 ### 2. RÈGLES CRITIQUES ET INTERDICTIONS D'HALLUCINATIONS SÉMANTIQUES
 0. **INTERDICTION FORMELLE D'INVENTER OU DE COPIER UN TALENT (`ABILITY_*`)** :
    - Ne te base JAMAIS sur les talents d'autres cartes.
@@ -592,7 +594,7 @@ class LocalLLMCardCompiler:
         repo_id: Optional[str] = None,
         filename: Optional[str] = None,
         hf_token: Optional[str] = None,
-        n_ctx: int = 8192,
+        n_ctx: int = 16384,
         n_gpu_layers: int = -1,
         verbose: bool = False,
     ) -> None:
@@ -711,61 +713,94 @@ class LocalLLMCardCompiler:
         self,
         bundle: FetchedCardBundle,
         temperature: float = 0.1,
-        max_tokens: int = 2560,
+        max_tokens: int = 4096,
+        max_retries: int = 2,
     ) -> EngineCardModel:
-        """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`."""
+        """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`.
+
+        Gère automatiquement la détection de troncation de token (`finish_reason == 'length'` ou `EOF while parsing`)
+        avec réessai dynamique et augmentation du budget de tokens (`max_tokens`).
+        """
         if is_basic_energy(bundle):
             return build_basic_energy_model(bundle)
 
         self.load_model_in_memory()
 
         user_prompt = build_user_prompt(bundle)
-        t0 = time.perf_counter()
+        current_max_tokens = max_tokens
+        last_error: Optional[Exception] = None
+        compiled_part: Optional[LLMCompiledCardPart] = None
+        elapsed: float = 0.0
 
-        # Reset strict de l'état interne de llama.cpp (KV Cache C++) pour garantir une inférence 100% stateless
-        if hasattr(self._llm, "reset"):
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                current_max_tokens = min(self.n_ctx - 3000, current_max_tokens + 2048)
+
+            t0 = time.perf_counter()
+
+            # Reset strict de l'état interne de llama.cpp (KV Cache C++) pour garantir une inférence 100% stateless
+            if hasattr(self._llm, "reset"):
+                try:
+                    self._llm.reset()
+                except Exception:
+                    pass
+
+            completion = self._llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={
+                    "type": "json_object",
+                    "schema": self._json_schema,
+                },
+                temperature=temperature,
+                max_tokens=current_max_tokens,
+            )
+
+            elapsed = round(time.perf_counter() - t0, 3)
+            choice = completion["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            raw_content = choice["message"]["content"]
+
+            # Si le modèle s'est arrêté prématurément pour cause de limite de tokens (troncation)
+            if finish_reason == "length" and attempt < max_retries:
+                continue
+
             try:
-                self._llm.reset()
-            except Exception:
-                pass
+                compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
+                break
+            except Exception as val_err:
+                last_error = val_err
+                # Tentative de rattrapage sur les pondérations si le JSON est valide
+                try:
+                    raw_dict = json.loads(raw_content)
+                    if isinstance(raw_dict, dict):
+                        strat = raw_dict.get("strategicEvaluator")
+                        if isinstance(strat, dict):
+                            weights = strat.get("turnPhaseWeights")
+                            if isinstance(weights, dict):
+                                for k in ["turn1", "turn2", "turn3", "turn4Plus"]:
+                                    if k in weights:
+                                        try:
+                                            weights[k] = max(0.0, min(2.0, float(weights[k])))
+                                        except Exception:
+                                            pass
+                        compiled_part = LLMCompiledCardPart.model_validate(raw_dict)
+                        break
+                except Exception:
+                    pass
 
-        completion = self._llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={
-                "type": "json_object",
-                "schema": self._json_schema,
-            },
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-        elapsed = round(time.perf_counter() - t0, 3)
-        raw_content = completion["choices"][0]["message"]["content"]
-
-        try:
-            compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
-        except Exception as val_err:
-            try:
-                raw_dict = json.loads(raw_content)
-                if isinstance(raw_dict, dict):
-                    strat = raw_dict.get("strategicEvaluator")
-                    if isinstance(strat, dict):
-                        weights = strat.get("turnPhaseWeights")
-                        if isinstance(weights, dict):
-                            for k in ["turn1", "turn2", "turn3", "turn4Plus"]:
-                                if k in weights:
-                                    try:
-                                        weights[k] = max(0.0, min(2.0, float(weights[k])))
-                                    except Exception:
-                                        pass
-                    compiled_part = LLMCompiledCardPart.model_validate(raw_dict)
-                else:
-                    raise val_err
-            except Exception:
-                raise val_err
+                # Si l'erreur est une fin de JSON inattendue (EOF / JSONDecodeError) et qu'il reste des tentatives
+                err_str = str(val_err).lower()
+                if (
+                    "eof" in err_str
+                    or "expecting value" in err_str
+                    or finish_reason == "length"
+                ) and attempt < max_retries:
+                    continue
+        else:
+            raise last_error or RuntimeError(f"Échec de validation de la carte {bundle.card_id}")
 
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
