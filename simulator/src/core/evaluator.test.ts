@@ -1,9 +1,101 @@
 import { describe, expect, it } from 'vitest'
 import { UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
+import { createNativeBasicEnergyModel } from '../utils/energy'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
+import type { EngineCardModel } from '../types/cardModel'
 import { applyAction, createInitialMatchState } from './engine'
 import { evaluateState, getStateHash, selectBestTurnBranch } from './evaluator'
+
+const mockCharmander: EngineCardModel = {
+  cardId: 'test-charmander',
+  identity: {
+    cardId: 'test-charmander',
+    nameFr: 'Salamèche',
+    nameEn: 'Charmander',
+    setId: 'test',
+    setName: 'Test',
+    localId: '001',
+    category: 'POKEMON',
+    subCategory: 'BASIC',
+    regulationMark: 'G',
+    legalStandard: true,
+    legalExpanded: true,
+    rarity: 'Commune',
+    imageUrl: null,
+    rawRulesText: [],
+  },
+  pokemonStats: {
+    hp: 70,
+    types: ['Feu'],
+    stage: 'De base',
+    evolvesFrom: null,
+    rootBasicName: 'Salamèche',
+    evolutionChain: ['Salamèche', 'Reptincel', 'Dracaufeu-ex'],
+    retreatCost: 1,
+    weaknesses: [],
+    resistances: [],
+    prizeCardsGiven: 1,
+    isRuleBox: false,
+  },
+  category: 'POKEMON',
+  subCategory: 'BASIC',
+  playableActions: [],
+  strategicEvaluator: {
+    primaryRole: 'SECONDARY_ATTACKER',
+    intrinsicBaseScore: 50,
+    turnPhaseWeights: { turn1: 1, turn2: 1, turn3: 1, turn4Plus: 1 },
+    decklistSynergyRequirements: [],
+    inGameDeadCardConditions: [],
+    discardPriorityWhenDead: 60,
+    holdForNextTurnBonus: 10,
+  },
+}
+
+const mockTargetBasic: EngineCardModel = {
+  cardId: 'test-target',
+  identity: {
+    cardId: 'test-target',
+    nameFr: 'Cible Test',
+    nameEn: 'Target Test',
+    setId: 'test',
+    setName: 'Test',
+    localId: '002',
+    category: 'POKEMON',
+    subCategory: 'BASIC',
+    regulationMark: 'G',
+    legalStandard: true,
+    legalExpanded: true,
+    rarity: 'Commune',
+    imageUrl: null,
+    rawRulesText: [],
+  },
+  pokemonStats: {
+    hp: 70,
+    types: ['Incolore'],
+    stage: 'De base',
+    evolvesFrom: null,
+    rootBasicName: 'Cible Test',
+    evolutionChain: ['Cible Test'],
+    retreatCost: 1,
+    weaknesses: [],
+    resistances: [],
+    prizeCardsGiven: 1,
+    isRuleBox: false,
+  },
+  category: 'POKEMON',
+  subCategory: 'BASIC',
+  playableActions: [],
+  strategicEvaluator: {
+    primaryRole: 'SECONDARY_ATTACKER',
+    intrinsicBaseScore: 40,
+    turnPhaseWeights: { turn1: 1, turn2: 1, turn3: 1, turn4Plus: 1 },
+    decklistSynergyRequirements: [],
+    inGameDeadCardConditions: [],
+    discardPriorityWhenDead: 50,
+    holdForNextTurnBonus: 10,
+  },
+}
 
 function buildDeckModelsFromPtcgl(rawText: string) {
   const parsed = parsePtcglDecklist(rawText)
@@ -18,53 +110,53 @@ function buildDeckModelsFromPtcgl(rawText: string) {
 
 describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valuation', () => {
   it('deduplicates commutative bench placements via canonical getStateHash', () => {
-    const charizardDeck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
-    const boltDeck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[1]!.ptcglText)
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
 
-    const baseState = createInitialMatchState(charizardDeck, boltDeck, {
+    const baseState = createInitialMatchState(deckA, deckB, {
       seed: 101,
       firstPlayerIndex: 0,
       maxTurns: 18,
     })
 
-    const charmander = UNIFIED_CARD_REGISTRY['sv03.5-004']!
-    const pidgey = UNIFIED_CARD_REGISTRY['sv03.5-016']!
+    const boltEx = UNIFIED_CARD_REGISTRY['sv05-123']!
+    const fezandipitiEx = UNIFIED_CARD_REGISTRY['sv06.5-038']!
 
     baseState.player.bench = []
-    baseState.player.hand = [charmander, pidgey]
+    baseState.player.hand = [boltEx, fezandipitiEx]
 
-    // Séquence A : poser Salamèche puis Roucool
+    // Séquence A : poser Ire-Foudre puis Favianos
     const stateA1 = applyAction(baseState, {
       type: 'PUT_BASIC_ON_BENCH',
-      cardId: charmander.cardId,
-      label: 'Poser Salamèche',
+      cardId: boltEx.cardId,
+      label: 'Poser Ire-Foudre-ex',
     })
     const stateA2 = applyAction(stateA1, {
       type: 'PUT_BASIC_ON_BENCH',
-      cardId: pidgey.cardId,
-      label: 'Poser Roucool',
+      cardId: fezandipitiEx.cardId,
+      label: 'Poser Favianos-ex',
     })
 
-    // Séquence B : poser Roucool puis Salamèche
+    // Séquence B : poser Favianos puis Ire-Foudre
     const stateB1 = applyAction(baseState, {
       type: 'PUT_BASIC_ON_BENCH',
-      cardId: pidgey.cardId,
-      label: 'Poser Roucool',
+      cardId: fezandipitiEx.cardId,
+      label: 'Poser Favianos-ex',
     })
     const stateB2 = applyAction(stateB1, {
       type: 'PUT_BASIC_ON_BENCH',
-      cardId: charmander.cardId,
-      label: 'Poser Salamèche',
+      cardId: boltEx.cardId,
+      label: 'Poser Ire-Foudre-ex',
     })
 
     expect(getStateHash(stateA2)).toBe(getStateHash(stateB2))
   })
 
   it('selects Rare Candy -> Charizard ex -> Burning Darkness KO over passing via 3-ply lookahead', () => {
-    const charizardDeck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
-    const gardevoirDeck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[3]!.ptcglText)
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
 
-    const state = createInitialMatchState(charizardDeck, gardevoirDeck, {
+    const state = createInitialMatchState(deckA, deckB, {
       seed: 777,
       firstPlayerIndex: 0,
       maxTurns: 18,
@@ -73,15 +165,13 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     state.turnNumber = 3
     state.activePlayerIndex = 0
 
-    const charmander = UNIFIED_CARD_REGISTRY['sv03.5-004']!
-    const ralts = UNIFIED_CARD_REGISTRY['swsh10-060']!
     const rareCandy = UNIFIED_CARD_REGISTRY['sv04-125']!
     const charizardEx = UNIFIED_CARD_REGISTRY['sv03-125']!
-    const fireEnergy = UNIFIED_CARD_REGISTRY['sve-002']!
+    const fireEnergy = createNativeBasicEnergyModel('Feu')
 
     state.player.activePokemon = {
       instanceId: 'p_charmander',
-      card: charmander,
+      card: mockCharmander,
       previousStages: [],
       damage: 0,
       attachedEnergies: [],
@@ -90,8 +180,8 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
       evolvedThisTurn: false,
     }
     state.opponent.activePokemon = {
-      instanceId: 'p_ralts_active',
-      card: ralts,
+      instanceId: 'p_target_active',
+      card: mockTargetBasic,
       previousStages: [],
       damage: 0,
       attachedEnergies: [],
@@ -101,8 +191,8 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     }
     state.opponent.bench = [
       {
-        instanceId: 'p_ralts_bench',
-        card: ralts,
+        instanceId: 'p_target_bench',
+        card: mockTargetBasic,
         previousStages: [],
         damage: 0,
         attachedEnergies: [],
