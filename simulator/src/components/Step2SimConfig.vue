@@ -19,8 +19,8 @@ const emit = defineEmits<{
   (e: 'launch-simulation'): void
 }>()
 
-const iterationPresets = [50, 200, 1000, 5000]
-const maxTurnPresets = [12, 15, 18, 25]
+const iterationPresets = [100, 1000, 10000, 100000]
+const maxTurnPresets = [1, 2, 5, 10, 15, 20]
 
 const branchOptions: Array<{
   value: MaxBranchesSetting
@@ -113,8 +113,9 @@ const isValidConfig = computed(() => {
     props.deck.isFullyResolved &&
     props.config.selectedOpponentIds.length >= 1 &&
     props.config.iterations >= 1 &&
+    props.config.iterations <= 100000000 &&
     props.config.maxTurns >= 1 &&
-    props.config.maxTurns <= 50
+    props.config.maxTurns <= 20
   )
 })
 </script>
@@ -202,33 +203,34 @@ const isValidConfig = computed(() => {
               1. Nombre de parties à simuler ($X$)
             </label>
             <p class="mt-0.5 text-xs text-slate-500">
-              Réparties équitablement entre les decks adverses cochés
+              Champ libre (jusqu'à 100 millions) avec presets rapides cliquables
             </p>
 
-            <div class="mt-3 flex items-center gap-2">
+            <div class="mt-3">
               <input
                 id="iterations-input"
                 type="number"
                 min="1"
-                max="20000"
+                max="100000000"
+                step="100"
                 :value="config.iterations"
                 @input="
                   patchConfig({
                     iterations: Math.max(
                       1,
-                      Math.min(20000, Number(($event.target as HTMLInputElement).value) || 50),
+                      Math.min(100000000, Number(($event.target as HTMLInputElement).value) || 100),
                     ),
                   })
                 "
-                class="w-28 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm font-bold text-slate-900 focus:border-slate-900 focus:bg-white focus:outline-none"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm font-bold text-slate-900 focus:border-slate-900 focus:bg-white focus:outline-none"
               />
-              <div class="flex flex-wrap gap-1.5">
+              <div class="mt-2.5 flex flex-wrap gap-1.5">
                 <button
                   v-for="preset in iterationPresets"
                   :key="preset"
                   type="button"
                   @click="patchConfig({ iterations: preset })"
-                  class="rounded-md border px-2.5 py-1.5 font-mono text-xs font-semibold transition"
+                  class="rounded-md border px-2.5 py-1 font-mono text-xs font-semibold transition"
                   :class="
                     config.iterations === preset
                       ? 'border-slate-900 bg-slate-900 text-white'
@@ -248,45 +250,45 @@ const isValidConfig = computed(() => {
                 2. Plafond de tours (<code class="font-mono">maxTurns</code>)
               </label>
               <span class="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-700">
-                REQUIS (4–50)
+                MAX 20 TOURS
               </span>
             </div>
             <p class="mt-0.5 text-xs text-slate-500">
-              Joue jusqu'au KO/6 Récompenses ou départage à <code class="font-mono">maxTurns</code>
+              Champ libre (1 à 20 tours) avec presets rapides cliquables
             </p>
 
-            <div class="mt-3 flex items-center gap-2">
+            <div class="mt-3">
               <input
                 id="max-turns-input"
                 type="number"
                 required
-                min="4"
-                max="50"
+                min="1"
+                max="20"
                 :value="config.maxTurns"
                 @input="
                   patchConfig({
                     maxTurns: Math.max(
-                      4,
-                      Math.min(50, Number(($event.target as HTMLInputElement).value) || 18),
+                      1,
+                      Math.min(20, Number(($event.target as HTMLInputElement).value) || 15),
                     ),
                   })
                 "
-                class="w-24 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm font-bold text-slate-900 focus:border-slate-900 focus:bg-white focus:outline-none"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm font-bold text-slate-900 focus:border-slate-900 focus:bg-white focus:outline-none"
               />
-              <div class="flex flex-wrap gap-1.5">
+              <div class="mt-2.5 flex flex-wrap gap-1.5">
                 <button
                   v-for="tPreset in maxTurnPresets"
                   :key="tPreset"
                   type="button"
                   @click="patchConfig({ maxTurns: tPreset })"
-                  class="rounded-md border px-2.5 py-1.5 font-mono text-xs font-semibold transition"
+                  class="rounded-md border px-2.5 py-1 font-mono text-xs font-semibold transition"
                   :class="
                     config.maxTurns === tPreset
                       ? 'border-slate-900 bg-slate-900 text-white'
                       : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
                   "
                 >
-                  {{ tPreset }}t
+                  {{ tPreset }} tour{{ tPreset > 1 ? 's' : '' }}
                 </button>
               </div>
             </div>
