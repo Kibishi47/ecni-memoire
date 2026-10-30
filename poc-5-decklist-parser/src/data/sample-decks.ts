@@ -6,7 +6,7 @@ export const SAMPLE_DECKS: SampleDeckPreset[] = [
     name: 'Dracaufeu ex / Roucarnage ex',
     subtitle: 'Format Standard FR (60 cartes)',
     lang: 'FR',
-    badgeColor: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+    badgeColor: 'bg-orange-50 text-orange-700 border-orange-200',
     ptcglText: `Pokémon: 16
 4 Salamèche MEW 4
 1 Reptincel OBF 27
@@ -45,7 +45,7 @@ Total Cards: 60`,
     name: 'Charizard ex (English Export)',
     subtitle: 'PTCGL Official EN Export (with PH & Promos)',
     lang: 'EN',
-    badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
     ptcglText: `Pokémon: 16
 4 Charmander MEW 4 PH
 1 Charmeleon OBF 27
@@ -85,7 +85,7 @@ Total Cards: 60`,
     name: 'Méga Dracolosse ex (ASC / POR / MEG)',
     subtitle: 'Série Méga-Évolution & Ascended Heroes',
     lang: 'EN',
-    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     ptcglText: `Pokémon: 18
 2 Mega Dragonite ex ASC 152
 2 Dragonair ASC 151
@@ -124,7 +124,7 @@ Total Cards: 60`,
     name: 'Chien-Pao ex / Baxcalibur',
     subtitle: 'Test syntaxe Énergie PTCGL {W}',
     lang: 'EN',
-    badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    badgeColor: 'bg-cyan-50 text-cyan-700 border-cyan-200',
     ptcglText: `Pokémon: 15
 3 Chien-Pao ex PAL 61
 3 Frigibax PAL 57
@@ -159,7 +159,7 @@ Total Cards: 60`,
     name: 'Gardevoir ex / Fort-Ivoire',
     subtitle: 'Archétype Contrôle Psy (FR)',
     lang: 'FR',
-    badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+    badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
     ptcglText: `Pokémon: 16
 4 Tarsal ASR 60
 4 Kirlia SIT 68
