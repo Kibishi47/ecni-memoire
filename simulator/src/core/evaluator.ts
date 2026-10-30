@@ -12,8 +12,8 @@
 import type { EngineCardModel } from '../types/cardModel'
 import {
   applyAction,
-   cloneMatchState,
   computeAttackDamageToActive,
+  fastCloneState,
   getActiveBoard,
   getMainAttackEnergyRequirement,
   getPassiveBoard,
@@ -357,20 +357,12 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
 export function exploreTurnBranches(
   turnStartState: MatchState,
   maxBranches: MaxBranchesSetting,
-  maxActionDepth = 6,
+  maxActionDepth = 8,
   customBeamWidth?: number,
 ): { completedBranches: PartialTurnNode[]; totalExplored: number } {
   const perspectiveIndex = turnStartState.activePlayerIndex
-  const numericLimit = maxBranches === 'INFINITE' ? 80 : maxBranches
-  const perStepBeamWidth =
-    customBeamWidth ??
-    (maxBranches === 'INFINITE'
-      ? 24
-      : maxBranches === 50
-        ? 14
-        : maxBranches === 20
-          ? 8
-          : 5)
+  const numericLimit = maxBranches === 'INFINITE' ? 12 : Math.min(Number(maxBranches), 12)
+  const perStepBeamWidth = customBeamWidth ?? Math.min(numericLimit, 8)
 
   const visitedIntermediateHashes = new Set<string>()
   const completedByHash = new Map<string, PartialTurnNode>()
@@ -427,7 +419,7 @@ export function exploreTurnBranches(
           continue
         }
 
-        const nextState = applyAction(node.state, action)
+        const nextState = applyAction(node.state, action, false)
         totalExplored++
         const nextActions = [...node.actions, action]
         const nextScore = evaluateState(nextState, perspectiveIndex)
@@ -507,11 +499,12 @@ function summarizeActionSequence(actions: GameAction[]): string {
 }
 
 /**
- * Simule le meilleur tour complet à 1 pli (utilisé pour l'anticipation de $T_{\text{adv}}$ et de $T+1$ dans le 3-Ply Lookahead).
+ * Rollout Rapide Glouton (W = 1, Greedy Optimal) pour l'anticipation de T_adv et T+1.
+ * Ne fait aucun embranchement combinatoire : choisit séquentiellement le meilleur coup heuristique
+ * immédiat jusqu'à clôture du tour (attaque ou fin de tour).
  */
-function simulateBestSingleTurnRollout(
+function fastGreedySingleTurnRollout(
   postPreviousTurnState: MatchState,
-  innerBeam: MaxBranchesSetting,
 ): { bestEndState: MatchState; bestActions: GameAction[]; bestPerspectiveScore: number } {
   if (postPreviousTurnState.winner !== null) {
     const pIdx = postPreviousTurnState.activePlayerIndex
@@ -522,33 +515,66 @@ function simulateBestSingleTurnRollout(
     }
   }
 
-  const rolloutStart = cloneMatchState(postPreviousTurnState)
-  const actingPlayerIdx = rolloutStart.activePlayerIndex
-  startTurn(rolloutStart)
+  let state = fastCloneState(postPreviousTurnState, false)
+  const actingPlayerIdx = state.activePlayerIndex
+  startTurn(state)
 
-  if (rolloutStart.winner !== null) {
+  if (state.winner !== null) {
     return {
-      bestEndState: rolloutStart,
+      bestEndState: state,
       bestActions: [],
-      bestPerspectiveScore: evaluateState(rolloutStart, actingPlayerIdx),
+      bestPerspectiveScore: evaluateState(state, actingPlayerIdx),
     }
   }
 
-  const { completedBranches } = exploreTurnBranches(rolloutStart, innerBeam, 4, 3)
-  const bestBranch = completedBranches[0]!
+  const actionsTaken: GameAction[] = []
+  const maxActions = 8
+
+  for (let step = 0; step < maxActions; step++) {
+    if (state.winner !== null || state.activePlayerIndex !== actingPlayerIdx) {
+      break
+    }
+
+    const legalActions = getLegalActions(state)
+    if (legalActions.length === 0) {
+      break
+    }
+
+    // Sélection gloutonne immédiate du meilleur coup atomique (W = 1)
+    let bestAction = legalActions[0]!
+    let bestActionScore = -Infinity
+
+    for (const act of legalActions) {
+      const actScore = scoreAtomicActionHeuristic(state, act)
+      if (actScore > bestActionScore) {
+        bestActionScore = actScore
+        bestAction = act
+      }
+    }
+
+    state = applyAction(state, bestAction, false)
+    actionsTaken.push(bestAction)
+
+    if (bestAction.endsTurnImmediately) {
+      break
+    }
+  }
+
   return {
-    bestEndState: bestBranch.state,
-    bestActions: bestBranch.actions,
-    bestPerspectiveScore: bestBranch.heuristicScore,
+    bestEndState: state,
+    bestActions: actionsTaken,
+    bestPerspectiveScore: evaluateState(state, actingPlayerIdx),
   }
 }
 
 /**
- * Sélectionne la meilleure branche de tour complet via l'anticipation sur 3 demi-tours ($T \rightarrow T_{\text{adv}} \rightarrow T+1$) :
+ * Sélectionne la meilleure branche de tour complet via l'anticipation asymétrique 3-ply :
+ * - Tour T : Beam Search élagué (maxBranches ≤ 12, profondeur ≤ 8)
+ * - Top-3 : Sélection des K = 3 meilleures feuilles de fin de tour T
+ * - Rollout Rapide (W = 1, Greedy Optimal) pour T_adv et T+1
  *
- * $$\text{Score}(B) = 0.35 \cdot V(S_T) - 0.30 \cdot V_{\text{adv}}(S_{T_{\text{adv}}}) + 0.35 \cdot V(S_{T+1})$$
- *
- * Les deux joueurs (Joueur ET Adversaire) utilisent cet Évaluateur à chaque tour.
+ * Formule officielle de pondération :
+ * Score(B) = 0.35 * V(S_T) - 0.30 * V_adv(S_{T_adv}) + 0.35 * V(S_{T+1})
  */
 export function selectBestTurnBranch(
   turnStartState: MatchState,
@@ -558,20 +584,10 @@ export function selectBestTurnBranch(
   const perspectiveIndex = turnStartState.activePlayerIndex
   const opponentIndex: 0 | 1 = perspectiveIndex === 0 ? 1 : 0
 
-  const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 6)
+  const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 8)
 
-  // Nombre de branches candidates évaluées avec le rollout profond 3-ply (T -> T_adv -> T+1)
-  const deepLookaheadCap =
-    maxBranches === 8
-      ? 3
-      : maxBranches === 20
-        ? 5
-        : maxBranches === 50
-          ? 8
-          : 12
-
-  const candidatesToEvaluate = completedBranches.slice(0, deepLookaheadCap)
-  const innerRolloutBeam: MaxBranchesSetting = 8
+  // Sélection stricte des Top-3 (K = 3) meilleures feuilles du tour T
+  const candidatesToEvaluate = completedBranches.slice(0, 3)
 
   let bestIdx = 0
   let bestTotalScore = -Infinity
@@ -613,13 +629,13 @@ export function selectBestTurnBranch(
       continue
     }
 
-    // Étape 2 : Simulation du meilleur tour complet de l'Adversaire (T_adv) à partir de S_T
-    const advRollout = simulateBestSingleTurnRollout(stateT, innerRolloutBeam)
+    // Étape 2 : Projection rapide du tour adverse T_adv (Rollout glouton W = 1)
+    const advRollout = fastGreedySingleTurnRollout(stateT)
     const stateTAdv = advRollout.bestEndState
     const scoreTAdv = evaluateState(stateTAdv, opponentIndex)
     const opponentReactionSummary = summarizeActionSequence(advRollout.bestActions)
 
-    // Étape 3 : Si la partie n'est pas terminée après T_adv, simulation du rebond du Joueur au tour suivant (T+1)
+    // Étape 3 : Projection rapide du rebond Joueur T+1 (Rollout glouton W = 1)
     let scoreTPlus1: number
     let reboundSummary: string
     if (stateTAdv.winner !== null) {
@@ -629,7 +645,7 @@ export function selectBestTurnBranch(
           ? 'Victoire sur épuisement adverse'
           : 'Défaite subie lors de la riposte adverse (T_adv)'
     } else {
-      const reboundRollout = simulateBestSingleTurnRollout(stateTAdv, innerRolloutBeam)
+      const reboundRollout = fastGreedySingleTurnRollout(stateTAdv)
       scoreTPlus1 = evaluateState(reboundRollout.bestEndState, perspectiveIndex)
       reboundSummary = summarizeActionSequence(reboundRollout.bestActions)
     }
