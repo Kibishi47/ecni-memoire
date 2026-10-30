@@ -12,8 +12,10 @@ import atexit
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,21 @@ def find_available_port(start_port: int = 12345, max_attempts: int = 50) -> int:
     return start_port
 
 
+def _find_sshpass() -> Optional[str]:
+    """Recherche l'exécutable `sshpass` dans le PATH ou les répertoires standards macOS / Linux."""
+    found = shutil.which("sshpass")
+    if found:
+        return found
+    for fallback in [
+        "/opt/homebrew/bin/sshpass",
+        "/usr/local/bin/sshpass",
+        "/usr/bin/sshpass",
+    ]:
+        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
+            return fallback
+    return None
+
+
 # Modèle puissant configuré par défaut en mode normal pour la machine distante (GPU dédié)
 DEFAULT_REMOTE_NORMAL_MODEL = "Qwen3.8-27B"
 
@@ -61,6 +78,7 @@ class LMStudioCardCompiler:
         ssh_port: Optional[int] = None,
         ssh_user: Optional[str] = None,
         ssh_key_path: Optional[str] = None,
+        ssh_password: Optional[str] = None,
         remote_port: Optional[int] = None,
         local_port: Optional[int] = None,
         use_tunnel: Optional[bool] = None,
@@ -79,6 +97,8 @@ class LMStudioCardCompiler:
         self.ssh_port = int(ssh_port or os.environ.get("SSH_PORT") or 22)
         self.ssh_user = ssh_user or os.environ.get("SSH_USER") or None
         self.ssh_key_path = ssh_key_path or os.environ.get("SSH_KEY_PATH") or None
+        self.ssh_password = ssh_password or os.environ.get("SSH_PASSWORD") or None
+        self._askpass_file: Optional[str] = None
 
         # 2. Configuration LM Studio
         self.remote_port = int(remote_port or os.environ.get("LM_STUDIO_PORT") or 1234)
@@ -140,14 +160,53 @@ class LMStudioCardCompiler:
             return f"{model_label} (SSH {self.ssh_target})"
         return f"{model_label} ({self.api_base_url})"
 
+    def _ensure_askpass_script(self) -> Optional[str]:
+        """Crée un script temporaire compatible SSH_ASKPASS pour transmettre le mot de passe sans TTY."""
+        if not self.ssh_password:
+            return None
+        if self._askpass_file and os.path.exists(self._askpass_file):
+            return self._askpass_file
+        fd, path = tempfile.mkstemp(prefix="ssh_askpass_", suffix=".py")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("#!/usr/bin/env python3\n")
+            f.write("import os, sys\n")
+            f.write("sys.stdout.write(os.environ.get('SSHPASS', ''))\n")
+            f.write("sys.stdout.flush()\n")
+        os.chmod(path, 0o700)
+        self._askpass_file = path
+        return path
+
+    def _get_ssh_env(self) -> Dict[str, str]:
+        """Prépare l'environnement pour les commandes SSH et tunnels."""
+        env = os.environ.copy()
+        if self.ssh_password:
+            env["SSHPASS"] = self.ssh_password
+            if not _find_sshpass():
+                askpass = self._ensure_askpass_script()
+                if askpass:
+                    env["SSH_ASKPASS"] = askpass
+                    env["SSH_ASKPASS_REQUIRE"] = "force"
+                    env["DISPLAY"] = env.get("DISPLAY", ":0")
+        return env
+
     def _build_ssh_base_command(self) -> List[str]:
         """Construit la liste des arguments standard pour exécuter une commande SSH."""
-        cmd = [
+        cmd: List[str] = []
+        sshpass_bin = _find_sshpass() if self.ssh_password else None
+        if self.ssh_password and sshpass_bin:
+            cmd.extend([sshpass_bin, "-e"])
+
+        cmd.extend([
             "ssh",
-            "-o", "BatchMode=yes",
+            "-o", "BatchMode=no" if self.ssh_password else "BatchMode=yes",
             "-o", "ConnectTimeout=8",
             "-o", "StrictHostKeyChecking=accept-new",
-        ]
+        ])
+        if self.ssh_password:
+            cmd.extend(["-o", "PreferredAuthentications=password,keyboard-interactive,publickey"])
+            if not self.ssh_key_path:
+                cmd.extend(["-o", "PubkeyAuthentication=no"])
+
         if self.ssh_port != 22:
             cmd.extend(["-p", str(self.ssh_port)])
         if self.ssh_key_path:
@@ -161,7 +220,14 @@ class LMStudioCardCompiler:
         """Exécute une commande distante via SSH et retourne (code_retour, stdout, stderr)."""
         cmd = self._build_ssh_base_command()
         cmd.append(remote_command)
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        env = self._get_ssh_env()
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
         return proc.returncode, proc.stdout, proc.stderr
 
     def _start_ssh_tunnel(self) -> None:
@@ -169,7 +235,12 @@ class LMStudioCardCompiler:
         if self._tunnel_proc is not None and self._tunnel_proc.poll() is None:
             return
 
-        cmd = [
+        cmd: List[str] = []
+        sshpass_bin = _find_sshpass() if self.ssh_password else None
+        if self.ssh_password and sshpass_bin:
+            cmd.extend([sshpass_bin, "-e"])
+
+        cmd.extend([
             "ssh",
             "-N",
             "-L", f"{self.local_port}:127.0.0.1:{self.remote_port}",
@@ -178,7 +249,13 @@ class LMStudioCardCompiler:
             "-o", "ServerAliveCountMax=3",
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=10",
-        ]
+            "-o", "BatchMode=no" if self.ssh_password else "BatchMode=yes",
+        ])
+        if self.ssh_password:
+            cmd.extend(["-o", "PreferredAuthentications=password,keyboard-interactive,publickey"])
+            if not self.ssh_key_path:
+                cmd.extend(["-o", "PubkeyAuthentication=no"])
+
         if self.ssh_port != 22:
             cmd.extend(["-p", str(self.ssh_port)])
         if self.ssh_key_path:
@@ -187,8 +264,11 @@ class LMStudioCardCompiler:
         target = f"{self.ssh_user}@{self.ssh_host}" if self.ssh_user else self.ssh_host
         cmd.append(target)
 
+        env = self._get_ssh_env()
         self._tunnel_proc = subprocess.Popen(
             cmd,
+            env=env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
@@ -224,8 +304,14 @@ class LMStudioCardCompiler:
         # 1. Vérification de connectivité SSH basique
         code, _, stderr = self._run_ssh_command("echo OK")
         if code != 0:
+            hint = ""
+            if "Permission denied" in stderr:
+                if self.ssh_password and not _find_sshpass():
+                    hint = "\nAstuce : Pour la connexion SSH par mot de passe, 'sshpass' est recommandé (brew install sshpass)."
+                elif not self.ssh_password:
+                    hint = "\nAstuce : Si le serveur distant requiert un mot de passe, configurez SSH_PASSWORD dans .env ou utilisez l'option --ssh-password."
             raise ConnectionError(
-                f"Connexion SSH échouée vers {self.ssh_target} (code {code}) : {stderr.strip()}"
+                f"Connexion SSH échouée vers {self.ssh_target} (code {code}) : {stderr.strip()}{hint}"
             )
 
         # 2. Vérification du statut via `lms status`
@@ -483,7 +569,7 @@ class LMStudioCardCompiler:
         return engine_card
 
     def close(self) -> None:
-        """Ferme proprement le tunnel SSH et libère les processus associés."""
+        """Ferme proprement le tunnel SSH et libère les processus et fichiers associés."""
         if self._tunnel_proc is not None:
             try:
                 self._tunnel_proc.terminate()
@@ -495,4 +581,10 @@ class LMStudioCardCompiler:
                     pass
             finally:
                 self._tunnel_proc = None
+        if self._askpass_file and os.path.exists(self._askpass_file):
+            try:
+                os.unlink(self._askpass_file)
+            except Exception:
+                pass
+            self._askpass_file = None
         self._ready = False

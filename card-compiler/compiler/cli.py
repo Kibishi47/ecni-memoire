@@ -124,10 +124,11 @@ def create_compiler_engine(
     tier: ModelTier = ModelTier.qwen3,
     fast: bool = False,
     hf_token: Optional[str] = None,
+    ssh_password: Optional[str] = None,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
-        return LMStudioCardCompiler(tier=tier)
+        return LMStudioCardCompiler(tier=tier, ssh_password=ssh_password)
     return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token)
 
 
@@ -143,6 +144,7 @@ def _execute_run_pipeline(
     force: bool,
     limit: Optional[int],
     hf_token: Optional[str] = None,
+    ssh_password: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -167,12 +169,18 @@ def _execute_run_pipeline(
     )
 
     if llm_provider == LLMProvider.lm_studio:
-        engine_preview = LMStudioCardCompiler(tier=effective_tier)
+        engine_preview = LMStudioCardCompiler(tier=effective_tier, ssh_password=ssh_password)
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (Distant SSH / Local REST)[/bold cyan]"
         if engine_preview.ssh_host:
+            auth_info = (
+                "[green]Mot de passe (SSH_PASSWORD)[/green]"
+                if engine_preview.ssh_password
+                else (f"Clé privée ([cyan]{engine_preview.ssh_key_path}[/cyan])" if engine_preview.ssh_key_path else "Clé SSH standard / Agent")
+            )
             llm_lines = (
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Distant via SSH)[/bold magenta]\n"
                 f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
+                f"• [bold]Authentification[/bold] : {auth_info}\n"
                 f"• [bold]Tunnel SSH[/bold] : {'Actif (port local ' + str(engine_preview.local_port) + ' -> distant ' + str(engine_preview.remote_port) + ')' if engine_preview.use_tunnel else 'Désactivé (connexion directe)'}\n"
                 f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — Modèle distant : [cyan]{engine_preview.model_name}[/cyan]"
             )
@@ -275,6 +283,7 @@ def _execute_run_pipeline(
             tier=effective_tier,
             fast=fast,
             hf_token=hf_token,
+            ssh_password=ssh_password,
         )
         try:
             with console.status(
@@ -468,8 +477,24 @@ def run_command(
         envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
     ),
+    ssh_password: Optional[str] = typer.Option(
+        None,
+        "--ssh-password",
+        envvar=["SSH_PASSWORD"],
+        help="Mot de passe SSH pour la machine distante (si connexion sans clé publique).",
+    ),
+    prompt_ssh_password: bool = typer.Option(
+        False,
+        "--prompt-ssh-password",
+        help="Demande interactivement le mot de passe SSH dans le terminal de manière masquée.",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
+    if prompt_ssh_password and not ssh_password:
+        import getpass
+
+        ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
+
     _execute_run_pipeline(
         mode=mode,
         test_flag=test_flag,
@@ -482,6 +507,7 @@ def run_command(
         force=force,
         limit=limit,
         hf_token=hf_token,
+        ssh_password=ssh_password,
     )
 
 
@@ -514,8 +540,24 @@ def compile_alias(
         envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
     ),
+    ssh_password: Optional[str] = typer.Option(
+        None,
+        "--ssh-password",
+        envvar=["SSH_PASSWORD"],
+        help="Mot de passe SSH pour la machine distante (si connexion sans clé publique).",
+    ),
+    prompt_ssh_password: bool = typer.Option(
+        False,
+        "--prompt-ssh-password",
+        help="Demande interactivement le mot de passe SSH dans le terminal.",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
+    if prompt_ssh_password and not ssh_password:
+        import getpass
+
+        ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
+
     _execute_run_pipeline(
         mode=mode,
         test_flag=test_flag,
@@ -528,6 +570,7 @@ def compile_alias(
         force=force,
         limit=limit,
         hf_token=hf_token,
+        ssh_password=ssh_password,
     )
 
 
