@@ -825,3 +825,7 @@ class LocalLLMCardCompiler:
         # Post-processing déterministe des règles métier Pokémon TCG
         engine_card = sanitize_and_enrich_card(bundle, engine_card)
         return engine_card
+
+    def close(self) -> None:
+        """Libère les ressources locales si nécessaire."""
+        pass
