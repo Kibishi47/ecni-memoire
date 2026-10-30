@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from compiler.cli import LLMProvider, create_compiler_engine
+from compiler.llm_engine import ModelTier
 from compiler.lm_studio_compiler import LMStudioCardCompiler, find_available_port
 from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel
 
@@ -43,6 +44,24 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIn("-p", ssh_cmd)
         self.assertIn("2222", ssh_cmd)
         self.assertIn("ai-user@gpu-node.internal", ssh_cmd)
+
+    def test_remote_model_defaults_to_qwen_27b_in_normal_mode(self):
+        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler Qwen3.8-27B par défaut
+        with patch.dict("os.environ", {}, clear=True):
+            compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal")
+            self.assertEqual(compiler.model_name, "Qwen3.8-27B")
+            self.assertEqual(compiler.tier, ModelTier.qwen3)
+
+            # Test des autres tiers sur hôte distant
+            compiler_fast = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.fast)
+            self.assertEqual(compiler_fast.model_name, "Qwen2.5-Coder-7B-Instruct")
+
+            compiler_max = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.max)
+            self.assertEqual(compiler_max.model_name, "Qwen3-30B-A3B")
+
+            # Override explicite par argument ou variable d'environnement
+            compiler_custom = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="custom-model-40b")
+            self.assertEqual(compiler_custom.model_name, "custom-model-40b")
 
     def test_init_local_lm_studio_without_ssh(self):
         compiler = LMStudioCardCompiler(

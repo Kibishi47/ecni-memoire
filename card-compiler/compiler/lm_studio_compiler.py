@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from compiler import load_env_file
+from compiler.llm_engine import ModelTier
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import (
     CompilationMetadata,
@@ -41,6 +42,16 @@ def find_available_port(start_port: int = 12345, max_attempts: int = 50) -> int:
     return start_port
 
 
+# Modèle puissant configuré par défaut en mode normal pour la machine distante (GPU dédié)
+DEFAULT_REMOTE_NORMAL_MODEL = "Qwen3.8-27B"
+
+LM_STUDIO_TIER_MODELS: Dict[ModelTier, str] = {
+    ModelTier.qwen3: "Qwen3.8-27B",
+    ModelTier.max: "Qwen3-30B-A3B",
+    ModelTier.fast: "Qwen2.5-Coder-7B-Instruct",
+}
+
+
 class LMStudioCardCompiler:
     """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (local ou via SSH)."""
 
@@ -57,8 +68,11 @@ class LMStudioCardCompiler:
         cli_path: Optional[str] = None,
         auto_start: Optional[bool] = None,
         timeout_seconds: float = 180.0,
+        tier: ModelTier = ModelTier.qwen3,
     ) -> None:
         load_env_file()
+
+        self.tier = tier
 
         # 1. Configuration SSH
         self.ssh_host = ssh_host or os.environ.get("SSH_HOST") or None
@@ -74,7 +88,17 @@ class LMStudioCardCompiler:
         env_tunnel = os.environ.get("LM_STUDIO_USE_TUNNEL", "true").lower() in {"1", "true", "yes"}
         self.use_tunnel = use_tunnel if use_tunnel is not None else (env_tunnel if self.ssh_host else False)
 
-        self.model_name = model_name or os.environ.get("LM_STUDIO_MODEL") or None
+        env_model = os.environ.get("LM_STUDIO_MODEL")
+        if model_name:
+            self.model_name = model_name
+        elif env_model:
+            self.model_name = env_model
+        elif self.ssh_host:
+            # Sur machine distante : modèle plus puissant en mode normal (Qwen3.8-27B)
+            self.model_name = LM_STUDIO_TIER_MODELS.get(self.tier, DEFAULT_REMOTE_NORMAL_MODEL)
+        else:
+            self.model_name = LM_STUDIO_TIER_MODELS.get(self.tier, DEFAULT_REMOTE_NORMAL_MODEL)
+
         self.cli_path = cli_path or os.environ.get("LM_STUDIO_CLI_PATH") or "lms"
         env_auto = os.environ.get("LM_STUDIO_AUTO_START", "true").lower() in {"1", "true", "yes"}
         self.auto_start = auto_start if auto_start is not None else env_auto
@@ -217,8 +241,44 @@ class LMStudioCardCompiler:
         # 3. Chargement du modèle si spécifié et absent de `lms ps`
         if self.model_name:
             code, ps_out, _ = self._run_ssh_command(f"{self.cli_path} ps")
-            if code == 0 and self.model_name.lower() not in ps_out.lower():
-                self._run_ssh_command(f"{self.cli_path} load {self.model_name} --gpu max")
+            model_already_loaded = False
+            if code == 0 and ps_out.strip():
+                low_ps = ps_out.lower()
+                target_keys = [self.model_name.lower()]
+                if "27b" in self.model_name.lower():
+                    target_keys.extend(["27b", "qwen3.8", "qwen3.8-27b", "qwen2.5-27b"])
+                if any(k in low_ps for k in target_keys):
+                    model_already_loaded = True
+
+            if not model_already_loaded:
+                # 1. Tentative de chargement direct avec offload GPU maximal
+                load_code, _, _ = self._run_ssh_command(f"{self.cli_path} load {self.model_name} --gpu max")
+                if load_code != 0:
+                    # 2. Si le nom exact échoue, inspection des modèles téléchargés via `lms ls`
+                    ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
+                    if ls_code == 0:
+                        candidates: List[str] = []
+                        for line in ls_out.splitlines():
+                            line_clean = line.strip()
+                            if not line_clean or line_clean.startswith("─") or "NAME" in line_clean:
+                                continue
+                            parts = line_clean.split()
+                            if parts:
+                                cand_name = parts[0]
+                                if (
+                                    "27b" in cand_name.lower()
+                                    or "qwen3.8" in cand_name.lower()
+                                    or "qwen" in cand_name.lower()
+                                ):
+                                    candidates.append(cand_name)
+                        if candidates:
+                            best_cand = candidates[0]
+                            for c in candidates:
+                                if "27b" in c.lower() or "qwen3.8" in c.lower():
+                                    best_cand = c
+                                    break
+                            self._run_ssh_command(f"{self.cli_path} load {best_cand} --gpu max")
+                            self.model_name = best_cand
                 time.sleep(2.0)
 
     def _ensure_local_lm_studio(self) -> None:
@@ -260,8 +320,20 @@ class LMStudioCardCompiler:
                 models_list = data.get("data", [])
                 if models_list and isinstance(models_list, list):
                     active_ids = [m.get("id") for m in models_list if isinstance(m, dict) and m.get("id")]
-                    if not self.model_name and active_ids:
-                        self.model_name = active_ids[0]
+                    if active_ids:
+                        matched = None
+                        if self.model_name:
+                            target_l = self.model_name.lower()
+                            for act_id in active_ids:
+                                act_l = act_id.lower()
+                                if (
+                                    target_l in act_l
+                                    or ("27b" in target_l and "27b" in act_l)
+                                    or ("qwen3.8" in target_l and "qwen3.8" in act_l)
+                                ):
+                                    matched = act_id
+                                    break
+                        self.model_name = matched or self.model_name or active_ids[0]
         except Exception as exc:
             self.close()
             target_desc = f"{self.ssh_target} (via tunnel {self.api_base_url})" if self.ssh_host else self.api_base_url
