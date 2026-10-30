@@ -1,0 +1,1500 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAtIso": "2026-10-30T14:00:00+00:00",
+  "totalCards": 11,
+  "cards": {
+    "sv04-125": {
+      "cardId": "sv04-125",
+      "identity": {
+        "cardId": "sv04-125",
+        "nameFr": "Super Bonbon",
+        "nameEn": "Rare Candy",
+        "setId": "sv01",
+        "setName": "Écarlate et Violet",
+        "localId": "191",
+        "category": "TRAINER",
+        "subCategory": "ITEM",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv01/191",
+        "rawRulesText": [
+          "[Effet FR] Choisissez l'un de vos Pokémon de base en jeu. Si vous avez dans votre main une carte de Niveau 2 qui évolue de ce Pokémon, placez cette carte sur le Pokémon de base pour le faire évoluer. Vous ne pouvez pas utiliser cette carte pendant votre premier tour ni sur un Pokémon de base qui a été joué pendant ce tour.",
+          "[Effect EN] Choose 1 of your Basic Pokémon in play. If you have a Stage 2 card in your hand that evolves from that Pokémon, put that card onto the Basic Pokémon to evolve it."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "ITEM",
+      "playableActions": [
+        {
+          "actionId": "play_rare_candy",
+          "label": "Super Bonbon",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_CARD",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": false,
+          "preconditions": [
+            {
+              "type": "BASIC_IN_PLAY_PREVIOUS_TURN",
+              "zone": "IN_PLAY_ALL",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "BASIC",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            },
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "HAND",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "STAGE_2",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "EVOLVE_SKIP_STAGE1",
+              "sourceZone": "HAND",
+              "targetZone": "IN_PLAY_ALL",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "STAGE_2",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "EVOLUTION_ACCELERATOR",
+        "intrinsicBaseScore": 92,
+        "turnPhaseWeights": {
+          "turn1": 0.0,
+          "turn2": 1.9,
+          "turn3": 1.6,
+          "turn4Plus": 0.9
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "STAGE_2",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 1,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 15.0
+          },
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 2,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 10.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NO_STAGE2_LEFT_IN_DECK_OR_HAND",
+            "zonesToCheck": ["HAND", "DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "STAGE_2",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          },
+          {
+            "reason": "NO_BASE_POKEMON_LINE_LEFT",
+            "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 95,
+        "holdForNextTurnBonus": 42
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.84,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv05-144": {
+      "cardId": "sv05-144",
+      "identity": {
+        "cardId": "sv05-144",
+        "nameFr": "Poffin Copain-Copain",
+        "nameEn": "Buddy-Buddy Poffin",
+        "setId": "sv05",
+        "setName": "Forces Temporelles",
+        "localId": "144",
+        "category": "TRAINER",
+        "subCategory": "ITEM",
+        "regulationMark": "H",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv05/144",
+        "rawRulesText": [
+          "[Effet FR] Cherchez dans votre deck jusqu'à 2 Pokémon de base ayant 70 PV maximum et placez-les sur votre Banc. Mélangez ensuite votre deck.",
+          "[Effect EN] Search your deck for up to 2 Basic Pokémon with 70 HP or less and put them onto your Bench. Then, shuffle your deck."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "ITEM",
+      "playableActions": [
+        {
+          "actionId": "play_buddy_buddy_poffin",
+          "label": "Poffin Copain-Copain",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_CARD",
+          "canUseTurn1GoingFirst": true,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "BENCH_HAS_EMPTY_SLOTS",
+              "zone": "BENCH",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "BASIC",
+                "maxHp": 70,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SEARCH_DECK_TO_BENCH",
+              "sourceZone": "DECK",
+              "targetZone": "BENCH",
+              "count": 2,
+              "upTo": true,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "BASIC",
+                "maxHp": 70,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "BENCH_DEPLOYER",
+        "intrinsicBaseScore": 94,
+        "turnPhaseWeights": {
+          "turn1": 2.0,
+          "turn2": 1.4,
+          "turn3": 0.8,
+          "turn4Plus": 0.4
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": 70,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 4,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 12.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "BENCH_ALREADY_FULL",
+            "zonesToCheck": ["BENCH"],
+            "targetFilter": null
+          },
+          {
+            "reason": "NO_VALID_TARGET_IN_DECK",
+            "zonesToCheck": ["DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": 70,
+              "energyType": null,
+              "specificCardName": null
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 92,
+        "holdForNextTurnBonus": 15
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.72,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv01-196": {
+      "cardId": "sv01-196",
+      "identity": {
+        "cardId": "sv01-196",
+        "nameFr": "Hyper Ball",
+        "nameEn": "Ultra Ball",
+        "setId": "sv01",
+        "setName": "Écarlate et Violet",
+        "localId": "196",
+        "category": "TRAINER",
+        "subCategory": "ITEM",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv01/196",
+        "rawRulesText": [
+          "[Effet FR] Vous ne pouvez utiliser cette carte que si vous défaussez 2 autres cartes de votre main. Cherchez dans votre deck un Pokémon, montrez-le, puis ajoutez-le à votre main. Mélangez ensuite votre deck.",
+          "[Effect EN] You can use this card only if you discard 2 other cards from your hand. Search your deck for a Pokémon, reveal it, and put it into your hand. Then, shuffle your deck."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "ITEM",
+      "playableActions": [
+        {
+          "actionId": "play_ultra_ball",
+          "label": "Hyper Ball",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_CARD",
+          "canUseTurn1GoingFirst": true,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "HAND_MIN_OTHER_CARDS",
+              "zone": "HAND",
+              "minCount": 2,
+              "targetFilter": null
+            },
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [
+            {
+              "type": "DISCARD_FROM_HAND",
+              "count": 2,
+              "targetFilter": null
+            }
+          ],
+          "effects": [
+            {
+              "primitive": "SEARCH_DECK_TO_HAND",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 1,
+              "upTo": true,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "CONSISTENCY_TUTOR",
+        "intrinsicBaseScore": 93,
+        "turnPhaseWeights": {
+          "turn1": 1.6,
+          "turn2": 1.8,
+          "turn3": 1.5,
+          "turn4Plus": 1.2
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": null,
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 6,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 5.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NO_VALID_TARGET_IN_DECK",
+            "zonesToCheck": ["DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": null,
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 88,
+        "holdForNextTurnBonus": 28
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.65,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv01-181": {
+      "cardId": "sv01-181",
+      "identity": {
+        "cardId": "sv01-181",
+        "nameFr": "Faiblo Ball",
+        "nameEn": "Nest Ball",
+        "setId": "sv01",
+        "setName": "Écarlate et Violet",
+        "localId": "181",
+        "category": "TRAINER",
+        "subCategory": "ITEM",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv01/181",
+        "rawRulesText": [
+          "[Effet FR] Cherchez dans votre deck un Pokémon de base et placez-le sur votre Banc. Mélangez ensuite votre deck.",
+          "[Effect EN] Search your deck for a Basic Pokémon and put it onto your Bench. Then, shuffle your deck."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "ITEM",
+      "playableActions": [
+        {
+          "actionId": "play_nest_ball",
+          "label": "Faiblo Ball",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_CARD",
+          "canUseTurn1GoingFirst": true,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "BENCH_HAS_EMPTY_SLOTS",
+              "zone": "BENCH",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "BASIC",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SEARCH_DECK_TO_BENCH",
+              "sourceZone": "DECK",
+              "targetZone": "BENCH",
+              "count": 1,
+              "upTo": true,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": "BASIC",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "BENCH_DEPLOYER",
+        "intrinsicBaseScore": 86,
+        "turnPhaseWeights": {
+          "turn1": 2.0,
+          "turn2": 1.4,
+          "turn3": 0.8,
+          "turn4Plus": 0.4
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 4,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 8.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "BENCH_ALREADY_FULL",
+            "zonesToCheck": ["BENCH"],
+            "targetFilter": null
+          },
+          {
+            "reason": "NO_VALID_TARGET_IN_DECK",
+            "zonesToCheck": ["DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 85,
+        "holdForNextTurnBonus": 15
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.58,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv03-125": {
+      "cardId": "sv03-125",
+      "identity": {
+        "cardId": "sv03-125",
+        "nameFr": "Dracaufeu-ex",
+        "nameEn": "Charizard ex",
+        "setId": "sv03",
+        "setName": "Flammes Obsidiennes",
+        "localId": "125",
+        "category": "POKEMON",
+        "subCategory": "STAGE_2",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Double Rare",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv03/125",
+        "rawRulesText": [
+          "[Talent FR: Règne Infernal] Lorsque vous jouez ce Pokémon de votre main pour faire évoluer l'un de vos Pokémon pendant votre tour, vous pouvez chercher dans votre deck jusqu'à 3 cartes Énergie {R} de base et les attacher à vos Pokémon comme il vous plaît. Mélangez ensuite votre deck.",
+          "[Ability EN: Infernal Reign] When you play this Pokémon from your hand to evolve 1 of your Pokémon during your turn, you may search your deck for up to 3 Basic {R} Energy cards and attach them to your Pokémon in any way you like. Then, shuffle your deck.",
+          "[Attaque FR: Combustion Obscure | Coût: Feu,Feu (180+ dégâts)] Cette attaque inflige 30 dégâts supplémentaires pour chaque carte Récompense que votre adversaire a récupérée.",
+          "[Attack EN: Burning Darkness | Cost: Fire,Fire (180+ dmg)] This attack does 30 more damage for each Prize card your opponent has taken."
+        ]
+      },
+      "pokemonStats": {
+        "hp": 330,
+        "types": ["Obscurité"],
+        "stage": "Niveau 2",
+        "evolvesFrom": "Reptincel",
+        "rootBasicName": "Salamèche",
+        "evolutionChain": ["Salamèche", "Reptincel", "Dracaufeu-ex"],
+        "retreatCost": 2,
+        "weaknesses": ["Plante"],
+        "resistances": [],
+        "prizeCardsGiven": 2,
+        "isRuleBox": true
+      },
+      "category": "POKEMON",
+      "subCategory": "STAGE_2",
+      "playableActions": [
+        {
+          "actionId": "ability_infernal_reign",
+          "label": "Règne Infernal",
+          "sourceType": "ABILITY_ON_EVOLVE",
+          "timing": "ON_EVOLVE_TRIGGER",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": false,
+          "preconditions": [
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": "BASIC_ENERGY",
+                "maxHp": null,
+                "energyType": "Feu",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SEARCH_AND_ATTACH_ENERGY",
+              "sourceZone": "DECK",
+              "targetZone": "IN_PLAY_ALL",
+              "count": 3,
+              "upTo": true,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": "BASIC_ENERGY",
+                "maxHp": null,
+                "energyType": "Feu",
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        },
+        {
+          "actionId": "attack_burning_darkness",
+          "label": "Combustion Obscure",
+          "sourceType": "ATTACK",
+          "timing": "END_OF_TURN_ATTACK",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": false,
+          "preconditions": [
+            {
+              "type": "SELF_IS_ACTIVE",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "SELF_HAS_ENERGY_COST",
+              "zone": "ACTIVE",
+              "minCount": 2,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": "Feu",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "DEAL_DAMAGE_ACTIVE",
+              "sourceZone": "ACTIVE",
+              "targetZone": "ACTIVE",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": 180,
+              "damageScalingPerOpponentPrizeTaken": 30
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "MAIN_ATTACKER",
+        "intrinsicBaseScore": 97,
+        "turnPhaseWeights": {
+          "turn1": 0.0,
+          "turn2": 1.8,
+          "turn3": 2.0,
+          "turn4Plus": 1.9
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Salamèche"
+            },
+            "minCountInDeck": 2,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 20.0
+          },
+          {
+            "requiredFilter": {
+              "category": "TRAINER",
+              "subCategory": "ITEM",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Super Bonbon"
+            },
+            "minCountInDeck": 2,
+            "ifMissingSetValueToZero": false,
+            "bonusWeightPerCopy": 15.0
+          },
+          {
+            "requiredFilter": {
+              "category": "ENERGY",
+              "subCategory": "BASIC_ENERGY",
+              "maxHp": null,
+              "energyType": "Feu",
+              "specificCardName": null
+            },
+            "minCountInDeck": 5,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 8.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NO_BASE_POKEMON_LINE_LEFT",
+            "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Salamèche"
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 82,
+        "holdForNextTurnBonus": 45
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 2.15,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv03-164": {
+      "cardId": "sv03-164",
+      "identity": {
+        "cardId": "sv03-164",
+        "nameFr": "Roucarnage-ex",
+        "nameEn": "Pidgeot ex",
+        "setId": "sv03",
+        "setName": "Flammes Obsidiennes",
+        "localId": "164",
+        "category": "POKEMON",
+        "subCategory": "STAGE_2",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Double Rare",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv03/164",
+        "rawRulesText": [
+          "[Talent FR: Recherche Rapide] Une fois pendant votre tour, vous pouvez chercher dans votre deck une carte et l'ajouter à votre main. Mélangez ensuite votre deck. Vous ne pouvez utiliser qu'un talent Recherche Rapide par tour.",
+          "[Ability EN: Quick Search] Once during your turn, you may search your deck for a card and put it into your hand. Then, shuffle your deck.",
+          "[Attaque FR: Rafale Tornade | Coût: Incolore,Incolore (120 dégâts)] Vous pouvez défausser un Stade en jeu."
+        ]
+      },
+      "pokemonStats": {
+        "hp": 280,
+        "types": ["Incolore"],
+        "stage": "Niveau 2",
+        "evolvesFrom": "Roucoups",
+        "rootBasicName": "Roucool",
+        "evolutionChain": ["Roucool", "Roucoups", "Roucarnage-ex"],
+        "retreatCost": 0,
+        "weaknesses": ["Électrique"],
+        "resistances": ["Combat"],
+        "prizeCardsGiven": 2,
+        "isRuleBox": true
+      },
+      "category": "POKEMON",
+      "subCategory": "STAGE_2",
+      "playableActions": [
+        {
+          "actionId": "ability_quick_search",
+          "label": "Recherche Rapide",
+          "sourceType": "ABILITY_ACTIVATED",
+          "timing": "ONCE_PER_TURN_ABILITY",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": false,
+          "preconditions": [
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": null
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SEARCH_DECK_TO_HAND",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        },
+        {
+          "actionId": "attack_blustery_wind",
+          "label": "Rafale Tornade",
+          "sourceType": "ATTACK",
+          "timing": "END_OF_TURN_ATTACK",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": false,
+          "preconditions": [
+            {
+              "type": "SELF_IS_ACTIVE",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "SELF_HAS_ENERGY_COST",
+              "zone": "ACTIVE",
+              "minCount": 2,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": "Incolore",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "DEAL_DAMAGE_ACTIVE",
+              "sourceZone": "ACTIVE",
+              "targetZone": "ACTIVE",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": 120,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "TUTOR_ENGINE_POKEMON",
+        "intrinsicBaseScore": 96,
+        "turnPhaseWeights": {
+          "turn1": 0.0,
+          "turn2": 1.8,
+          "turn3": 2.0,
+          "turn4Plus": 1.9
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Roucool"
+            },
+            "minCountInDeck": 2,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 20.0
+          },
+          {
+            "requiredFilter": {
+              "category": "TRAINER",
+              "subCategory": "ITEM",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Super Bonbon"
+            },
+            "minCountInDeck": 2,
+            "ifMissingSetValueToZero": false,
+            "bonusWeightPerCopy": 15.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NO_BASE_POKEMON_LINE_LEFT",
+            "zonesToCheck": ["BENCH", "ACTIVE", "HAND", "DECK"],
+            "targetFilter": {
+              "category": "POKEMON",
+              "subCategory": "BASIC",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": "Roucool"
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 80,
+        "holdForNextTurnBonus": 44
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.95,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv02-185": {
+      "cardId": "sv02-185",
+      "identity": {
+        "cardId": "sv02-185",
+        "nameFr": "Mashynn",
+        "nameEn": "Iono",
+        "setId": "sv02",
+        "setName": "Évolutions à Paldea",
+        "localId": "185",
+        "category": "TRAINER",
+        "subCategory": "SUPPORTER",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv02/185",
+        "rawRulesText": [
+          "[Effet FR] Chaque joueur mélange sa main et la place sous son deck. Ensuite, chaque joueur pioche une carte pour chacune de ses cartes Récompense restantes.",
+          "[Effect EN] Each player shuffles their hand and puts it on the bottom of their deck. Then, each player draws a card for each of their remaining Prize cards."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "SUPPORTER",
+      "playableActions": [
+        {
+          "actionId": "play_iono",
+          "label": "Mashynn",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_TURN_SUPPORTER",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SHUFFLE_HAND_BOTTOM_DRAW_PRIZES",
+              "sourceZone": "HAND",
+              "targetZone": "DECK",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "HAND_DISRUPTION",
+        "intrinsicBaseScore": 91,
+        "turnPhaseWeights": {
+          "turn1": 0.8,
+          "turn2": 1.5,
+          "turn3": 1.7,
+          "turn4Plus": 1.9
+        },
+        "decklistSynergyRequirements": [],
+        "inGameDeadCardConditions": [],
+        "discardPriorityWhenDead": 25,
+        "holdForNextTurnBonus": 35
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.48,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv01-166": {
+      "cardId": "sv01-166",
+      "identity": {
+        "cardId": "sv01-166",
+        "nameFr": "Pepper",
+        "nameEn": "Arven",
+        "setId": "sv01",
+        "setName": "Écarlate et Violet",
+        "localId": "166",
+        "category": "TRAINER",
+        "subCategory": "SUPPORTER",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv01/166",
+        "rawRulesText": [
+          "[Effet FR] Cherchez dans votre deck une carte Objet et une carte Outil Pokémon, montrez-les, puis ajoutez-les à votre main. Mélangez ensuite votre deck.",
+          "[Effect EN] Search your deck for an Item card and a Pokémon Tool card, reveal them, and put them into your hand. Then, shuffle your deck."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "SUPPORTER",
+      "playableActions": [
+        {
+          "actionId": "play_arven",
+          "label": "Pepper",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_TURN_SUPPORTER",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "ZONE_HAS_MATCHING_CARD",
+              "zone": "DECK",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "TRAINER",
+                "subCategory": "ITEM",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "SEARCH_DECK_TO_HAND",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 1,
+              "upTo": true,
+              "targetFilter": {
+                "category": "TRAINER",
+                "subCategory": "ITEM",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            },
+            {
+              "primitive": "SEARCH_DECK_TO_HAND",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 1,
+              "upTo": true,
+              "targetFilter": {
+                "category": "TRAINER",
+                "subCategory": "TOOL",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "CONSISTENCY_TUTOR",
+        "intrinsicBaseScore": 88,
+        "turnPhaseWeights": {
+          "turn1": 1.2,
+          "turn2": 1.9,
+          "turn3": 1.5,
+          "turn4Plus": 1.0
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "TRAINER",
+              "subCategory": "ITEM",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 4,
+            "ifMissingSetValueToZero": false,
+            "bonusWeightPerCopy": 8.0
+          },
+          {
+            "requiredFilter": {
+              "category": "TRAINER",
+              "subCategory": "TOOL",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 1,
+            "ifMissingSetValueToZero": false,
+            "bonusWeightPerCopy": 12.0
+          }
+        ],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NO_VALID_TARGET_IN_DECK",
+            "zonesToCheck": ["DECK"],
+            "targetFilter": {
+              "category": "TRAINER",
+              "subCategory": "ITEM",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          },
+          {
+            "reason": "NO_VALID_TARGET_IN_DECK",
+            "zonesToCheck": ["DECK"],
+            "targetFilter": {
+              "category": "TRAINER",
+              "subCategory": "TOOL",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            }
+          }
+        ],
+        "discardPriorityWhenDead": 90,
+        "holdForNextTurnBonus": 36
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.79,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv04-160": {
+      "cardId": "sv04-160",
+      "identity": {
+        "cardId": "sv04-160",
+        "nameFr": "Attrape-Riposte",
+        "nameEn": "Counter Catcher",
+        "setId": "sv04",
+        "setName": "Faille Paradoxe",
+        "localId": "160",
+        "category": "TRAINER",
+        "subCategory": "ITEM",
+        "regulationMark": "G",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Peu Commune",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv04/160",
+        "rawRulesText": [
+          "[Effet FR] Vous ne pouvez utiliser cette carte que s'il vous reste plus de cartes Récompense qu'à votre adversaire. Envoyez l'un des Pokémon de Banc de votre adversaire sur le Poste Actif.",
+          "[Effect EN] You can use this card only if you have more Prize cards remaining than your opponent. Switch in 1 of your opponent's Benched Pokémon to the Active Spot."
+        ]
+      },
+      "pokemonStats": null,
+      "category": "TRAINER",
+      "subCategory": "ITEM",
+      "playableActions": [
+        {
+          "actionId": "play_counter_catcher",
+          "label": "Attrape-Riposte",
+          "sourceType": "TRAINER_PLAY",
+          "timing": "ONCE_PER_CARD",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "PLAYER_BEHIND_ON_PRIZES",
+              "zone": "PRIZES",
+              "minCount": 1,
+              "targetFilter": null
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "GUST_OPPONENT_BENCH",
+              "sourceZone": "BENCH",
+              "targetZone": "ACTIVE",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              },
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "GUST_BOSS_EFFECT",
+        "intrinsicBaseScore": 85,
+        "turnPhaseWeights": {
+          "turn1": 0.2,
+          "turn2": 1.6,
+          "turn3": 1.8,
+          "turn4Plus": 1.7
+        },
+        "decklistSynergyRequirements": [],
+        "inGameDeadCardConditions": [
+          {
+            "reason": "NOT_BEHIND_ON_PRIZES",
+            "zonesToCheck": ["PRIZES"],
+            "targetFilter": null
+          }
+        ],
+        "discardPriorityWhenDead": 75,
+        "holdForNextTurnBonus": 38
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.61,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv05-123": {
+      "cardId": "sv05-123",
+      "identity": {
+        "cardId": "sv05-123",
+        "nameFr": "Ire-Foudre-ex",
+        "nameEn": "Raging Bolt ex",
+        "setId": "sv05",
+        "setName": "Forces Temporelles",
+        "localId": "123",
+        "category": "POKEMON",
+        "subCategory": "BASIC",
+        "regulationMark": "H",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Double Rare",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv05/123",
+        "rawRulesText": [
+          "[Attaque FR: Explosion Hurlante | Coût: Incolore] Défaussez votre main, puis piochez 6 cartes.",
+          "[Attack EN: Burst Roar | Cost: Colorless] Discard your hand and draw 6 cards.",
+          "[Attaque FR: Tempête Éclats | Coût: Électrique,Combat (70× dégâts)] Vous pouvez défausser autant d'Énergies de base que vous le voulez de vos Pokémon. Cette attaque inflige 70 dégâts pour chaque carte défaussée de cette façon.",
+          "[Attack EN: Bellowing Thunder | Cost: Lightning,Fighting (70× dmg)] You may discard any amount of Basic Energy from your Pokémon. This attack does 70 damage for each card you discarded in this way."
+        ]
+      },
+      "pokemonStats": {
+        "hp": 240,
+        "types": ["Dragon"],
+        "stage": "De base",
+        "evolvesFrom": null,
+        "rootBasicName": "Ire-Foudre-ex",
+        "evolutionChain": ["Ire-Foudre-ex"],
+        "retreatCost": 3,
+        "weaknesses": [],
+        "resistances": [],
+        "prizeCardsGiven": 2,
+        "isRuleBox": true
+      },
+      "category": "POKEMON",
+      "subCategory": "BASIC",
+      "playableActions": [
+        {
+          "actionId": "attack_burst_roar",
+          "label": "Explosion Hurlante",
+          "sourceType": "ATTACK",
+          "timing": "END_OF_TURN_ATTACK",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "SELF_IS_ACTIVE",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "SELF_HAS_ENERGY_COST",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": "Incolore",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "DISCARD_HAND_AND_DRAW",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 6,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        },
+        {
+          "actionId": "attack_bellowing_thunder",
+          "label": "Tempête Éclats",
+          "sourceType": "ATTACK",
+          "timing": "END_OF_TURN_ATTACK",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "SELF_IS_ACTIVE",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "SELF_HAS_ENERGY_COST",
+              "zone": "ACTIVE",
+              "minCount": 2,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": "Électrique",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [
+            {
+              "type": "DISCARD_ENERGY_FROM_PLAY",
+              "count": 1,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": "BASIC_ENERGY",
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "effects": [
+            {
+              "primitive": "DEAL_DAMAGE_ACTIVE",
+              "sourceZone": "ACTIVE",
+              "targetZone": "ACTIVE",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": 70,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "MAIN_ATTACKER",
+        "intrinsicBaseScore": 95,
+        "turnPhaseWeights": {
+          "turn1": 1.7,
+          "turn2": 1.9,
+          "turn3": 2.0,
+          "turn4Plus": 1.9
+        },
+        "decklistSynergyRequirements": [
+          {
+            "requiredFilter": {
+              "category": "ENERGY",
+              "subCategory": "BASIC_ENERGY",
+              "maxHp": null,
+              "energyType": null,
+              "specificCardName": null
+            },
+            "minCountInDeck": 8,
+            "ifMissingSetValueToZero": true,
+            "bonusWeightPerCopy": 6.0
+          }
+        ],
+        "inGameDeadCardConditions": [],
+        "discardPriorityWhenDead": 30,
+        "holdForNextTurnBonus": 32
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 2.04,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    },
+    "sv06.5-038": {
+      "cardId": "sv06.5-038",
+      "identity": {
+        "cardId": "sv06.5-038",
+        "nameFr": "Favianos-ex",
+        "nameEn": "Fezandipiti ex",
+        "setId": "sv06.5",
+        "setName": "Fable Nébuleuse",
+        "localId": "038",
+        "category": "POKEMON",
+        "subCategory": "BASIC",
+        "regulationMark": "H",
+        "legalStandard": true,
+        "legalExpanded": true,
+        "rarity": "Double Rare",
+        "imageUrl": "https://assets.tcgdex.net/fr/sv/sv06.5/038",
+        "rawRulesText": [
+          "[Talent FR: Retour Renversant] Une fois pendant votre tour, si l'un de vos Pokémon a été mis K.O. pendant le dernier tour de votre adversaire, vous pouvez piocher 3 cartes. Vous ne pouvez pas utiliser plus d'un talent Retour Renversant par tour.",
+          "[Ability EN: Flip the Script] Once during your turn, if any of your Pokémon were Knocked Out during your opponent's last turn, you may draw 3 cards.",
+          "[Attaque FR: Flèche Cruelle | Coût: Incolore,Incolore,Incolore] Cette attaque inflige 100 dégâts à l'un des Pokémon de votre adversaire."
+        ]
+      },
+      "pokemonStats": {
+        "hp": 210,
+        "types": ["Obscurité"],
+        "stage": "De base",
+        "evolvesFrom": null,
+        "rootBasicName": "Favianos-ex",
+        "evolutionChain": ["Favianos-ex"],
+        "retreatCost": 1,
+        "weaknesses": ["Combat"],
+        "resistances": [],
+        "prizeCardsGiven": 2,
+        "isRuleBox": true
+      },
+      "category": "POKEMON",
+      "subCategory": "BASIC",
+      "playableActions": [
+        {
+          "actionId": "ability_flip_the_script",
+          "label": "Retour Renversant",
+          "sourceType": "ABILITY_ACTIVATED",
+          "timing": "ONCE_PER_TURN_ABILITY",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "KO_SUFFERED_LAST_TURN",
+              "zone": "DISCARD",
+              "minCount": 1,
+              "targetFilter": {
+                "category": "POKEMON",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": null,
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "DRAW_CARDS",
+              "sourceZone": "DECK",
+              "targetZone": "HAND",
+              "count": 3,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": null,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        },
+        {
+          "actionId": "attack_cruel_arrow",
+          "label": "Flèche Cruelle",
+          "sourceType": "ATTACK",
+          "timing": "END_OF_TURN_ATTACK",
+          "canUseTurn1GoingFirst": false,
+          "canUseTurn1GoingSecond": true,
+          "preconditions": [
+            {
+              "type": "SELF_IS_ACTIVE",
+              "zone": "ACTIVE",
+              "minCount": 1,
+              "targetFilter": null
+            },
+            {
+              "type": "SELF_HAS_ENERGY_COST",
+              "zone": "ACTIVE",
+              "minCount": 3,
+              "targetFilter": {
+                "category": "ENERGY",
+                "subCategory": null,
+                "maxHp": null,
+                "energyType": "Incolore",
+                "specificCardName": null
+              }
+            }
+          ],
+          "costs": [],
+          "effects": [
+            {
+              "primitive": "DEAL_DAMAGE_ACTIVE",
+              "sourceZone": "ACTIVE",
+              "targetZone": "ACTIVE",
+              "count": 1,
+              "upTo": false,
+              "targetFilter": null,
+              "baseDamage": 100,
+              "damageScalingPerOpponentPrizeTaken": null
+            }
+          ]
+        }
+      ],
+      "strategicEvaluator": {
+        "primaryRole": "DRAW_ENGINE_POKEMON",
+        "intrinsicBaseScore": 91,
+        "turnPhaseWeights": {
+          "turn1": 0.0,
+          "turn2": 1.6,
+          "turn3": 1.8,
+          "turn4Plus": 1.8
+        },
+        "decklistSynergyRequirements": [],
+        "inGameDeadCardConditions": [],
+        "discardPriorityWhenDead": 35,
+        "holdForNextTurnBonus": 30
+      },
+      "compilationMetadata": {
+        "modelRepoId": "Qwen/Qwen3-14B-GGUF",
+        "modelFilename": "Qwen3-14B-Q6_K.gguf",
+        "compilationTimeSeconds": 1.88,
+        "compiledAtIso": "2026-10-30T12:00:00+00:00"
+      }
+    }
+  }
+}
