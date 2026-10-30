@@ -30,7 +30,7 @@ import {
 import { selectBestTurnBranch } from './evaluator'
 import { deriveGameSeed } from './prng'
 
-export const MAX_TRACED_GAMES = 50
+export const MAX_TRACED_GAMES = 20
 
 export interface OpponentDeckDescriptor {
   id: string
@@ -276,7 +276,7 @@ export function runSimulationShard(
     const globalGameIdx = input.startGameIndex + i
     const oppDeck = input.opponentDecks[globalGameIdx % oppCount]!
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
-    const shouldTrace = globalGameIdx < MAX_TRACED_GAMES
+    const shouldTrace = Boolean(input.config.debugMode) && globalGameIdx < MAX_TRACED_GAMES
 
     try {
       const outcome = playFullGame(

@@ -155,9 +155,10 @@ export function clonePlayerBoard(b: PlayerBoardState): PlayerBoardState {
 }
 
 /**
- * Clone profond ultra-rapide d'un `MatchState` complet pour l'exploration d'arbre sans effets de bord.
+ * Clone superficiel ultra-rapide d'un `MatchState` (`fastCloneState`).
+ * Ne clone pas les modèles de cartes immuables et n'alloue l'historique d'actions que si demandé.
  */
-export function cloneMatchState(state: MatchState): MatchState {
+export function fastCloneState(state: MatchState, includeActionLog = false): MatchState {
   return {
     player: clonePlayerBoard(state.player),
     opponent: clonePlayerBoard(state.opponent),
@@ -169,8 +170,15 @@ export function cloneMatchState(state: MatchState): MatchState {
     winReason: state.winReason,
     rngState: state.rngState,
     nextInstanceSeq: state.nextInstanceSeq,
-    lastActionLog: state.lastActionLog.slice(),
+    lastActionLog: includeActionLog ? state.lastActionLog.slice() : [],
   }
+}
+
+/**
+ * Clone profond de compatibilité d'un `MatchState`.
+ */
+export function cloneMatchState(state: MatchState): MatchState {
+  return fastCloneState(state, true)
 }
 
 export function getActiveBoard(state: MatchState): PlayerBoardState {
@@ -1336,8 +1344,12 @@ function discardCardsFromHandForCost(
 /**
  * Exécute un coup atomique sur une copie de `state` et retourne le nouvel état (`applyAction`).
  */
-export function applyAction(inputState: MatchState, action: GameAction): MatchState {
-  const state = cloneMatchState(inputState)
+export function applyAction(
+  inputState: MatchState,
+  action: GameAction,
+  includeActionLog = false,
+): MatchState {
+  const state = fastCloneState(inputState, includeActionLog)
   if (state.winner !== null) return state
 
   const activeBoard = getActiveBoard(state)
