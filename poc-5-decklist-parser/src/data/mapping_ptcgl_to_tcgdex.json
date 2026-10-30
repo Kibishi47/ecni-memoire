@@ -1,0 +1,2175 @@
+{
+  "generatedAt": "2026-10-30T10:14:42.952Z",
+  "version": "1.0.0",
+  "source": "seed-verified + osamc/pokemon-tcg-deck-parser aliases",
+  "totalSets": 34,
+  "byPtcglCode": {
+    "151": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SVI": {
+      "setId": "sv01",
+      "ptcglCode": "SVI",
+      "aliases": [
+        "SV1",
+        "SV01"
+      ],
+      "nameFr": "Écarlate et Violet",
+      "nameEn": "Scarlet & Violet",
+      "serie": "sv",
+      "officialCount": 198,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV1": {
+      "setId": "sv01",
+      "ptcglCode": "SVI",
+      "aliases": [
+        "SV1",
+        "SV01"
+      ],
+      "nameFr": "Écarlate et Violet",
+      "nameEn": "Scarlet & Violet",
+      "serie": "sv",
+      "officialCount": 198,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV01": {
+      "setId": "sv01",
+      "ptcglCode": "SVI",
+      "aliases": [
+        "SV1",
+        "SV01"
+      ],
+      "nameFr": "Écarlate et Violet",
+      "nameEn": "Scarlet & Violet",
+      "serie": "sv",
+      "officialCount": 198,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PAL": {
+      "setId": "sv02",
+      "ptcglCode": "PAL",
+      "aliases": [
+        "SV2",
+        "SV02"
+      ],
+      "nameFr": "Évolutions à Paldea",
+      "nameEn": "Paldea Evolved",
+      "serie": "sv",
+      "officialCount": 193,
+      "releaseDate": "2023-06-09",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV2": {
+      "setId": "sv02",
+      "ptcglCode": "PAL",
+      "aliases": [
+        "SV2",
+        "SV02"
+      ],
+      "nameFr": "Évolutions à Paldea",
+      "nameEn": "Paldea Evolved",
+      "serie": "sv",
+      "officialCount": 193,
+      "releaseDate": "2023-06-09",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV02": {
+      "setId": "sv02",
+      "ptcglCode": "PAL",
+      "aliases": [
+        "SV2",
+        "SV02"
+      ],
+      "nameFr": "Évolutions à Paldea",
+      "nameEn": "Paldea Evolved",
+      "serie": "sv",
+      "officialCount": 193,
+      "releaseDate": "2023-06-09",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "OBF": {
+      "setId": "sv03",
+      "ptcglCode": "OBF",
+      "aliases": [
+        "SV3",
+        "SV03"
+      ],
+      "nameFr": "Flammes Obsidiennes",
+      "nameEn": "Obsidian Flames",
+      "serie": "sv",
+      "officialCount": 197,
+      "releaseDate": "2023-08-11",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV3": {
+      "setId": "sv03",
+      "ptcglCode": "OBF",
+      "aliases": [
+        "SV3",
+        "SV03"
+      ],
+      "nameFr": "Flammes Obsidiennes",
+      "nameEn": "Obsidian Flames",
+      "serie": "sv",
+      "officialCount": 197,
+      "releaseDate": "2023-08-11",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV03": {
+      "setId": "sv03",
+      "ptcglCode": "OBF",
+      "aliases": [
+        "SV3",
+        "SV03"
+      ],
+      "nameFr": "Flammes Obsidiennes",
+      "nameEn": "Obsidian Flames",
+      "serie": "sv",
+      "officialCount": 197,
+      "releaseDate": "2023-08-11",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "MEW": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV3.5": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV03.5": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV3PT5": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PAR": {
+      "setId": "sv04",
+      "ptcglCode": "PAR",
+      "aliases": [
+        "SV4",
+        "SV04"
+      ],
+      "nameFr": "Faille Paradoxe",
+      "nameEn": "Paradox Rift",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2023-11-03",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV4": {
+      "setId": "sv04",
+      "ptcglCode": "PAR",
+      "aliases": [
+        "SV4",
+        "SV04"
+      ],
+      "nameFr": "Faille Paradoxe",
+      "nameEn": "Paradox Rift",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2023-11-03",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV04": {
+      "setId": "sv04",
+      "ptcglCode": "PAR",
+      "aliases": [
+        "SV4",
+        "SV04"
+      ],
+      "nameFr": "Faille Paradoxe",
+      "nameEn": "Paradox Rift",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2023-11-03",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PAF": {
+      "setId": "sv04.5",
+      "ptcglCode": "PAF",
+      "aliases": [
+        "SV4.5",
+        "SV04.5",
+        "SV4PT5"
+      ],
+      "nameFr": "Destinées de Paldea",
+      "nameEn": "Paldean Fates",
+      "serie": "sv",
+      "officialCount": 91,
+      "releaseDate": "2024-01-26",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV4.5": {
+      "setId": "sv04.5",
+      "ptcglCode": "PAF",
+      "aliases": [
+        "SV4.5",
+        "SV04.5",
+        "SV4PT5"
+      ],
+      "nameFr": "Destinées de Paldea",
+      "nameEn": "Paldean Fates",
+      "serie": "sv",
+      "officialCount": 91,
+      "releaseDate": "2024-01-26",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV04.5": {
+      "setId": "sv04.5",
+      "ptcglCode": "PAF",
+      "aliases": [
+        "SV4.5",
+        "SV04.5",
+        "SV4PT5"
+      ],
+      "nameFr": "Destinées de Paldea",
+      "nameEn": "Paldean Fates",
+      "serie": "sv",
+      "officialCount": 91,
+      "releaseDate": "2024-01-26",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV4PT5": {
+      "setId": "sv04.5",
+      "ptcglCode": "PAF",
+      "aliases": [
+        "SV4.5",
+        "SV04.5",
+        "SV4PT5"
+      ],
+      "nameFr": "Destinées de Paldea",
+      "nameEn": "Paldean Fates",
+      "serie": "sv",
+      "officialCount": 91,
+      "releaseDate": "2024-01-26",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "TEF": {
+      "setId": "sv05",
+      "ptcglCode": "TEF",
+      "aliases": [
+        "SV5",
+        "SV05"
+      ],
+      "nameFr": "Forces Temporelles",
+      "nameEn": "Temporal Forces",
+      "serie": "sv",
+      "officialCount": 162,
+      "releaseDate": "2024-03-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV5": {
+      "setId": "sv05",
+      "ptcglCode": "TEF",
+      "aliases": [
+        "SV5",
+        "SV05"
+      ],
+      "nameFr": "Forces Temporelles",
+      "nameEn": "Temporal Forces",
+      "serie": "sv",
+      "officialCount": 162,
+      "releaseDate": "2024-03-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV05": {
+      "setId": "sv05",
+      "ptcglCode": "TEF",
+      "aliases": [
+        "SV5",
+        "SV05"
+      ],
+      "nameFr": "Forces Temporelles",
+      "nameEn": "Temporal Forces",
+      "serie": "sv",
+      "officialCount": 162,
+      "releaseDate": "2024-03-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "TWM": {
+      "setId": "sv06",
+      "ptcglCode": "TWM",
+      "aliases": [
+        "SV6",
+        "SV06"
+      ],
+      "nameFr": "Mascarade Crépusculaire",
+      "nameEn": "Twilight Masquerade",
+      "serie": "sv",
+      "officialCount": 167,
+      "releaseDate": "2024-05-24",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV6": {
+      "setId": "sv06",
+      "ptcglCode": "TWM",
+      "aliases": [
+        "SV6",
+        "SV06"
+      ],
+      "nameFr": "Mascarade Crépusculaire",
+      "nameEn": "Twilight Masquerade",
+      "serie": "sv",
+      "officialCount": 167,
+      "releaseDate": "2024-05-24",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV06": {
+      "setId": "sv06",
+      "ptcglCode": "TWM",
+      "aliases": [
+        "SV6",
+        "SV06"
+      ],
+      "nameFr": "Mascarade Crépusculaire",
+      "nameEn": "Twilight Masquerade",
+      "serie": "sv",
+      "officialCount": 167,
+      "releaseDate": "2024-05-24",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SFA": {
+      "setId": "sv06.5",
+      "ptcglCode": "SFA",
+      "aliases": [
+        "SV6.5",
+        "SV06.5",
+        "SV6PT5"
+      ],
+      "nameFr": "Fable Nébuleuse",
+      "nameEn": "Shrouded Fable",
+      "serie": "sv",
+      "officialCount": 64,
+      "releaseDate": "2024-08-02",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV6.5": {
+      "setId": "sv06.5",
+      "ptcglCode": "SFA",
+      "aliases": [
+        "SV6.5",
+        "SV06.5",
+        "SV6PT5"
+      ],
+      "nameFr": "Fable Nébuleuse",
+      "nameEn": "Shrouded Fable",
+      "serie": "sv",
+      "officialCount": 64,
+      "releaseDate": "2024-08-02",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV06.5": {
+      "setId": "sv06.5",
+      "ptcglCode": "SFA",
+      "aliases": [
+        "SV6.5",
+        "SV06.5",
+        "SV6PT5"
+      ],
+      "nameFr": "Fable Nébuleuse",
+      "nameEn": "Shrouded Fable",
+      "serie": "sv",
+      "officialCount": 64,
+      "releaseDate": "2024-08-02",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV6PT5": {
+      "setId": "sv06.5",
+      "ptcglCode": "SFA",
+      "aliases": [
+        "SV6.5",
+        "SV06.5",
+        "SV6PT5"
+      ],
+      "nameFr": "Fable Nébuleuse",
+      "nameEn": "Shrouded Fable",
+      "serie": "sv",
+      "officialCount": 64,
+      "releaseDate": "2024-08-02",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SCR": {
+      "setId": "sv07",
+      "ptcglCode": "SCR",
+      "aliases": [
+        "SV7",
+        "SV07"
+      ],
+      "nameFr": "Couronne Stellaire",
+      "nameEn": "Stellar Crown",
+      "serie": "sv",
+      "officialCount": 142,
+      "releaseDate": "2024-09-13",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV7": {
+      "setId": "sv07",
+      "ptcglCode": "SCR",
+      "aliases": [
+        "SV7",
+        "SV07"
+      ],
+      "nameFr": "Couronne Stellaire",
+      "nameEn": "Stellar Crown",
+      "serie": "sv",
+      "officialCount": 142,
+      "releaseDate": "2024-09-13",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV07": {
+      "setId": "sv07",
+      "ptcglCode": "SCR",
+      "aliases": [
+        "SV7",
+        "SV07"
+      ],
+      "nameFr": "Couronne Stellaire",
+      "nameEn": "Stellar Crown",
+      "serie": "sv",
+      "officialCount": 142,
+      "releaseDate": "2024-09-13",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SSP": {
+      "setId": "sv08",
+      "ptcglCode": "SSP",
+      "aliases": [
+        "SV8",
+        "SV08"
+      ],
+      "nameFr": "Étincelles Déferlantes",
+      "nameEn": "Surging Sparks",
+      "serie": "sv",
+      "officialCount": 191,
+      "releaseDate": "2024-11-08",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV8": {
+      "setId": "sv08",
+      "ptcglCode": "SSP",
+      "aliases": [
+        "SV8",
+        "SV08"
+      ],
+      "nameFr": "Étincelles Déferlantes",
+      "nameEn": "Surging Sparks",
+      "serie": "sv",
+      "officialCount": 191,
+      "releaseDate": "2024-11-08",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV08": {
+      "setId": "sv08",
+      "ptcglCode": "SSP",
+      "aliases": [
+        "SV8",
+        "SV08"
+      ],
+      "nameFr": "Étincelles Déferlantes",
+      "nameEn": "Surging Sparks",
+      "serie": "sv",
+      "officialCount": 191,
+      "releaseDate": "2024-11-08",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PRE": {
+      "setId": "sv08.5",
+      "ptcglCode": "PRE",
+      "aliases": [
+        "SV8.5",
+        "SV08.5",
+        "SV8PT5"
+      ],
+      "nameFr": "Évolutions Prismatiques",
+      "nameEn": "Prismatic Evolutions",
+      "serie": "sv",
+      "officialCount": 131,
+      "releaseDate": "2025-01-17",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV8.5": {
+      "setId": "sv08.5",
+      "ptcglCode": "PRE",
+      "aliases": [
+        "SV8.5",
+        "SV08.5",
+        "SV8PT5"
+      ],
+      "nameFr": "Évolutions Prismatiques",
+      "nameEn": "Prismatic Evolutions",
+      "serie": "sv",
+      "officialCount": 131,
+      "releaseDate": "2025-01-17",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV08.5": {
+      "setId": "sv08.5",
+      "ptcglCode": "PRE",
+      "aliases": [
+        "SV8.5",
+        "SV08.5",
+        "SV8PT5"
+      ],
+      "nameFr": "Évolutions Prismatiques",
+      "nameEn": "Prismatic Evolutions",
+      "serie": "sv",
+      "officialCount": 131,
+      "releaseDate": "2025-01-17",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV8PT5": {
+      "setId": "sv08.5",
+      "ptcglCode": "PRE",
+      "aliases": [
+        "SV8.5",
+        "SV08.5",
+        "SV8PT5"
+      ],
+      "nameFr": "Évolutions Prismatiques",
+      "nameEn": "Prismatic Evolutions",
+      "serie": "sv",
+      "officialCount": 131,
+      "releaseDate": "2025-01-17",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "JTG": {
+      "setId": "sv09",
+      "ptcglCode": "JTG",
+      "aliases": [
+        "SV9",
+        "SV09"
+      ],
+      "nameFr": "Aventures Ensemble",
+      "nameEn": "Journey Together",
+      "serie": "sv",
+      "officialCount": 159,
+      "releaseDate": "2025-03-28",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV9": {
+      "setId": "sv09",
+      "ptcglCode": "JTG",
+      "aliases": [
+        "SV9",
+        "SV09"
+      ],
+      "nameFr": "Aventures Ensemble",
+      "nameEn": "Journey Together",
+      "serie": "sv",
+      "officialCount": 159,
+      "releaseDate": "2025-03-28",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV09": {
+      "setId": "sv09",
+      "ptcglCode": "JTG",
+      "aliases": [
+        "SV9",
+        "SV09"
+      ],
+      "nameFr": "Aventures Ensemble",
+      "nameEn": "Journey Together",
+      "serie": "sv",
+      "officialCount": 159,
+      "releaseDate": "2025-03-28",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "DRI": {
+      "setId": "sv10",
+      "ptcglCode": "DRI",
+      "aliases": [
+        "SV10"
+      ],
+      "nameFr": "Rivaux Destinés",
+      "nameEn": "Destined Rivals",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2025-05-30",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SV10": {
+      "setId": "sv10",
+      "ptcglCode": "DRI",
+      "aliases": [
+        "SV10"
+      ],
+      "nameFr": "Rivaux Destinés",
+      "nameEn": "Destined Rivals",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2025-05-30",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PR-SV": {
+      "setId": "svp",
+      "ptcglCode": "PR-SV",
+      "aliases": [
+        "SVP",
+        "PR-SVI"
+      ],
+      "nameFr": "Promos Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Promos",
+      "serie": "sv",
+      "officialCount": 200,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SVP": {
+      "setId": "svp",
+      "ptcglCode": "PR-SV",
+      "aliases": [
+        "SVP",
+        "PR-SVI"
+      ],
+      "nameFr": "Promos Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Promos",
+      "serie": "sv",
+      "officialCount": 200,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "PR-SVI": {
+      "setId": "svp",
+      "ptcglCode": "PR-SV",
+      "aliases": [
+        "SVP",
+        "PR-SVI"
+      ],
+      "nameFr": "Promos Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Promos",
+      "serie": "sv",
+      "officialCount": 200,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SVE": {
+      "setId": "sve",
+      "ptcglCode": "SVE",
+      "aliases": [
+        "ENERGY",
+        "MEE"
+      ],
+      "nameFr": "Énergies Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Energies",
+      "serie": "sv",
+      "officialCount": 16,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "ENERGY": {
+      "setId": "sve",
+      "ptcglCode": "SVE",
+      "aliases": [
+        "ENERGY",
+        "MEE"
+      ],
+      "nameFr": "Énergies Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Energies",
+      "serie": "sv",
+      "officialCount": 16,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "MEE": {
+      "setId": "sve",
+      "ptcglCode": "SVE",
+      "aliases": [
+        "ENERGY",
+        "MEE"
+      ],
+      "nameFr": "Énergies Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Energies",
+      "serie": "sv",
+      "officialCount": 16,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "SSH": {
+      "setId": "swsh1",
+      "ptcglCode": "SSH",
+      "aliases": [
+        "SWSH1",
+        "SWSH01"
+      ],
+      "nameFr": "Épée et Bouclier",
+      "nameEn": "Sword & Shield",
+      "serie": "swsh",
+      "officialCount": 202,
+      "releaseDate": "2020-02-07",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH1": {
+      "setId": "swsh1",
+      "ptcglCode": "SSH",
+      "aliases": [
+        "SWSH1",
+        "SWSH01"
+      ],
+      "nameFr": "Épée et Bouclier",
+      "nameEn": "Sword & Shield",
+      "serie": "swsh",
+      "officialCount": 202,
+      "releaseDate": "2020-02-07",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH01": {
+      "setId": "swsh1",
+      "ptcglCode": "SSH",
+      "aliases": [
+        "SWSH1",
+        "SWSH01"
+      ],
+      "nameFr": "Épée et Bouclier",
+      "nameEn": "Sword & Shield",
+      "serie": "swsh",
+      "officialCount": 202,
+      "releaseDate": "2020-02-07",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "RCL": {
+      "setId": "swsh2",
+      "ptcglCode": "RCL",
+      "aliases": [
+        "SWSH2",
+        "SWSH02"
+      ],
+      "nameFr": "Clash des Rebelles",
+      "nameEn": "Rebel Clash",
+      "serie": "swsh",
+      "officialCount": 192,
+      "releaseDate": "2020-05-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH2": {
+      "setId": "swsh2",
+      "ptcglCode": "RCL",
+      "aliases": [
+        "SWSH2",
+        "SWSH02"
+      ],
+      "nameFr": "Clash des Rebelles",
+      "nameEn": "Rebel Clash",
+      "serie": "swsh",
+      "officialCount": 192,
+      "releaseDate": "2020-05-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH02": {
+      "setId": "swsh2",
+      "ptcglCode": "RCL",
+      "aliases": [
+        "SWSH2",
+        "SWSH02"
+      ],
+      "nameFr": "Clash des Rebelles",
+      "nameEn": "Rebel Clash",
+      "serie": "swsh",
+      "officialCount": 192,
+      "releaseDate": "2020-05-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "DAA": {
+      "setId": "swsh3",
+      "ptcglCode": "DAA",
+      "aliases": [
+        "SWSH3",
+        "SWSH03"
+      ],
+      "nameFr": "Ténèbres Embrasées",
+      "nameEn": "Darkness Ablaze",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2020-08-14",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH3": {
+      "setId": "swsh3",
+      "ptcglCode": "DAA",
+      "aliases": [
+        "SWSH3",
+        "SWSH03"
+      ],
+      "nameFr": "Ténèbres Embrasées",
+      "nameEn": "Darkness Ablaze",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2020-08-14",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH03": {
+      "setId": "swsh3",
+      "ptcglCode": "DAA",
+      "aliases": [
+        "SWSH3",
+        "SWSH03"
+      ],
+      "nameFr": "Ténèbres Embrasées",
+      "nameEn": "Darkness Ablaze",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2020-08-14",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "CPA": {
+      "setId": "swsh3.5",
+      "ptcglCode": "CPA",
+      "aliases": [
+        "SWSH3.5",
+        "SWSH03.5"
+      ],
+      "nameFr": "La Voie du Maître",
+      "nameEn": "Champion's Path",
+      "serie": "swsh",
+      "officialCount": 73,
+      "releaseDate": "2020-09-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH3.5": {
+      "setId": "swsh3.5",
+      "ptcglCode": "CPA",
+      "aliases": [
+        "SWSH3.5",
+        "SWSH03.5"
+      ],
+      "nameFr": "La Voie du Maître",
+      "nameEn": "Champion's Path",
+      "serie": "swsh",
+      "officialCount": 73,
+      "releaseDate": "2020-09-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH03.5": {
+      "setId": "swsh3.5",
+      "ptcglCode": "CPA",
+      "aliases": [
+        "SWSH3.5",
+        "SWSH03.5"
+      ],
+      "nameFr": "La Voie du Maître",
+      "nameEn": "Champion's Path",
+      "serie": "swsh",
+      "officialCount": 73,
+      "releaseDate": "2020-09-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "VIV": {
+      "setId": "swsh4",
+      "ptcglCode": "VIV",
+      "aliases": [
+        "SWSH4",
+        "SWSH04"
+      ],
+      "nameFr": "Voltage Éclatant",
+      "nameEn": "Vivid Voltage",
+      "serie": "swsh",
+      "officialCount": 185,
+      "releaseDate": "2020-11-13",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH4": {
+      "setId": "swsh4",
+      "ptcglCode": "VIV",
+      "aliases": [
+        "SWSH4",
+        "SWSH04"
+      ],
+      "nameFr": "Voltage Éclatant",
+      "nameEn": "Vivid Voltage",
+      "serie": "swsh",
+      "officialCount": 185,
+      "releaseDate": "2020-11-13",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH04": {
+      "setId": "swsh4",
+      "ptcglCode": "VIV",
+      "aliases": [
+        "SWSH4",
+        "SWSH04"
+      ],
+      "nameFr": "Voltage Éclatant",
+      "nameEn": "Vivid Voltage",
+      "serie": "swsh",
+      "officialCount": 185,
+      "releaseDate": "2020-11-13",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SHF": {
+      "setId": "swsh4.5",
+      "ptcglCode": "SHF",
+      "aliases": [
+        "SWSH4.5",
+        "SWSH04.5"
+      ],
+      "nameFr": "Destinées Radieuses",
+      "nameEn": "Shining Fates",
+      "serie": "swsh",
+      "officialCount": 72,
+      "releaseDate": "2021-02-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH4.5": {
+      "setId": "swsh4.5",
+      "ptcglCode": "SHF",
+      "aliases": [
+        "SWSH4.5",
+        "SWSH04.5"
+      ],
+      "nameFr": "Destinées Radieuses",
+      "nameEn": "Shining Fates",
+      "serie": "swsh",
+      "officialCount": 72,
+      "releaseDate": "2021-02-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH04.5": {
+      "setId": "swsh4.5",
+      "ptcglCode": "SHF",
+      "aliases": [
+        "SWSH4.5",
+        "SWSH04.5"
+      ],
+      "nameFr": "Destinées Radieuses",
+      "nameEn": "Shining Fates",
+      "serie": "swsh",
+      "officialCount": 72,
+      "releaseDate": "2021-02-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "BST": {
+      "setId": "swsh5",
+      "ptcglCode": "BST",
+      "aliases": [
+        "SWSH5",
+        "SWSH05"
+      ],
+      "nameFr": "Styles de Combat",
+      "nameEn": "Battle Styles",
+      "serie": "swsh",
+      "officialCount": 163,
+      "releaseDate": "2021-03-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH5": {
+      "setId": "swsh5",
+      "ptcglCode": "BST",
+      "aliases": [
+        "SWSH5",
+        "SWSH05"
+      ],
+      "nameFr": "Styles de Combat",
+      "nameEn": "Battle Styles",
+      "serie": "swsh",
+      "officialCount": 163,
+      "releaseDate": "2021-03-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH05": {
+      "setId": "swsh5",
+      "ptcglCode": "BST",
+      "aliases": [
+        "SWSH5",
+        "SWSH05"
+      ],
+      "nameFr": "Styles de Combat",
+      "nameEn": "Battle Styles",
+      "serie": "swsh",
+      "officialCount": 163,
+      "releaseDate": "2021-03-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "CRE": {
+      "setId": "swsh6",
+      "ptcglCode": "CRE",
+      "aliases": [
+        "SWSH6",
+        "SWSH06"
+      ],
+      "nameFr": "Règne de Glace",
+      "nameEn": "Chilling Reign",
+      "serie": "swsh",
+      "officialCount": 198,
+      "releaseDate": "2021-06-18",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH6": {
+      "setId": "swsh6",
+      "ptcglCode": "CRE",
+      "aliases": [
+        "SWSH6",
+        "SWSH06"
+      ],
+      "nameFr": "Règne de Glace",
+      "nameEn": "Chilling Reign",
+      "serie": "swsh",
+      "officialCount": 198,
+      "releaseDate": "2021-06-18",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH06": {
+      "setId": "swsh6",
+      "ptcglCode": "CRE",
+      "aliases": [
+        "SWSH6",
+        "SWSH06"
+      ],
+      "nameFr": "Règne de Glace",
+      "nameEn": "Chilling Reign",
+      "serie": "swsh",
+      "officialCount": 198,
+      "releaseDate": "2021-06-18",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "EVS": {
+      "setId": "swsh7",
+      "ptcglCode": "EVS",
+      "aliases": [
+        "SWSH7",
+        "SWSH07"
+      ],
+      "nameFr": "Évolution Céleste",
+      "nameEn": "Evolving Skies",
+      "serie": "swsh",
+      "officialCount": 203,
+      "releaseDate": "2021-08-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH7": {
+      "setId": "swsh7",
+      "ptcglCode": "EVS",
+      "aliases": [
+        "SWSH7",
+        "SWSH07"
+      ],
+      "nameFr": "Évolution Céleste",
+      "nameEn": "Evolving Skies",
+      "serie": "swsh",
+      "officialCount": 203,
+      "releaseDate": "2021-08-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH07": {
+      "setId": "swsh7",
+      "ptcglCode": "EVS",
+      "aliases": [
+        "SWSH7",
+        "SWSH07"
+      ],
+      "nameFr": "Évolution Céleste",
+      "nameEn": "Evolving Skies",
+      "serie": "swsh",
+      "officialCount": 203,
+      "releaseDate": "2021-08-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "CEL": {
+      "setId": "swsh7.5",
+      "ptcglCode": "CEL",
+      "aliases": [
+        "SWSH7.5",
+        "SWSH07.5"
+      ],
+      "nameFr": "Célébrations",
+      "nameEn": "Celebrations",
+      "serie": "swsh",
+      "officialCount": 25,
+      "releaseDate": "2021-10-08",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH7.5": {
+      "setId": "swsh7.5",
+      "ptcglCode": "CEL",
+      "aliases": [
+        "SWSH7.5",
+        "SWSH07.5"
+      ],
+      "nameFr": "Célébrations",
+      "nameEn": "Celebrations",
+      "serie": "swsh",
+      "officialCount": 25,
+      "releaseDate": "2021-10-08",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH07.5": {
+      "setId": "swsh7.5",
+      "ptcglCode": "CEL",
+      "aliases": [
+        "SWSH7.5",
+        "SWSH07.5"
+      ],
+      "nameFr": "Célébrations",
+      "nameEn": "Celebrations",
+      "serie": "swsh",
+      "officialCount": 25,
+      "releaseDate": "2021-10-08",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "FST": {
+      "setId": "swsh8",
+      "ptcglCode": "FST",
+      "aliases": [
+        "SWSH8",
+        "SWSH08"
+      ],
+      "nameFr": "Poing de Fusion",
+      "nameEn": "Fusion Strike",
+      "serie": "swsh",
+      "officialCount": 264,
+      "releaseDate": "2021-11-12",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH8": {
+      "setId": "swsh8",
+      "ptcglCode": "FST",
+      "aliases": [
+        "SWSH8",
+        "SWSH08"
+      ],
+      "nameFr": "Poing de Fusion",
+      "nameEn": "Fusion Strike",
+      "serie": "swsh",
+      "officialCount": 264,
+      "releaseDate": "2021-11-12",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH08": {
+      "setId": "swsh8",
+      "ptcglCode": "FST",
+      "aliases": [
+        "SWSH8",
+        "SWSH08"
+      ],
+      "nameFr": "Poing de Fusion",
+      "nameEn": "Fusion Strike",
+      "serie": "swsh",
+      "officialCount": 264,
+      "releaseDate": "2021-11-12",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "BRS": {
+      "setId": "swsh9",
+      "ptcglCode": "BRS",
+      "aliases": [
+        "SWSH9",
+        "SWSH09"
+      ],
+      "nameFr": "Stars Étincelantes",
+      "nameEn": "Brilliant Stars",
+      "serie": "swsh",
+      "officialCount": 172,
+      "releaseDate": "2022-02-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH9": {
+      "setId": "swsh9",
+      "ptcglCode": "BRS",
+      "aliases": [
+        "SWSH9",
+        "SWSH09"
+      ],
+      "nameFr": "Stars Étincelantes",
+      "nameEn": "Brilliant Stars",
+      "serie": "swsh",
+      "officialCount": 172,
+      "releaseDate": "2022-02-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH09": {
+      "setId": "swsh9",
+      "ptcglCode": "BRS",
+      "aliases": [
+        "SWSH9",
+        "SWSH09"
+      ],
+      "nameFr": "Stars Étincelantes",
+      "nameEn": "Brilliant Stars",
+      "serie": "swsh",
+      "officialCount": 172,
+      "releaseDate": "2022-02-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "ASR": {
+      "setId": "swsh10",
+      "ptcglCode": "ASR",
+      "aliases": [
+        "SWSH10"
+      ],
+      "nameFr": "Astres Radieux",
+      "nameEn": "Astral Radiance",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2022-05-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH10": {
+      "setId": "swsh10",
+      "ptcglCode": "ASR",
+      "aliases": [
+        "SWSH10"
+      ],
+      "nameFr": "Astres Radieux",
+      "nameEn": "Astral Radiance",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2022-05-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "PGO": {
+      "setId": "swsh10.5",
+      "ptcglCode": "PGO",
+      "aliases": [
+        "SWSH10.5"
+      ],
+      "nameFr": "Pokémon GO",
+      "nameEn": "Pokémon GO",
+      "serie": "swsh",
+      "officialCount": 78,
+      "releaseDate": "2022-07-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH10.5": {
+      "setId": "swsh10.5",
+      "ptcglCode": "PGO",
+      "aliases": [
+        "SWSH10.5"
+      ],
+      "nameFr": "Pokémon GO",
+      "nameEn": "Pokémon GO",
+      "serie": "swsh",
+      "officialCount": 78,
+      "releaseDate": "2022-07-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "LOR": {
+      "setId": "swsh11",
+      "ptcglCode": "LOR",
+      "aliases": [
+        "SWSH11"
+      ],
+      "nameFr": "Origine Perdue",
+      "nameEn": "Lost Origin",
+      "serie": "swsh",
+      "officialCount": 196,
+      "releaseDate": "2022-09-09",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH11": {
+      "setId": "swsh11",
+      "ptcglCode": "LOR",
+      "aliases": [
+        "SWSH11"
+      ],
+      "nameFr": "Origine Perdue",
+      "nameEn": "Lost Origin",
+      "serie": "swsh",
+      "officialCount": 196,
+      "releaseDate": "2022-09-09",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SIT": {
+      "setId": "swsh12",
+      "ptcglCode": "SIT",
+      "aliases": [
+        "SWSH12"
+      ],
+      "nameFr": "Tempête Argentée",
+      "nameEn": "Silver Tempest",
+      "serie": "swsh",
+      "officialCount": 195,
+      "releaseDate": "2022-11-11",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH12": {
+      "setId": "swsh12",
+      "ptcglCode": "SIT",
+      "aliases": [
+        "SWSH12"
+      ],
+      "nameFr": "Tempête Argentée",
+      "nameEn": "Silver Tempest",
+      "serie": "swsh",
+      "officialCount": 195,
+      "releaseDate": "2022-11-11",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "CRZ": {
+      "setId": "swsh12.5",
+      "ptcglCode": "CRZ",
+      "aliases": [
+        "SWSH12.5"
+      ],
+      "nameFr": "Zénith Suprême",
+      "nameEn": "Crown Zenith",
+      "serie": "swsh",
+      "officialCount": 159,
+      "releaseDate": "2023-01-20",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH12.5": {
+      "setId": "swsh12.5",
+      "ptcglCode": "CRZ",
+      "aliases": [
+        "SWSH12.5"
+      ],
+      "nameFr": "Zénith Suprême",
+      "nameEn": "Crown Zenith",
+      "serie": "swsh",
+      "officialCount": 159,
+      "releaseDate": "2023-01-20",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "PR-SW": {
+      "setId": "swshp",
+      "ptcglCode": "PR-SW",
+      "aliases": [
+        "SWSHP",
+        "PR-SWSH",
+        "SWSH"
+      ],
+      "nameFr": "Promos Épée et Bouclier",
+      "nameEn": "Sword & Shield Promos",
+      "serie": "swsh",
+      "officialCount": 307,
+      "releaseDate": "2019-11-15",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSHP": {
+      "setId": "swshp",
+      "ptcglCode": "PR-SW",
+      "aliases": [
+        "SWSHP",
+        "PR-SWSH",
+        "SWSH"
+      ],
+      "nameFr": "Promos Épée et Bouclier",
+      "nameEn": "Sword & Shield Promos",
+      "serie": "swsh",
+      "officialCount": 307,
+      "releaseDate": "2019-11-15",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "PR-SWSH": {
+      "setId": "swshp",
+      "ptcglCode": "PR-SW",
+      "aliases": [
+        "SWSHP",
+        "PR-SWSH",
+        "SWSH"
+      ],
+      "nameFr": "Promos Épée et Bouclier",
+      "nameEn": "Sword & Shield Promos",
+      "serie": "swsh",
+      "officialCount": 307,
+      "releaseDate": "2019-11-15",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "SWSH": {
+      "setId": "swshp",
+      "ptcglCode": "PR-SW",
+      "aliases": [
+        "SWSHP",
+        "PR-SWSH",
+        "SWSH"
+      ],
+      "nameFr": "Promos Épée et Bouclier",
+      "nameEn": "Sword & Shield Promos",
+      "serie": "swsh",
+      "officialCount": 307,
+      "releaseDate": "2019-11-15",
+      "legalStandard": false,
+      "legalExpanded": true
+    }
+  },
+  "byTcgdexId": {
+    "sv01": {
+      "setId": "sv01",
+      "ptcglCode": "SVI",
+      "aliases": [
+        "SV1",
+        "SV01"
+      ],
+      "nameFr": "Écarlate et Violet",
+      "nameEn": "Scarlet & Violet",
+      "serie": "sv",
+      "officialCount": 198,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv02": {
+      "setId": "sv02",
+      "ptcglCode": "PAL",
+      "aliases": [
+        "SV2",
+        "SV02"
+      ],
+      "nameFr": "Évolutions à Paldea",
+      "nameEn": "Paldea Evolved",
+      "serie": "sv",
+      "officialCount": 193,
+      "releaseDate": "2023-06-09",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv03": {
+      "setId": "sv03",
+      "ptcglCode": "OBF",
+      "aliases": [
+        "SV3",
+        "SV03"
+      ],
+      "nameFr": "Flammes Obsidiennes",
+      "nameEn": "Obsidian Flames",
+      "serie": "sv",
+      "officialCount": 197,
+      "releaseDate": "2023-08-11",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv03.5": {
+      "setId": "sv03.5",
+      "ptcglCode": "MEW",
+      "aliases": [
+        "151",
+        "SV3.5",
+        "SV03.5",
+        "SV3PT5"
+      ],
+      "nameFr": "151",
+      "nameEn": "151",
+      "serie": "sv",
+      "officialCount": 165,
+      "releaseDate": "2023-09-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv04": {
+      "setId": "sv04",
+      "ptcglCode": "PAR",
+      "aliases": [
+        "SV4",
+        "SV04"
+      ],
+      "nameFr": "Faille Paradoxe",
+      "nameEn": "Paradox Rift",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2023-11-03",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv04.5": {
+      "setId": "sv04.5",
+      "ptcglCode": "PAF",
+      "aliases": [
+        "SV4.5",
+        "SV04.5",
+        "SV4PT5"
+      ],
+      "nameFr": "Destinées de Paldea",
+      "nameEn": "Paldean Fates",
+      "serie": "sv",
+      "officialCount": 91,
+      "releaseDate": "2024-01-26",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv05": {
+      "setId": "sv05",
+      "ptcglCode": "TEF",
+      "aliases": [
+        "SV5",
+        "SV05"
+      ],
+      "nameFr": "Forces Temporelles",
+      "nameEn": "Temporal Forces",
+      "serie": "sv",
+      "officialCount": 162,
+      "releaseDate": "2024-03-22",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv06": {
+      "setId": "sv06",
+      "ptcglCode": "TWM",
+      "aliases": [
+        "SV6",
+        "SV06"
+      ],
+      "nameFr": "Mascarade Crépusculaire",
+      "nameEn": "Twilight Masquerade",
+      "serie": "sv",
+      "officialCount": 167,
+      "releaseDate": "2024-05-24",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv06.5": {
+      "setId": "sv06.5",
+      "ptcglCode": "SFA",
+      "aliases": [
+        "SV6.5",
+        "SV06.5",
+        "SV6PT5"
+      ],
+      "nameFr": "Fable Nébuleuse",
+      "nameEn": "Shrouded Fable",
+      "serie": "sv",
+      "officialCount": 64,
+      "releaseDate": "2024-08-02",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv07": {
+      "setId": "sv07",
+      "ptcglCode": "SCR",
+      "aliases": [
+        "SV7",
+        "SV07"
+      ],
+      "nameFr": "Couronne Stellaire",
+      "nameEn": "Stellar Crown",
+      "serie": "sv",
+      "officialCount": 142,
+      "releaseDate": "2024-09-13",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv08": {
+      "setId": "sv08",
+      "ptcglCode": "SSP",
+      "aliases": [
+        "SV8",
+        "SV08"
+      ],
+      "nameFr": "Étincelles Déferlantes",
+      "nameEn": "Surging Sparks",
+      "serie": "sv",
+      "officialCount": 191,
+      "releaseDate": "2024-11-08",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv08.5": {
+      "setId": "sv08.5",
+      "ptcglCode": "PRE",
+      "aliases": [
+        "SV8.5",
+        "SV08.5",
+        "SV8PT5"
+      ],
+      "nameFr": "Évolutions Prismatiques",
+      "nameEn": "Prismatic Evolutions",
+      "serie": "sv",
+      "officialCount": 131,
+      "releaseDate": "2025-01-17",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv09": {
+      "setId": "sv09",
+      "ptcglCode": "JTG",
+      "aliases": [
+        "SV9",
+        "SV09"
+      ],
+      "nameFr": "Aventures Ensemble",
+      "nameEn": "Journey Together",
+      "serie": "sv",
+      "officialCount": 159,
+      "releaseDate": "2025-03-28",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sv10": {
+      "setId": "sv10",
+      "ptcglCode": "DRI",
+      "aliases": [
+        "SV10"
+      ],
+      "nameFr": "Rivaux Destinés",
+      "nameEn": "Destined Rivals",
+      "serie": "sv",
+      "officialCount": 182,
+      "releaseDate": "2025-05-30",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "svp": {
+      "setId": "svp",
+      "ptcglCode": "PR-SV",
+      "aliases": [
+        "SVP",
+        "PR-SVI"
+      ],
+      "nameFr": "Promos Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Promos",
+      "serie": "sv",
+      "officialCount": 200,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "sve": {
+      "setId": "sve",
+      "ptcglCode": "SVE",
+      "aliases": [
+        "ENERGY",
+        "MEE"
+      ],
+      "nameFr": "Énergies Écarlate et Violet",
+      "nameEn": "Scarlet & Violet Energies",
+      "serie": "sv",
+      "officialCount": 16,
+      "releaseDate": "2023-03-31",
+      "legalStandard": true,
+      "legalExpanded": true
+    },
+    "swsh1": {
+      "setId": "swsh1",
+      "ptcglCode": "SSH",
+      "aliases": [
+        "SWSH1",
+        "SWSH01"
+      ],
+      "nameFr": "Épée et Bouclier",
+      "nameEn": "Sword & Shield",
+      "serie": "swsh",
+      "officialCount": 202,
+      "releaseDate": "2020-02-07",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh2": {
+      "setId": "swsh2",
+      "ptcglCode": "RCL",
+      "aliases": [
+        "SWSH2",
+        "SWSH02"
+      ],
+      "nameFr": "Clash des Rebelles",
+      "nameEn": "Rebel Clash",
+      "serie": "swsh",
+      "officialCount": 192,
+      "releaseDate": "2020-05-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh3": {
+      "setId": "swsh3",
+      "ptcglCode": "DAA",
+      "aliases": [
+        "SWSH3",
+        "SWSH03"
+      ],
+      "nameFr": "Ténèbres Embrasées",
+      "nameEn": "Darkness Ablaze",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2020-08-14",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh3.5": {
+      "setId": "swsh3.5",
+      "ptcglCode": "CPA",
+      "aliases": [
+        "SWSH3.5",
+        "SWSH03.5"
+      ],
+      "nameFr": "La Voie du Maître",
+      "nameEn": "Champion's Path",
+      "serie": "swsh",
+      "officialCount": 73,
+      "releaseDate": "2020-09-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh4": {
+      "setId": "swsh4",
+      "ptcglCode": "VIV",
+      "aliases": [
+        "SWSH4",
+        "SWSH04"
+      ],
+      "nameFr": "Voltage Éclatant",
+      "nameEn": "Vivid Voltage",
+      "serie": "swsh",
+      "officialCount": 185,
+      "releaseDate": "2020-11-13",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh4.5": {
+      "setId": "swsh4.5",
+      "ptcglCode": "SHF",
+      "aliases": [
+        "SWSH4.5",
+        "SWSH04.5"
+      ],
+      "nameFr": "Destinées Radieuses",
+      "nameEn": "Shining Fates",
+      "serie": "swsh",
+      "officialCount": 72,
+      "releaseDate": "2021-02-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh5": {
+      "setId": "swsh5",
+      "ptcglCode": "BST",
+      "aliases": [
+        "SWSH5",
+        "SWSH05"
+      ],
+      "nameFr": "Styles de Combat",
+      "nameEn": "Battle Styles",
+      "serie": "swsh",
+      "officialCount": 163,
+      "releaseDate": "2021-03-19",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh6": {
+      "setId": "swsh6",
+      "ptcglCode": "CRE",
+      "aliases": [
+        "SWSH6",
+        "SWSH06"
+      ],
+      "nameFr": "Règne de Glace",
+      "nameEn": "Chilling Reign",
+      "serie": "swsh",
+      "officialCount": 198,
+      "releaseDate": "2021-06-18",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh7": {
+      "setId": "swsh7",
+      "ptcglCode": "EVS",
+      "aliases": [
+        "SWSH7",
+        "SWSH07"
+      ],
+      "nameFr": "Évolution Céleste",
+      "nameEn": "Evolving Skies",
+      "serie": "swsh",
+      "officialCount": 203,
+      "releaseDate": "2021-08-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh7.5": {
+      "setId": "swsh7.5",
+      "ptcglCode": "CEL",
+      "aliases": [
+        "SWSH7.5",
+        "SWSH07.5"
+      ],
+      "nameFr": "Célébrations",
+      "nameEn": "Celebrations",
+      "serie": "swsh",
+      "officialCount": 25,
+      "releaseDate": "2021-10-08",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh8": {
+      "setId": "swsh8",
+      "ptcglCode": "FST",
+      "aliases": [
+        "SWSH8",
+        "SWSH08"
+      ],
+      "nameFr": "Poing de Fusion",
+      "nameEn": "Fusion Strike",
+      "serie": "swsh",
+      "officialCount": 264,
+      "releaseDate": "2021-11-12",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh9": {
+      "setId": "swsh9",
+      "ptcglCode": "BRS",
+      "aliases": [
+        "SWSH9",
+        "SWSH09"
+      ],
+      "nameFr": "Stars Étincelantes",
+      "nameEn": "Brilliant Stars",
+      "serie": "swsh",
+      "officialCount": 172,
+      "releaseDate": "2022-02-25",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh10": {
+      "setId": "swsh10",
+      "ptcglCode": "ASR",
+      "aliases": [
+        "SWSH10"
+      ],
+      "nameFr": "Astres Radieux",
+      "nameEn": "Astral Radiance",
+      "serie": "swsh",
+      "officialCount": 189,
+      "releaseDate": "2022-05-27",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh10.5": {
+      "setId": "swsh10.5",
+      "ptcglCode": "PGO",
+      "aliases": [
+        "SWSH10.5"
+      ],
+      "nameFr": "Pokémon GO",
+      "nameEn": "Pokémon GO",
+      "serie": "swsh",
+      "officialCount": 78,
+      "releaseDate": "2022-07-01",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh11": {
+      "setId": "swsh11",
+      "ptcglCode": "LOR",
+      "aliases": [
+        "SWSH11"
+      ],
+      "nameFr": "Origine Perdue",
+      "nameEn": "Lost Origin",
+      "serie": "swsh",
+      "officialCount": 196,
+      "releaseDate": "2022-09-09",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh12": {
+      "setId": "swsh12",
+      "ptcglCode": "SIT",
+      "aliases": [
+        "SWSH12"
+      ],
+      "nameFr": "Tempête Argentée",
+      "nameEn": "Silver Tempest",
+      "serie": "swsh",
+      "officialCount": 195,
+      "releaseDate": "2022-11-11",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swsh12.5": {
+      "setId": "swsh12.5",
+      "ptcglCode": "CRZ",
+      "aliases": [
+        "SWSH12.5"
+      ],
+      "nameFr": "Zénith Suprême",
+      "nameEn": "Crown Zenith",
+      "serie": "swsh",
+      "officialCount": 159,
+      "releaseDate": "2023-01-20",
+      "legalStandard": false,
+      "legalExpanded": true
+    },
+    "swshp": {
+      "setId": "swshp",
+      "ptcglCode": "PR-SW",
+      "aliases": [
+        "SWSHP",
+        "PR-SWSH",
+        "SWSH"
+      ],
+      "nameFr": "Promos Épée et Bouclier",
+      "nameEn": "Sword & Shield Promos",
+      "serie": "swsh",
+      "officialCount": 307,
+      "releaseDate": "2019-11-15",
+      "legalStandard": false,
+      "legalExpanded": true
+    }
+  },
+  "setCodeAliases": {
+    "151": "sv03.5",
+    "PR-SW": "swshp",
+    "PR-SWSH": "swshp",
+    "SWSHP": "swshp",
+    "SWSH": "swshp",
+    "PR-SV": "svp",
+    "PR-SVI": "svp",
+    "SVP": "svp",
+    "PR-SM": "smp",
+    "SMP": "smp",
+    "PR-XY": "xyp",
+    "XYP": "xyp",
+    "PR-BW": "bwp",
+    "PR-BLW": "bwp",
+    "BWP": "bwp",
+    "SVE": "sve",
+    "MEE": "sve",
+    "ENERGY": "sve",
+    "SVI": "sv01",
+    "SV1": "sv01",
+    "SV01": "sv01",
+    "PAL": "sv02",
+    "SV2": "sv02",
+    "SV02": "sv02",
+    "OBF": "sv03",
+    "SV3": "sv03",
+    "SV03": "sv03",
+    "MEW": "sv03.5",
+    "SV3.5": "sv03.5",
+    "SV03.5": "sv03.5",
+    "SV3PT5": "sv03.5",
+    "PAR": "sv04",
+    "SV4": "sv04",
+    "SV04": "sv04",
+    "PAF": "sv04.5",
+    "SV4.5": "sv04.5",
+    "SV04.5": "sv04.5",
+    "SV4PT5": "sv04.5",
+    "TEF": "sv05",
+    "SV5": "sv05",
+    "SV05": "sv05",
+    "TWM": "sv06",
+    "SV6": "sv06",
+    "SV06": "sv06",
+    "SFA": "sv06.5",
+    "SV6.5": "sv06.5",
+    "SV06.5": "sv06.5",
+    "SV6PT5": "sv06.5",
+    "SCR": "sv07",
+    "SV7": "sv07",
+    "SV07": "sv07",
+    "SSP": "sv08",
+    "SV8": "sv08",
+    "SV08": "sv08",
+    "PRE": "sv08.5",
+    "SV8.5": "sv08.5",
+    "SV08.5": "sv08.5",
+    "SV8PT5": "sv08.5",
+    "JTG": "sv09",
+    "SV9": "sv09",
+    "SV09": "sv09",
+    "DRI": "sv10",
+    "SV10": "sv10",
+    "SSH": "swsh1",
+    "SWSH1": "swsh1",
+    "SWSH01": "swsh1",
+    "RCL": "swsh2",
+    "SWSH2": "swsh2",
+    "SWSH02": "swsh2",
+    "DAA": "swsh3",
+    "SWSH3": "swsh3",
+    "SWSH03": "swsh3",
+    "CPA": "swsh3.5",
+    "SWSH3.5": "swsh3.5",
+    "SWSH03.5": "swsh3.5",
+    "VIV": "swsh4",
+    "SWSH4": "swsh4",
+    "SWSH04": "swsh4",
+    "SHF": "swsh4.5",
+    "SWSH4.5": "swsh4.5",
+    "SWSH04.5": "swsh4.5",
+    "BST": "swsh5",
+    "SWSH5": "swsh5",
+    "SWSH05": "swsh5",
+    "CRE": "swsh6",
+    "SWSH6": "swsh6",
+    "SWSH06": "swsh6",
+    "EVS": "swsh7",
+    "SWSH7": "swsh7",
+    "SWSH07": "swsh7",
+    "CEL": "swsh7.5",
+    "SWSH7.5": "swsh7.5",
+    "SWSH07.5": "swsh7.5",
+    "FST": "swsh8",
+    "SWSH8": "swsh8",
+    "SWSH08": "swsh8",
+    "BRS": "swsh9",
+    "SWSH9": "swsh9",
+    "SWSH09": "swsh9",
+    "ASR": "swsh10",
+    "SWSH10": "swsh10",
+    "PGO": "swsh10.5",
+    "SWSH10.5": "swsh10.5",
+    "LOR": "swsh11",
+    "SWSH11": "swsh11",
+    "SIT": "swsh12",
+    "SWSH12": "swsh12",
+    "CRZ": "swsh12.5",
+    "SWSH12.5": "swsh12.5"
+  }
+}
