@@ -44,7 +44,7 @@ class FetcherProvider(str, Enum):
     sdk = "sdk"
     rest = "rest"
 
-# Liste officielle des 11 cartes stratégiques de référence du mode --test
+# Liste officielle des 13 cartes stratégiques et énergies de référence du mode --test
 TEST_CARD_IDS: List[str] = [
     "sv04-125",  # Super Bonbon (Rare Candy)
     "sv05-144",  # Poffin Copain-Copain (Buddy-Buddy Poffin)
@@ -57,6 +57,8 @@ TEST_CARD_IDS: List[str] = [
     "sv04-160",  # Attrape-Riposte (Counter Catcher)
     "sv05-123",  # Ire-Foudre-ex (Raging Bolt ex)
     "sv06.5-038",  # Favianos-ex (Fezandipiti ex)
+    "sve-002",  # Énergie Feu (Fire Energy) - Court-circuit statique
+    "sve-004",  # Énergie Électrique (Lightning Energy) - Court-circuit statique
 ]
 
 # Table de référence garantissant que les IDs stratégiques résolvent toujours vers la bonne carte
@@ -117,7 +119,26 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "expected_name_en": "Fezandipiti",
         "fallback_tcgdex_id": "sv06.5-038",
     },
+    "sve-002": {
+        "expected_name_fr": "Énergie Feu",
+        "expected_name_en": "Fire Energy",
+        "fallback_tcgdex_id": "sve-002",
+    },
+    "sve-004": {
+        "expected_name_fr": "Énergie Electrik",
+        "expected_name_en": "Lightning Energy",
+        "fallback_tcgdex_id": "sve-004",
+    },
 }
+
+
+def _clean_tcgdex_dict(obj: Any) -> Any:
+    """Nettoie récursivement les dictionnaires issus de `asdict` en supprimant les instances SDK non sérialisables."""
+    if isinstance(obj, dict):
+        return {k: _clean_tcgdex_dict(v) for k, v in obj.items() if k != "sdk"}
+    elif isinstance(obj, list):
+        return [_clean_tcgdex_dict(v) for v in obj]
+    return obj
 
 
 @dataclass
@@ -364,9 +385,7 @@ class TCGdexFetcher:
             try:
                 cards_list_obj = await asyncio.to_thread(self._sdk_fr.card.listSync)
                 if cards_list_obj and isinstance(cards_list_obj, list):
-                    cards_list = [asdict(c) for c in cards_list_obj if hasattr(c, "id")]
-                    for item in cards_list:
-                        item.pop("sdk", None)
+                    cards_list = [_clean_tcgdex_dict(asdict(c)) for c in cards_list_obj if hasattr(c, "id")]
                     if cards_list:
                         self.index_path.write_text(
                             json.dumps(cards_list, ensure_ascii=False, indent=2),
@@ -408,8 +427,7 @@ class TCGdexFetcher:
                 try:
                     card_obj = await asyncio.to_thread(sdk_instance.card.getSync, candidate)
                     if card_obj is not None and getattr(card_obj, "id", None):
-                        data = asdict(card_obj)
-                        data.pop("sdk", None)
+                        data = _clean_tcgdex_dict(asdict(card_obj))
                         return data, candidate
                 except Exception:
                     continue
