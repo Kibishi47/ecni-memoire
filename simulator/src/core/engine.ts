@@ -1018,7 +1018,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
                 handIndex: handIdx,
                 targetSlot: 'ACTIVE',
                 targetCardIds: [s2.cardId],
-                label: `Jouer ${card.identity.nameFr} : ${activeBoard.activePokemon.card.identity.nameFr} (Actif) ➔ ${s2.identity.nameFr}`,
+                label: `Jouer ${card.identity.nameFr} : ${activeBoard.activePokemon.card.identity.nameFr} (Actif) → ${s2.identity.nameFr}`,
               })
             }
           }
@@ -1034,7 +1034,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
                   handIndex: handIdx,
                   targetSlot: bIdx,
                   targetCardIds: [s2.cardId],
-                  label: `Jouer ${card.identity.nameFr} : ${bPoke.card.identity.nameFr} (Banc #${bIdx + 1}) ➔ ${s2.identity.nameFr}`,
+                  label: `Jouer ${card.identity.nameFr} : ${bPoke.card.identity.nameFr} (Banc #${bIdx + 1}) → ${s2.identity.nameFr}`,
                 })
               }
             }
@@ -1057,7 +1057,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
             actionId: pAction.actionId,
             handIndex: handIdx,
             targetBenchIndex: obIdx,
-            label: `Jouer ${card.identity.nameFr} ➔ Cibler ${oppBench.card.identity.nameFr} adverse (${getRemainingHp(oppBench)} PV)`,
+            label: `Jouer ${card.identity.nameFr} → Cibler ${oppBench.card.identity.nameFr} adverse (${getRemainingHp(oppBench)} PV)`,
           })
         })
         continue
@@ -1083,7 +1083,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
             actionId: pAction.actionId,
             handIndex: handIdx,
             targetCardIds: [targetModel.cardId],
-            label: `Jouer ${card.identity.nameFr} ➔ Chercher ${targetModel.identity.nameFr}`,
+            label: `Jouer ${card.identity.nameFr} → Chercher ${targetModel.identity.nameFr}`,
           })
         }
         continue
@@ -1131,7 +1131,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
             actionId: pAction.actionId,
             targetCardIds: [targetModel.cardId],
             endsTurnImmediately: endsTurn,
-            label: `Talent ${pAction.label} (${poke.card.identity.nameFr}) ➔ Tutorer ${targetModel.identity.nameFr}`,
+            label: `Talent ${pAction.label} (${poke.card.identity.nameFr}) → Tutorer ${targetModel.identity.nameFr}`,
           })
         }
       } else {
@@ -1165,7 +1165,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
         actions.push({
           type: 'RETREAT_ACTIVE',
           targetBenchIndex: bIdx,
-          label: `Battre en retraite (${activeBoard.activePokemon!.card.identity.nameFr}, -${retreatCost} NRJ) ➔ Promouvoir ${bPoke.card.identity.nameFr}`,
+          label: `Battre en retraite (${activeBoard.activePokemon!.card.identity.nameFr}, -${retreatCost} NRJ) → Promouvoir ${bPoke.card.identity.nameFr}`,
         })
       })
     }

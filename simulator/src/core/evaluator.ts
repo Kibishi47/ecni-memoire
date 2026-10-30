@@ -495,7 +495,7 @@ function summarizeActionSequence(actions: GameAction[]): string {
   return meaningful
     .slice(0, 4)
     .map((a) => a.label)
-    .join(' ➔ ')
+    .join(' → ')
 }
 
 /**

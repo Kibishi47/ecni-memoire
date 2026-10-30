@@ -61,7 +61,7 @@ const steps = [
             </span>
           </div>
           <p class="text-xs text-slate-500">
-            Simulateur Monte-Carlo Multi-Workers &amp; Évaluateur d'Arbre 3-Ply (T ➔ T_adv ➔ T+1)
+            Simulateur Monte-Carlo Multi-Workers &amp; Évaluateur d'Arbre 3-Ply (T → T_adv → T+1)
           </p>
         </div>
       </div>

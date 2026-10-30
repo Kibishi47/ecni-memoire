@@ -27,7 +27,55 @@ const emit = defineEmits<{
   (e: 'promote-current-as-baseline'): void
   (e: 'reset-to-baseline'): void
   (e: 'back-step2'): void
+  (e: 'cancel-simulation'): void
 }>()
+
+const compareButtonState = computed(() => {
+  if (props.isSimulating) {
+    const pct =
+      props.progressTotal > 0
+        ? Math.min(100, Math.round((props.progressCompleted / props.progressTotal) * 100))
+        : 0
+    return {
+      disabled: true,
+      label: `Simulation en cours d'exécution... (${pct} %)`,
+      showSpinner: true,
+    }
+  }
+  if (!props.editableDeck.isDatabaseLoaded) {
+    return {
+      disabled: true,
+      label: 'Simulation bloquée : la base cards_database.json est vide',
+      showSpinner: false,
+    }
+  }
+  if (!props.editableDeck.isFullyResolved || props.editableDeck.unresolvedCount > 0) {
+    return {
+      disabled: true,
+      label: `Simulation bloquée : ${props.editableDeck.unresolvedCount} carte(s) absente(s) de cards_database.json`,
+      showSpinner: false,
+    }
+  }
+  if (props.editableDeck.totalCards !== 60) {
+    return {
+      disabled: true,
+      label: `Simulation bloquée : Le deck contient ${props.editableDeck.totalCards}/60 cartes (60 requises)`,
+      showSpinner: false,
+    }
+  }
+  if (!props.editableDeck.hasAtLeastOneBasic) {
+    return {
+      disabled: true,
+      label: 'Simulation bloquée : Aucun Pokémon de base (au moins 1 requis)',
+      showSpinner: false,
+    }
+  }
+  return {
+    disabled: false,
+    label: 'Simuler la Variante & Comparer',
+    showSpinner: false,
+  }
+})
 
 const catalogSearchQuery = ref('')
 const showExportPanel = ref(false)
@@ -695,7 +743,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             >
               <span>{{ diff.deltaQty > 0 ? `+${diff.deltaQty}` : diff.deltaQty }}</span>
               <span class="font-sans font-semibold">{{ diff.nameFr }}</span>
-              <span class="text-[10px] opacity-75">({{ diff.oldQty }} ➔ {{ diff.newQty }})</span>
+              <span class="text-[10px] opacity-75">({{ diff.oldQty }} → {{ diff.newQty }})</span>
             </span>
           </div>
           <p v-else class="mt-1 text-xs text-slate-500">
@@ -731,7 +779,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                     "
                   >
                     Δ {{ formatSignedDelta(currentSummary.globalWinRate - baselineSummary.globalWinRate, '%') }}
-                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.globalWinRate.toFixed(1) }}% ➔ {{ currentSummary.globalWinRate.toFixed(1) }}%)</span>
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.globalWinRate.toFixed(1) }}% → {{ currentSummary.globalWinRate.toFixed(1) }}%)</span>
                   </span>
                 </td>
               </tr>
@@ -751,7 +799,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                     "
                   >
                     Δ {{ formatSignedDelta(currentSummary.gamesWithMulliganRate - baselineSummary.gamesWithMulliganRate, '%') }}
-                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}% ➔ {{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%)</span>
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.gamesWithMulliganRate.toFixed(1) }}% → {{ currentSummary.gamesWithMulliganRate.toFixed(1) }}%)</span>
                   </span>
                 </td>
               </tr>
@@ -771,7 +819,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                     "
                   >
                     Δ {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - baselineSummary.avgPlayerPrizesWon) }}
-                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} ➔ {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }})</span>
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgPlayerPrizesWon.toFixed(2) }} → {{ currentSummary.avgPlayerPrizesWon.toFixed(2) }})</span>
                   </span>
                 </td>
               </tr>
@@ -791,7 +839,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                     "
                   >
                     Δ {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
-                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} ➔ {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }})</span>
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} → {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }})</span>
                   </span>
                 </td>
               </tr>
@@ -808,7 +856,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
               <span class="rounded bg-slate-200 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
                 Deck Référence (Baseline) : 60 cartes
               </span>
-              <span class="text-slate-300">➔</span>
+              <span class="text-slate-300">→</span>
               <span class="rounded bg-indigo-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-800">
                 Variante Active : {{ editableDeck.totalCards }} / 60 cartes
               </span>
@@ -841,29 +889,42 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
               </span>
             </div>
 
-            <!-- Bouton [Simuler la Variante & Comparer] (strictement disabled si != 60 cartes) -->
+            <!-- Bouton [Annuler la simulation] -->
+            <button
+              v-if="isSimulating"
+              type="button"
+              @click="emit('cancel-simulation')"
+              class="inline-flex items-center gap-1.5 rounded-xl border border-rose-600 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-rose-700 active:bg-rose-800"
+            >
+              <svg class="h-4 w-4 shrink-0 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <span>Annuler la simulation</span>
+            </button>
+
+            <!-- Bouton [Simuler la Variante & Comparer] -->
             <button
               type="button"
-              :disabled="
-                editableDeck.totalCards !== 60 ||
-                !editableDeck.hasAtLeastOneBasic ||
-                !editableDeck.isFullyResolved ||
-                !editableDeck.isDatabaseLoaded ||
-                isSimulating
-              "
+              :disabled="compareButtonState.disabled"
               @click="emit('rerun-and-compare')"
-              class="rounded-xl border px-5 py-2.5 text-xs font-bold transition shadow-xs sm:text-sm"
+              class="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-bold transition shadow-xs sm:text-sm"
               :class="
-                editableDeck.totalCards === 60 &&
-                editableDeck.hasAtLeastOneBasic &&
-                editableDeck.isFullyResolved &&
-                editableDeck.isDatabaseLoaded &&
-                !isSimulating
-                  ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700'
-                  : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                compareButtonState.disabled
+                  ? 'opacity-60 cursor-not-allowed bg-slate-300 text-slate-600 border-slate-300'
+                  : 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700'
               "
             >
-              Simuler la Variante &amp; Comparer
+              <svg
+                v-if="compareButtonState.showSpinner"
+                class="h-4 w-4 animate-spin text-slate-600"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+              </svg>
+              <span>{{ compareButtonState.label }}</span>
             </button>
           </div>
         </div>

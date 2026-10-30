@@ -11,12 +11,15 @@ const props = defineProps<{
   deck: ParsedDeck
   isDebugMode: boolean
   maxHardwareWorkers: number
+  isSimulating?: boolean
+  progressPercent?: number
 }>()
 
 const emit = defineEmits<{
   (e: 'update-config', updated: SimulationConfig): void
   (e: 'back-step1'): void
   (e: 'launch-simulation'): void
+  (e: 'cancel-simulation'): void
 }>()
 
 const iterationPresets = [100, 1000, 10000, 100000]
@@ -108,16 +111,61 @@ function updateSeedValue(val: number) {
   }
 }
 
-const isValidConfig = computed(() => {
-  return (
-    props.deck.isDatabaseLoaded &&
-    props.deck.isFullyResolved &&
-    props.config.selectedOpponentIds.length >= 1 &&
-    props.config.iterations >= 1 &&
-    props.config.iterations <= 100000000 &&
-    props.config.maxTurns >= 1 &&
-    props.config.maxTurns <= 20
-  )
+const launchButtonState = computed(() => {
+  if (props.isSimulating) {
+    return {
+      disabled: true,
+      label: `Simulation en cours d'exécution... (${props.progressPercent ?? 0} %)`,
+      showSpinner: true,
+    }
+  }
+  if (!props.deck.cards || props.deck.cards.length === 0) {
+    return {
+      disabled: true,
+      label: 'Veuillez importer et valider une liste PTCGL',
+      showSpinner: false,
+    }
+  }
+  if (!props.deck.isDatabaseLoaded) {
+    return {
+      disabled: true,
+      label: 'Simulation bloquée : la base de données cards_database.json est vide',
+      showSpinner: false,
+    }
+  }
+  if (!props.deck.isFullyResolved || props.deck.unresolvedCount > 0) {
+    return {
+      disabled: true,
+      label: `Simulation bloquée : ${props.deck.unresolvedCount} carte(s) absente(s) de cards_database.json`,
+      showSpinner: false,
+    }
+  }
+  if (props.deck.totalCards !== 60) {
+    return {
+      disabled: true,
+      label: `Simulation bloquée : Le deck contient ${props.deck.totalCards}/60 cartes (60 requises)`,
+      showSpinner: false,
+    }
+  }
+  if (!props.deck.hasAtLeastOneBasic) {
+    return {
+      disabled: true,
+      label: 'Simulation bloquée : Aucun Pokémon de base (au moins 1 requis)',
+      showSpinner: false,
+    }
+  }
+  if (props.config.selectedOpponentIds.length === 0) {
+    return {
+      disabled: true,
+      label: 'Sélectionnez au moins 1 deck adverse à affronter',
+      showSpinner: false,
+    }
+  }
+  return {
+    disabled: false,
+    label: `Lancer la simulation (${props.config.iterations.toLocaleString('fr-FR')} parties)`,
+    showSpinner: false,
+  }
 })
 </script>
 
@@ -150,17 +198,38 @@ const isValidConfig = computed(() => {
             ← Retour au Deck
           </button>
           <button
+            v-if="isSimulating"
             type="button"
-            :disabled="!isValidConfig || !deck.isFullyResolved || !deck.isDatabaseLoaded"
+            @click="emit('cancel-simulation')"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-rose-600 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-rose-700 active:bg-rose-800"
+          >
+            <svg class="h-4 w-4 shrink-0 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span>Annuler la simulation</span>
+          </button>
+          <button
+            type="button"
+            :disabled="launchButtonState.disabled"
             @click="emit('launch-simulation')"
-            class="rounded-lg border px-5 py-2.5 text-sm font-semibold transition"
+            class="inline-flex items-center gap-2 rounded-lg border px-5 py-2.5 text-sm font-semibold transition"
             :class="
-              isValidConfig && deck.isFullyResolved && deck.isDatabaseLoaded
-                ? 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
-                : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+              launchButtonState.disabled
+                ? 'opacity-60 cursor-not-allowed bg-slate-300 text-slate-600 border-slate-300'
+                : 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800'
             "
           >
-            Lancer la Simulation ({{ config.iterations.toLocaleString('fr-FR') }} parties) →
+            <svg
+              v-if="launchButtonState.showSpinner"
+              class="h-4 w-4 animate-spin text-slate-600"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <span>{{ launchButtonState.label }}</span>
           </button>
         </div>
       </div>
