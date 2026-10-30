@@ -3,17 +3,50 @@
  * Adaptée de osamc/pokemon-tcg-deck-parser
  */
 export const SET_CODE_ALIASES: Record<string, string> = {
+  // Mega Evolution
+  ASC: 'me02.5',
+  HER: 'me02.5',
+  POR: 'me03',
+  ORP: 'me03',
+  MEG: 'me01',
+  PFL: 'me02',
+  PFF: 'me02',
+  CRI: 'me04',
+  CHA: 'me04',
+  PBL: 'me05',
+  DKN: 'me05',
+  MEE: 'mee',
+  MEP: 'mep',
+  'PR-ME': 'mep',
+  '30C': '30th',
+  '30TH': '30th',
+  '30CC': '30th-c',
+  '30TH-C': '30th-c',
+
+  // Scarlet & Violet
+  WHT: 'sv10.5w',
+  BLK: 'sv10.5b',
+  'PR-SV': 'svp',
+  'PR-SVI': 'svp',
+  SVP: 'svp',
+  SVE: 'sve',
+
+  // Sword & Shield
   'PR-SW': 'swshp',
   'PR-SWSH': 'swshp',
   SWSHP: 'swshp',
   SWSH: 'swshp',
-  'PR-SV': 'svp',
-  'PR-SVI': 'svp',
-  SVP: 'svp',
+  TRR: 'ex7',
+
+  // Sun & Moon
   'PR-SM': 'smp',
   SMP: 'smp',
+
+  // XY
   'PR-XY': 'xyp',
   XYP: 'xyp',
+
+  // Black & White
   'PR-BW': 'bwp',
   'PR-BLW': 'bwp',
   BWP: 'bwp',
@@ -23,12 +56,7 @@ export const SET_CODE_ALIASES: Record<string, string> = {
   DPP: 'dpp',
   'PR-NP': 'np',
   NP: 'np',
-  MEP: 'mep',
-  'PR-ME': 'mep',
-  SVE: 'sve',
-  MEE: 'sve',
   ENERGY: 'sve',
-  TRR: 'ex7',
 }
 
 export const AMBIGUOUS_SET_CODES: Record<string, string[]> = {
