@@ -240,6 +240,7 @@ def _execute_run_pipeline(
             f"[green]✓[/green] Modèle GGUF [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) chargé en mémoire avec accélération Metal."
         )
 
+        failed_cards: List[Tuple[str, str, str]] = []
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -257,14 +258,27 @@ def _execute_run_pipeline(
                     task_id,
                     description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
                 )
-                engine_card = compiler_engine.compile_card(bundle)
-                out_path = compiled_dir / f"{bundle.card_id}.json"
-                out_path.write_text(
-                    json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                compiled_results.append(engine_card)
-                progress.advance(task_id)
+                try:
+                    engine_card = compiler_engine.compile_card(bundle)
+                    out_path = compiled_dir / f"{bundle.card_id}.json"
+                    out_path.write_text(
+                        json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    compiled_results.append(engine_card)
+                except Exception as card_err:
+                    console.print(
+                        f"\n[bold red]✗ Erreur lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
+                    )
+                    failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
+                finally:
+                    progress.advance(task_id)
+
+        if failed_cards:
+            console.print(
+                f"\n[bold red]⚠️ {len(failed_cards)} carte(s) ont échoué lors de la compilation :[/bold red] "
+                f"{', '.join(c[0] for c in failed_cards)}"
+            )
     elif not static_energy_ids:
         console.print(
             "[green]✓[/green] Toutes les cartes cibles sont déjà compilées et valides (utilisez [bold]--force[/bold] pour recompiler)."
