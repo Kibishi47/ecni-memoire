@@ -357,12 +357,20 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
 export function exploreTurnBranches(
   turnStartState: MatchState,
   maxBranches: MaxBranchesSetting,
-  maxActionDepth = 9,
+  maxActionDepth = 6,
+  customBeamWidth?: number,
 ): { completedBranches: PartialTurnNode[]; totalExplored: number } {
   const perspectiveIndex = turnStartState.activePlayerIndex
-  const numericLimit = maxBranches === 'INFINITE' ? 140 : maxBranches
+  const numericLimit = maxBranches === 'INFINITE' ? 80 : maxBranches
   const perStepBeamWidth =
-    maxBranches === 'INFINITE' ? 48 : Math.max(8, Math.min(36, Math.round(numericLimit * 1.15)))
+    customBeamWidth ??
+    (maxBranches === 'INFINITE'
+      ? 24
+      : maxBranches === 50
+        ? 14
+        : maxBranches === 20
+          ? 8
+          : 5)
 
   const visitedIntermediateHashes = new Set<string>()
   const completedByHash = new Map<string, PartialTurnNode>()
@@ -526,7 +534,7 @@ function simulateBestSingleTurnRollout(
     }
   }
 
-  const { completedBranches } = exploreTurnBranches(rolloutStart, innerBeam, 6)
+  const { completedBranches } = exploreTurnBranches(rolloutStart, innerBeam, 4, 3)
   const bestBranch = completedBranches[0]!
   return {
     bestEndState: bestBranch.state,
@@ -550,17 +558,17 @@ export function selectBestTurnBranch(
   const perspectiveIndex = turnStartState.activePlayerIndex
   const opponentIndex: 0 | 1 = perspectiveIndex === 0 ? 1 : 0
 
-  const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 8)
+  const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 6)
 
   // Nombre de branches candidates évaluées avec le rollout profond 3-ply (T -> T_adv -> T+1)
   const deepLookaheadCap =
     maxBranches === 8
-      ? 4
+      ? 3
       : maxBranches === 20
-        ? 6
+        ? 5
         : maxBranches === 50
-          ? 10
-          : 14
+          ? 8
+          : 12
 
   const candidatesToEvaluate = completedBranches.slice(0, deepLookaheadCap)
   const innerRolloutBeam: MaxBranchesSetting = 8
