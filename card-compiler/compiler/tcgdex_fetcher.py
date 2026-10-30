@@ -16,11 +16,17 @@ import asyncio
 import json
 import re
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+
+try:
+    from tcgdexsdk import TCGdex
+except ImportError:
+    TCGdex = None
 
 from compiler.schemas import (
     CardCategory,
@@ -30,6 +36,13 @@ from compiler.schemas import (
 )
 
 TCGDEX_API_BASE = "https://api.tcgdex.net/v2"
+
+
+class FetcherProvider(str, Enum):
+    """Fournisseurs d'accès aux données de cartes Pokémon TCG."""
+
+    sdk = "sdk"
+    rest = "rest"
 
 # Liste officielle des 11 cartes stratégiques de référence du mode --test
 TEST_CARD_IDS: List[str] = [
@@ -306,21 +319,34 @@ def detect_rule_box_and_prizes(name_fr: str, name_en: Optional[str], raw_fr: Dic
 class TCGdexFetcher:
     """Client asynchrone TCGdex gérant l'index global, le cache brut et la résolution de lignée d'évolution."""
 
-    def __init__(self, data_dir: Path, timeout_seconds: float = 25.0) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        timeout_seconds: float = 25.0,
+        provider: FetcherProvider = FetcherProvider.sdk,
+    ) -> None:
         self.data_dir = data_dir
         self.raw_dir = self.data_dir / "raw_tcgdex"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.raw_dir / "_cards_index.json"
         self.timeout_seconds = timeout_seconds
+        self.provider = provider
         self._name_to_pre_evo_cache: Dict[str, Optional[str]] = {}
         self._cards_index_cache: Optional[List[Dict[str, Any]]] = None
+
+        if self.provider == FetcherProvider.sdk and TCGdex is not None:
+            self._sdk_fr = TCGdex("fr")
+            self._sdk_en = TCGdex("en")
+        else:
+            self._sdk_fr = None
+            self._sdk_en = None
 
     async def fetch_cards_index(
         self,
         client: httpx.AsyncClient,
         force: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Étape 1 : Récupère la liste globale de toutes les cartes via `GET /v2/fr/cards` et la met en cache."""
+        """Étape 1 : Récupère la liste globale de toutes les cartes via SDK ou `GET /v2/fr/cards` et la met en cache."""
         if self._cards_index_cache is not None and not force:
             return self._cards_index_cache
 
@@ -333,6 +359,25 @@ class TCGdexFetcher:
             except Exception:
                 pass
 
+        # 1. Tentative via SDK officiel si provider SDK
+        if self.provider == FetcherProvider.sdk and self._sdk_fr is not None:
+            try:
+                cards_list_obj = await asyncio.to_thread(self._sdk_fr.card.listSync)
+                if cards_list_obj and isinstance(cards_list_obj, list):
+                    cards_list = [asdict(c) for c in cards_list_obj if hasattr(c, "id")]
+                    for item in cards_list:
+                        item.pop("sdk", None)
+                    if cards_list:
+                        self.index_path.write_text(
+                            json.dumps(cards_list, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        self._cards_index_cache = cards_list
+                        return cards_list
+            except Exception:
+                pass
+
+        # 2. Requête REST via httpx
         url = f"{TCGDEX_API_BASE}/fr/cards"
         response = await client.get(url)
         response.raise_for_status()
@@ -353,8 +398,24 @@ class TCGdexFetcher:
         lang: str,
         card_id: str,
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        """Interroge `/v2/{lang}/cards/{candidate}` en testant automatiquement les variantes avec/sans zéro initial."""
-        for candidate in generate_candidate_ids(card_id):
+        """Interroge le provider sélectionné (SDK ou REST) en testant automatiquement les variantes avec/sans zéro initial."""
+        sdk_instance = self._sdk_fr if lang == "fr" else self._sdk_en
+        candidates = generate_candidate_ids(card_id)
+
+        # 1. Tentative via SDK Python officiel TCGdex si activé
+        if self.provider == FetcherProvider.sdk and sdk_instance is not None:
+            for candidate in candidates:
+                try:
+                    card_obj = await asyncio.to_thread(sdk_instance.card.getSync, candidate)
+                    if card_obj is not None and getattr(card_obj, "id", None):
+                        data = asdict(card_obj)
+                        data.pop("sdk", None)
+                        return data, candidate
+                except Exception:
+                    continue
+
+        # 2. Requête REST directe via httpx (provider REST ou fallback si SDK indisponible)
+        for candidate in candidates:
             url = f"{TCGDEX_API_BASE}/{lang}/cards/{urllib.parse.quote(candidate)}"
             try:
                 resp = await client.get(url)
@@ -366,6 +427,7 @@ class TCGdexFetcher:
                     continue
             except httpx.HTTPError:
                 continue
+
         return None, None
 
     async def _resolve_pre_evolution_name(
@@ -649,29 +711,46 @@ class TCGdexFetcher:
 
         Optimise la sélection en filtrant les extensions Écarlate et Violet (`sv*`) de l'index global
         ou en vérifiant `legal.standard` lors du téléchargement détaillé.
+        Exclut les sets futurs ou placeholders non encore publiés sur TCGdex (ex: sv09, sv10, sv10.5).
         """
         cards_index = await self.fetch_cards_index(client, force=False)
-        # Les cartes Standard actuelles appartiennent aux séries Écarlate et Violet (sv*)
+
+        # Extensions Standard officielles parues de l'ère Écarlate et Violet (bloc SV)
+        # Exclut les sets futurs / placeholders non publiés (ex: sv09, sv10, sv10.5) qui provoquent des 404
+        known_released_prefixes = {
+            "sv01", "sv02", "sv03", "sv03.5", "sv04", "sv04.5",
+            "sv05", "sv06", "sv06.5", "sv07", "sv08", "sv08.5",
+            "sve", "svp",
+        }
+
         sv_candidates: List[str] = []
+        unreleased_sv_candidates: List[str] = []
         other_candidates: List[str] = []
+
         for entry in cards_index:
             if not isinstance(entry, dict):
                 continue
             cid = str(entry.get("id") or "").strip()
             if not cid:
                 continue
+
             # Si l'index inclut déjà l'objet legal, on l'utilise directement
             legal = entry.get("legal")
             if isinstance(legal, dict) and "standard" in legal:
                 if legal.get("standard") is True:
                     sv_candidates.append(cid)
                 continue
-            if cid.lower().startswith("sv"):
+
+            set_prefix = cid.split("-")[0].lower() if "-" in cid else cid.lower()
+            if set_prefix in known_released_prefixes:
                 sv_candidates.append(cid)
+            elif cid.lower().startswith("sv"):
+                unreleased_sv_candidates.append(cid)
             else:
                 other_candidates.append(cid)
 
-        selected = sv_candidates if sv_candidates else other_candidates
+        # Priorité absolue aux extensions Standard parues, puis unreleased en fin de liste
+        selected = sv_candidates if sv_candidates else (unreleased_sv_candidates or other_candidates)
         if limit is not None and limit > 0:
             return selected[:limit]
         return selected
@@ -705,10 +784,16 @@ class TCGdexFetcher:
 
             async def _fetch_one(cid: str) -> Optional[FetchedCardBundle]:
                 async with semaphore:
-                    bundle = await self.fetch_card_by_id(client, cid, force=force)
-                    if mode == "standard" and not bundle.identity.legalStandard:
+                    try:
+                        bundle = await self.fetch_card_by_id(client, cid, force=force)
+                        if mode == "standard" and not bundle.identity.legalStandard:
+                            return None
+                        return bundle
+                    except Exception:
+                        # En mode batch ou standard, une carte introuvable sur TCGdex
+                        # (ex: placeholders de sets non parus, 404 temporaire) ne doit pas
+                        # faire planter tout le pipeline : on l'ignore proprement.
                         return None
-                    return bundle
 
             results = await asyncio.gather(*[_fetch_one(cid) for cid in target_ids])
             for res in results:
