@@ -42,6 +42,7 @@ from compiler.llm_engine import (
     LocalLLMCardCompiler,
     ModelTier,
 )
+from compiler.lm_studio_compiler import LMStudioCardCompiler
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import CardSubCategory, EngineCardModel
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
@@ -64,6 +65,13 @@ console = Console()
 class RunMode(str, Enum):
     test = "test"
     standard = "standard"
+
+
+class LLMProvider(str, Enum):
+    """Fournisseurs d'exécution pour le modèle LLM."""
+
+    local = "local"
+    lm_studio = "lm_studio"
 
 
 def get_project_root() -> Path:
@@ -111,12 +119,25 @@ def rebuild_consolidated_database(
     return db_path
 
 
+def create_compiler_engine(
+    provider: LLMProvider,
+    tier: ModelTier = ModelTier.qwen3,
+    fast: bool = False,
+    hf_token: Optional[str] = None,
+) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
+    """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
+    if provider == LLMProvider.lm_studio:
+        return LMStudioCardCompiler()
+    return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token)
+
+
 def _execute_run_pipeline(
     mode: RunMode,
     test_flag: bool,
     standard_flag: bool,
     ids: Optional[str],
     provider: FetcherProvider,
+    llm_provider: LLMProvider,
     tier: ModelTier,
     fast: bool,
     force: bool,
@@ -139,30 +160,49 @@ def _execute_run_pipeline(
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
 
-    compiler_engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
-    model_repo = compiler_engine_preview.repo_id
-    model_file = compiler_engine_preview.filename
-
     mode_label = (
         f"IDs personnalisés ({len(custom_ids)})"
         if custom_ids
         else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
     )
 
-    token_status = (
-        "[green]Configuré ✓ (téléchargement accéléré)[/green]"
-        if compiler_engine_preview.hf_token
-        else "[yellow]Non renseigné (anonyme)[/yellow]"
-    )
+    if llm_provider == LLMProvider.lm_studio:
+        engine_preview = LMStudioCardCompiler()
+        title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (Distant SSH / Local REST)[/bold cyan]"
+        if engine_preview.ssh_host:
+            llm_lines = (
+                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Distant via SSH)[/bold magenta]\n"
+                f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
+                f"• [bold]Tunnel SSH[/bold] : {'Actif (port local ' + str(engine_preview.local_port) + ' -> distant ' + str(engine_preview.remote_port) + ')' if engine_preview.use_tunnel else 'Désactivé (connexion directe)'}\n"
+                f"• [bold]Modèle configuré[/bold] : [yellow]{engine_preview.model_name or 'Auto-détecté via lms'}[/yellow]"
+            )
+        else:
+            llm_lines = (
+                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Local REST)[/bold magenta]\n"
+                f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
+                f"• [bold]Modèle configuré[/bold] : [yellow]{engine_preview.model_name or 'Auto-détecté via lms'}[/yellow]"
+            )
+    else:
+        engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
+        title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]"
+        token_status = (
+            "[green]Configuré ✓ (téléchargement accéléré)[/green]"
+            if engine_preview.hf_token
+            else "[yellow]Non renseigné (anonyme)[/yellow]"
+        )
+        llm_lines = (
+            f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Metal in-memory)[/bold magenta]\n"
+            f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{engine_preview.repo_id}[/yellow] ([green]{engine_preview.filename}[/green])\n"
+            f"• [bold]HF Token[/bold] : {token_status}\n"
+            f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]"
+        )
 
     console.print(
         Panel.fit(
-            f"[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]\n"
+            f"{title_text}\n"
             f"• [bold]Mode[/bold] : {mode_label}\n"
             f"• [bold]Fournisseur TCGdex[/bold] : [bold green]{provider.value.upper()}[/bold green] (SDK Python par défaut)\n"
-            f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{model_repo}[/yellow] ([green]{model_file}[/green])\n"
-            f"• [bold]HF Token[/bold] : {token_status}\n"
-            f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
+            f"{llm_lines}\n"
             f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}",
             border_style="cyan",
         )
@@ -230,55 +270,63 @@ def _execute_run_pipeline(
         )
 
     if bundles_to_compile:
-        compiler_engine = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
-        with console.status(
-            f"[bold magenta]Étape 3a : Sélection & chargement de {compiler_engine.repo_id} ({compiler_engine.filename}) en RAM/VRAM (Metal)...[/bold magenta]"
-        ):
-            compiler_engine.load_model_in_memory()
-
-        console.print(
-            f"[green]✓[/green] Modèle GGUF [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) chargé en mémoire avec accélération Metal."
+        compiler_engine = create_compiler_engine(
+            provider=llm_provider,
+            tier=effective_tier,
+            fast=fast,
+            hf_token=hf_token,
         )
+        try:
+            with console.status(
+                f"[bold magenta]Étape 3a : Connexion & initialisation du moteur {compiler_engine.repo_id} ({compiler_engine.filename})...[/bold magenta]"
+            ):
+                compiler_engine.load_model_in_memory()
 
-        failed_cards: List[Tuple[str, str, str]] = []
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            task_id = progress.add_task(
-                "[cyan]Compilation GBNF des cartes...",
-                total=len(bundles_to_compile),
-            )
-            for bundle in bundles_to_compile:
-                progress.update(
-                    task_id,
-                    description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
-                )
-                try:
-                    engine_card = compiler_engine.compile_card(bundle)
-                    out_path = compiled_dir / f"{bundle.card_id}.json"
-                    out_path.write_text(
-                        json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    compiled_results.append(engine_card)
-                except Exception as card_err:
-                    console.print(
-                        f"\n[bold red]✗ Erreur lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
-                    )
-                    failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
-                finally:
-                    progress.advance(task_id)
-
-        if failed_cards:
             console.print(
-                f"\n[bold red]⚠️ {len(failed_cards)} carte(s) ont échoué lors de la compilation :[/bold red] "
-                f"{', '.join(c[0] for c in failed_cards)}"
+                f"[green]✓[/green] Moteur LLM [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) prêt."
             )
+
+            failed_cards: List[Tuple[str, str, str]] = []
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task_id = progress.add_task(
+                    "[cyan]Compilation GBNF des cartes...",
+                    total=len(bundles_to_compile),
+                )
+                for bundle in bundles_to_compile:
+                    progress.update(
+                        task_id,
+                        description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
+                    )
+                    try:
+                        engine_card = compiler_engine.compile_card(bundle)
+                        out_path = compiled_dir / f"{bundle.card_id}.json"
+                        out_path.write_text(
+                            json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        compiled_results.append(engine_card)
+                    except Exception as card_err:
+                        console.print(
+                            f"\n[bold red]✗ Erreur lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
+                        )
+                        failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
+                    finally:
+                        progress.advance(task_id)
+
+            if failed_cards:
+                console.print(
+                    f"\n[bold red]⚠️ {len(failed_cards)} carte(s) ont échoué lors de la compilation :[/bold red] "
+                    f"{', '.join(c[0] for c in failed_cards)}"
+                )
+        finally:
+            compiler_engine.close()
     elif not static_energy_ids:
         console.print(
             "[green]✓[/green] Toutes les cartes cibles sont déjà compilées et valides (utilisez [bold]--force[/bold] pour recompiler)."
@@ -386,6 +434,13 @@ def run_command(
         "-p",
         help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
     ),
+    llm_provider: LLMProvider = typer.Option(
+        LLMProvider.local,
+        "--llm-provider",
+        "-lp",
+        envvar=["LLM_PROVIDER"],
+        help="Fournisseur d'inférence LLM : 'local' (Apple Metal llama.cpp local par défaut) ou 'lm_studio' (machine distante via SSH ou serveur LM Studio).",
+    ),
     tier: ModelTier = typer.Option(
         ModelTier.qwen3,
         "--tier",
@@ -421,6 +476,7 @@ def run_command(
         standard_flag=standard_flag,
         ids=ids,
         provider=provider,
+        llm_provider=llm_provider,
         tier=tier,
         fast=fast,
         force=force,
@@ -441,6 +497,13 @@ def compile_alias(
         "-p",
         help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
     ),
+    llm_provider: LLMProvider = typer.Option(
+        LLMProvider.local,
+        "--llm-provider",
+        "-lp",
+        envvar=["LLM_PROVIDER"],
+        help="Fournisseur d'inférence LLM : 'local' ou 'lm_studio'.",
+    ),
     tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t"),
     fast: bool = typer.Option(False, "--fast"),
     force: bool = typer.Option(False, "--force"),
@@ -459,6 +522,7 @@ def compile_alias(
         standard_flag=standard_flag,
         ids=ids,
         provider=provider,
+        llm_provider=llm_provider,
         tier=tier,
         fast=fast,
         force=force,

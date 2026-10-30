@@ -51,6 +51,10 @@ Options disponibles sur `run` (alias `compile`) :
 - `--mode test` (défaut) : Compile les 10 cartes stratégiques de référence (`TEST_CARD_IDS`).
 - `--mode standard` : Compile toutes les cartes légales au format Standard (`legal.standard == true`).
 - `--ids sv04-125,sv03-125` : Compile uniquement la liste d'identifiants fournie.
+- `--provider sdk|rest` (défaut : `sdk`) : Source des données TCGdex (SDK officiel `tcgdex-sdk` ou API REST `httpx`).
+- `--llm-provider local|lm_studio` (défaut : `local`, ou configurable via `LLM_PROVIDER` dans `.env`) :
+  - `local` : Moteur in-memory Apple Metal M4 local via `llama-cpp-python` (0 serveur externe).
+  - `lm_studio` : Exécution sur LM Studio (local ou machine distante via SSH et tunnel sécurisé, pilotable avec `lms`). Les données et cartes générées restent 100 % locales sur votre machine.
 - `--tier qwen3|max|fast` (défaut : `qwen3`) :
   - `qwen3` : `Qwen/Qwen3-14B-GGUF` (`Q6_K` / `Q5_K_M`, ~11-12 Go, sélection dynamique via `list_repo_files` et fallback automatique).
   - `max` : `Qwen/Qwen3-30B-A3B-GGUF` ou `Qwen/Qwen2.5-Coder-32B-Instruct-GGUF` (`Q4_K_M`, ~16-18.5 Go).
@@ -59,7 +63,28 @@ Options disponibles sur `run` (alias `compile`) :
 - `--fast` : Raccourci pour `--tier fast`.
 - `--force` : Force la recompilation même si le fichier existe déjà dans `data/compiled_cards/`.
 
-### 2. Inspecter le modèle JSON d'une carte compilée
+### 2. Exécution Distante sur Serveur GPU via SSH & LM Studio (`lms`)
+
+Si vous disposez d'un serveur ou PC distant équipé d'un GPU plus puissant et de LM Studio avec son CLI `lms` :
+1. Renseignez la configuration SSH dans votre fichier `.env` :
+   ```bash
+   LLM_PROVIDER=lm_studio
+   SSH_HOST=ip_ou_domaine_serveur
+   SSH_USER=ubuntu
+   SSH_KEY_PATH=~/.ssh/id_ed25519
+   LM_STUDIO_PORT=1234
+   LM_STUDIO_LOCAL_PORT=12345
+   LM_STUDIO_MODEL=qwen2.5-coder-14b-instruct
+   LM_STUDIO_USE_TUNNEL=true
+   LM_STUDIO_AUTO_START=true
+   ```
+2. Lancez la compilation depuis votre ordinateur :
+   ```bash
+   python -m compiler.cli run --llm-provider lm_studio
+   ```
+   *Un tunnel SSH sécurisé (`127.0.0.1:12345 -> 127.0.0.1:1234`) est ouvert automatiquement pendant le traitement, et **tous les fichiers générés restent stockés localement sur votre ordinateur** dans `data/compiled_cards/` sans nécessiter de transfert SFTP/rsync.*
+
+### 3. Inspecter le modèle JSON d'une carte compilée
 
 ```bash
 python -m compiler.cli inspect sv04-125
