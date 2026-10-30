@@ -16,7 +16,17 @@ import type {
 } from '../types/cardModel'
 import { detectBasicEnergy, isEnergyCardName } from '../utils/energy'
 
-const compiledDb = rawDatabase as unknown as ConsolidatedCardsDatabase
+const compiledDb = (rawDatabase || {}) as unknown as ConsolidatedCardsDatabase
+const compiledCards: Record<string, EngineCardModel> =
+  compiledDb && typeof compiledDb === 'object' && compiledDb.cards ? compiledDb.cards : {}
+
+export function getCompiledCardsCount(): number {
+  return Object.keys(compiledCards).length
+}
+
+export function hasCompiledCardData(): boolean {
+  return getCompiledCardsCount() > 0
+}
 
 export function normalizeCardNameForMatch(name: string): string {
   return name
@@ -31,7 +41,7 @@ export function normalizeCardNameForMatch(name: string): string {
 // Catalogue consolidé : `cards_database.json` est prioritaire, complété par `FALLBACK_CARD_MODELS`
 export const UNIFIED_CARD_REGISTRY: Record<string, EngineCardModel> = {
   ...FALLBACK_CARD_MODELS,
-  ...compiledDb.cards,
+  ...compiledCards,
 }
 
 // Alias d'identifiants fréquents entre extensions PTCGL (ex: réimpressions ou promos)
@@ -67,7 +77,7 @@ for (const model of Object.values(FALLBACK_CARD_MODELS)) {
   byNormalizedName.set(normFr.replace(/\s+ex$/, ' ex'), { model, source: 'fallback_registry' })
 }
 
-for (const model of Object.values(compiledDb.cards)) {
+for (const model of Object.values(compiledCards)) {
   const normFr = normalizeCardNameForMatch(model.identity.nameFr)
   byNormalizedName.set(normFr, { model, source: 'compiled_db' })
   if (model.identity.nameEn) {
@@ -363,7 +373,7 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
  */
 export function getAllCatalogModels(): EngineCardModel[] {
   const map = new Map<string, EngineCardModel>()
-  for (const model of Object.values(compiledDb.cards)) {
+  for (const model of Object.values(compiledCards)) {
     map.set(model.cardId, model)
   }
   for (const model of Object.values(FALLBACK_CARD_MODELS)) {

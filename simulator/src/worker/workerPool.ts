@@ -2,6 +2,7 @@ import type { EngineCardModel } from '../types/cardModel'
 import type { ParsedDeck } from '../types/deck'
 import type { SimulationConfig, SimulationMetricsSummary } from '../types/simulator'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
+import { hasCompiledCardData } from '../data/cardCatalog'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
 import {
   mergeSimulationShards,
@@ -75,11 +76,22 @@ export class SimulationWorkerPool {
         ? config.fixedSeed
         : DEFAULT_BASE_SEED
 
+    if (!hasCompiledCardData()) {
+      throw new Error(
+        'Simulation impossible : la base de données cards_database.json est vide. Synchronisez les modèles de cartes avec npm run sync-cards.',
+      )
+    }
+
     const playerDeckModels = expandParsedDeckToModels(playerDeck)
     const opponentDecks = resolveOpponentDescriptors(config.selectedOpponentIds)
     if (opponentDecks.length === 0) {
       throw new Error('Au moins 1 deck adverse doit être sélectionné.')
     }
+
+    // Assurer que tous les objets envoyés au Web Worker sont de purs objets sérialisables (pas de Proxy Vue, Window, etc.)
+    const cleanConfig: SimulationConfig = JSON.parse(JSON.stringify(config))
+    const cleanPlayerDeckModels: EngineCardModel[] = JSON.parse(JSON.stringify(playerDeckModels))
+    const cleanOpponentDecks: OpponentDeckDescriptor[] = JSON.parse(JSON.stringify(opponentDecks))
 
     const desiredWorkers = Math.max(
       1,
@@ -103,9 +115,9 @@ export class SimulationWorkerPool {
         startGameIndex: nextStart,
         gameCount: countForShard,
         baseSeed,
-        config: structuredClone(config),
-        playerDeckModels,
-        opponentDecks,
+        config: JSON.parse(JSON.stringify(cleanConfig)),
+        playerDeckModels: cleanPlayerDeckModels,
+        opponentDecks: cleanOpponentDecks,
       })
       nextStart += countForShard
     }

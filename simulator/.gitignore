@@ -3,3 +3,7 @@ dist
 dist-ssr
 *.local
 .DS_Store
+
+# Fichier volumineux généré par card-compiler (ne pas versionner)
+src/data/cards_database.json
+

@@ -216,7 +216,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             @click="showExportPanel = !showExportPanel"
             class="rounded-lg border border-slate-300 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200"
           >
-            {{ showExportPanel ? '✕ Masquer Export PTCGL' : '📋 Exporter la Variante (PTCGL)' }}
+            {{ showExportPanel ? 'Masquer Export PTCGL' : 'Exporter la Variante (PTCGL)' }}
           </button>
         </div>
       </div>
@@ -286,7 +286,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             @click="copyExportedDeck"
             class="rounded-lg border border-slate-900 bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
           >
-            {{ copiedFeedback ? '✓ Copié dans le presse-papiers !' : 'Copier 1-clic (Presse-papiers)' }}
+            {{ copiedFeedback ? 'Copié dans le presse-papiers !' : 'Copier 1-clic (Presse-papiers)' }}
           </button>
 
           <button
@@ -313,9 +313,11 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div class="flex items-center gap-3">
             <div
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 font-mono text-lg font-bold text-white shadow-xs"
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs"
             >
-              ⚡
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
             </div>
             <div>
               <div class="text-[11px] font-bold uppercase tracking-wider text-indigo-800">
@@ -619,7 +621,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             </span>
           </div>
           <h2 class="mt-2 text-xl font-bold text-slate-900">
-            🧪 Atelier d'Optimisation A/B
+            Atelier d'Optimisation A/B
           </h2>
           <p class="mt-1 text-sm text-slate-600">
             Ajustez les ratios de vos cartes pour mesurer l'impact immédiat sur votre Win Rate par rapport au deck original.
@@ -633,7 +635,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
             @click="showExportPanel = !showExportPanel"
             class="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 shadow-2xs transition hover:bg-slate-50"
           >
-            {{ showExportPanel ? '✕ Masquer Export PTCGL' : '📋 Exporter la Variante (PTCGL)' }}
+            {{ showExportPanel ? 'Masquer Export PTCGL' : 'Exporter la Variante (PTCGL)' }}
           </button>
 
           <button
@@ -846,6 +848,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                 editableDeck.totalCards !== 60 ||
                 !editableDeck.hasAtLeastOneBasic ||
                 !editableDeck.isFullyResolved ||
+                !editableDeck.isDatabaseLoaded ||
                 isSimulating
               "
               @click="emit('rerun-and-compare')"
@@ -854,6 +857,7 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                 editableDeck.totalCards === 60 &&
                 editableDeck.hasAtLeastOneBasic &&
                 editableDeck.isFullyResolved &&
+                editableDeck.isDatabaseLoaded &&
                 !isSimulating
                   ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700'
                   : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
@@ -864,12 +868,25 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           </div>
         </div>
 
-        <!-- Alerte obligatoire si total != 60 -->
+        <!-- Alerte obligatoire si base de données non chargée -->
         <div
-          v-if="editableDeck.totalCards !== 60"
+          v-if="!editableDeck.isDatabaseLoaded"
           class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
         >
-          <span class="text-base">⚠️</span>
+          <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span>Simulation impossible : la base de données cards_database.json est vide.</span>
+        </div>
+
+        <!-- Alerte obligatoire si total != 60 -->
+        <div
+          v-else-if="editableDeck.totalCards !== 60"
+          class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
+        >
+          <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
           <span>Le deck doit contenir exactement 60 cartes pour lancer une comparaison (actuellement : {{ editableDeck.totalCards }} cartes).</span>
         </div>
 
@@ -878,7 +895,9 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           v-else-if="!editableDeck.hasAtLeastOneBasic"
           class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
         >
-          <span class="text-base">⚠️</span>
+          <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
           <span>Le deck doit contenir au moins 1 Pokémon de Base pour lancer une comparaison.</span>
         </div>
 
@@ -887,7 +906,9 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           v-else-if="!editableDeck.isFullyResolved"
           class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2"
         >
-          <span class="text-base">⚠️</span>
+          <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
           <span>Simulation impossible : {{ editableDeck.unresolvedCount }} carte(s) ajoutée(s) ne sont pas résolues dans la base de données.</span>
         </div>
 

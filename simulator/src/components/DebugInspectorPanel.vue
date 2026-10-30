@@ -331,7 +331,7 @@ function formatWinReason(reason: string | null): string {
               v-if="activeTurn.perturbationNote"
               class="rounded bg-amber-500 px-2 py-0.5 text-xs font-bold text-slate-950"
             >
-              ⚡ {{ activeTurn.perturbationNote }}
+              [Perturbation] {{ activeTurn.perturbationNote }}
             </span>
           </div>
 
@@ -393,14 +393,14 @@ function formatWinReason(reason: string | null): string {
                     :key="eIdx"
                     class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-900"
                   >
-                    ⚡ {{ en }}
+                    NRJ: {{ en }}
                   </span>
                   <span
                     v-for="(tl, tIdx) in displayedPlayerBoard.active.attachedTools"
                     :key="tIdx"
                     class="rounded bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-900"
                   >
-                    🛠️ {{ tl }}
+                    Outil: {{ tl }}
                   </span>
                   <span
                     v-if="
@@ -444,7 +444,7 @@ function formatWinReason(reason: string | null): string {
                       :key="eIdx"
                       class="rounded bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] text-amber-800"
                     >
-                      ⚡ {{ en }}
+                      NRJ: {{ en }}
                     </span>
                   </div>
                 </div>
@@ -521,14 +521,14 @@ function formatWinReason(reason: string | null): string {
                     :key="eIdx"
                     class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-900"
                   >
-                    ⚡ {{ en }}
+                    NRJ: {{ en }}
                   </span>
                   <span
                     v-for="(tl, tIdx) in displayedOpponentBoard.active.attachedTools"
                     :key="tIdx"
                     class="rounded bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-900"
                   >
-                    🛠️ {{ tl }}
+                    Outil: {{ tl }}
                   </span>
                   <span
                     v-if="
@@ -572,7 +572,7 @@ function formatWinReason(reason: string | null): string {
                       :key="eIdx"
                       class="rounded bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] text-amber-800"
                     >
-                      ⚡ {{ en }}
+                      NRJ: {{ en }}
                     </span>
                   </div>
                 </div>
@@ -638,7 +638,7 @@ function formatWinReason(reason: string | null): string {
                         : 'bg-slate-200 text-slate-700'
                     "
                   >
-                    {{ branch.branchId }} {{ branch.isChosen ? '— BRANCHE RETENUE ✓' : '— Écartée' }}
+                    {{ branch.branchId }} {{ branch.isChosen ? '— BRANCHE RETENUE' : '— Écartée' }}
                   </span>
                   <span class="text-xs font-semibold text-slate-600">
                     {{ branch.actions.length }} action(s) dans la séquence
