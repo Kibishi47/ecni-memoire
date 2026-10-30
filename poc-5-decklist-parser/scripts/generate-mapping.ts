@@ -1,12 +1,6 @@
 /**
  * Script de génération de la table de correspondance PTCGL <-> TCGdex
  * Exécutable via : npm run generate-mapping (ou node scripts/generate-mapping.ts)
- *
- * Ce script :
- * 1. Interroge l'API officielle TCGdex (/v2/en/sets et /v2/fr/sets) si le réseau est disponible.
- * 2. Applique la table d'alias officielle inspirée de osamc/pokemon-tcg-deck-parser
- *    et du registre des codes d'extension PTCGL / Limitless.
- * 3. Génère le fichier JSON statique `src/data/mapping_ptcgl_to_tcgdex.json` utilisé par l'application web.
  */
 
 import fs from 'node:fs'
@@ -41,10 +35,131 @@ export interface MappingDatabase {
 }
 
 /**
- * Base de référence vérifiée des extensions Pokémon TCG (Séries SV, SWSH, SM, XY et Promos/Énergies)
- * avec leurs identifiants TCGdex exacts et codes PTCGL officiels.
+ * Base de référence vérifiée des extensions Pokémon TCG (Mega Evolution, SV, SWSH, SM, XY, Promos et Énergies)
  */
 const VERIFIED_SETS_SEED: SetMappingEntry[] = [
+  // === Série Méga-Évolution (Mega Evolution - me) ===
+  {
+    setId: 'me01',
+    ptcglCode: 'MEG',
+    aliases: ['ME01', 'ME1'],
+    nameFr: 'Méga-Évolution',
+    nameEn: 'Mega Evolution',
+    serie: 'me',
+    officialCount: 132,
+    releaseDate: '2025-09-26',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'me02',
+    ptcglCode: 'PFL',
+    aliases: ['PFF', 'ME02', 'ME2'],
+    nameFr: 'Flammes Fantasmagoriques',
+    nameEn: 'Phantasmal Flames',
+    serie: 'me',
+    officialCount: 94,
+    releaseDate: '2025-11-28',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'me02.5',
+    ptcglCode: 'ASC',
+    aliases: ['HER', 'ME02.5', 'ME02PT5', 'ME2.5'],
+    nameFr: 'Héros Transcendants',
+    nameEn: 'Ascended Heroes',
+    serie: 'me',
+    officialCount: 217,
+    releaseDate: '2026-01-30',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'me03',
+    ptcglCode: 'POR',
+    aliases: ['ORP', 'ME03', 'ME3'],
+    nameFr: 'Équilibre Parfait',
+    nameEn: 'Perfect Order',
+    serie: 'me',
+    officialCount: 88,
+    releaseDate: '2026-03-27',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'me04',
+    ptcglCode: 'CRI',
+    aliases: ['CHA', 'ME04', 'ME4'],
+    nameFr: 'Chaos Ascendant',
+    nameEn: 'Chaos Rising',
+    serie: 'me',
+    officialCount: 86,
+    releaseDate: '2026-05-29',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'me05',
+    ptcglCode: 'PBL',
+    aliases: ['DKN', 'PIT', 'ME05', 'ME5'],
+    nameFr: 'Nuit Noire',
+    nameEn: 'Pitch Black',
+    serie: 'me',
+    officialCount: 84,
+    releaseDate: '2026-07-31',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: '30th',
+    ptcglCode: '30C',
+    aliases: ['30TH'],
+    nameFr: '30ᵉ Anniversaire',
+    nameEn: '30th Celebration',
+    serie: 'me',
+    officialCount: 30,
+    releaseDate: '2026-02-27',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: '30th-c',
+    ptcglCode: '30CC',
+    aliases: ['30TH-C', '30THC'],
+    nameFr: 'Collection Classique 30ᵉ Anniversaire',
+    nameEn: '30th Classic Collection',
+    serie: 'me',
+    officialCount: 30,
+    releaseDate: '2026-02-27',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'mee',
+    ptcglCode: 'MEE',
+    aliases: ['ENERGY-ME', 'ME-ENERGY'],
+    nameFr: 'Méga-Évolution Énergie',
+    nameEn: 'Mega Evolution Energy',
+    serie: 'me',
+    officialCount: 16,
+    releaseDate: '2025-09-26',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'mep',
+    ptcglCode: 'MEP',
+    aliases: ['PR-ME'],
+    nameFr: 'MEP Black Star Promos',
+    nameEn: 'MEP Black Star Promos',
+    serie: 'me',
+    officialCount: 80,
+    releaseDate: '2025-09-26',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+
   // === Série Écarlate et Violet (Scarlet & Violet - sv) ===
   {
     setId: 'sv01',
@@ -206,7 +321,7 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
     setId: 'sv10',
     ptcglCode: 'DRI',
     aliases: ['SV10'],
-    nameFr: 'Rivaux Destinés',
+    nameFr: 'Rivalités Destinées',
     nameEn: 'Destined Rivals',
     serie: 'sv',
     officialCount: 182,
@@ -215,11 +330,35 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
     legalExpanded: true,
   },
   {
+    setId: 'sv10.5w',
+    ptcglCode: 'WHT',
+    aliases: ['SV10.5W', 'WHITE'],
+    nameFr: 'Flamme Blanche',
+    nameEn: 'White Flare',
+    serie: 'sv',
+    officialCount: 86,
+    releaseDate: '2025-07-18',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sv10.5b',
+    ptcglCode: 'BLK',
+    aliases: ['SV10.5B', 'BLACK'],
+    nameFr: 'Foudre Noire',
+    nameEn: 'Black Bolt',
+    serie: 'sv',
+    officialCount: 86,
+    releaseDate: '2025-07-18',
+    legalStandard: true,
+    legalExpanded: true,
+  },
+  {
     setId: 'svp',
     ptcglCode: 'PR-SV',
     aliases: ['SVP', 'PR-SVI'],
-    nameFr: 'Promos Écarlate et Violet',
-    nameEn: 'Scarlet & Violet Promos',
+    nameFr: 'SVP Black Star Promos',
+    nameEn: 'SVP Black Star Promos',
     serie: 'sv',
     officialCount: 200,
     releaseDate: '2023-03-31',
@@ -229,9 +368,9 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
   {
     setId: 'sve',
     ptcglCode: 'SVE',
-    aliases: ['ENERGY', 'MEE'],
-    nameFr: 'Énergies Écarlate et Violet',
-    nameEn: 'Scarlet & Violet Energies',
+    aliases: ['ENERGY', 'MEE-BASE'],
+    nameFr: 'Écarlate et Violet Énergie',
+    nameEn: 'Scarlet & Violet Energy',
     serie: 'sv',
     officialCount: 16,
     releaseDate: '2023-03-31',
@@ -316,7 +455,7 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
     setId: 'swsh5',
     ptcglCode: 'BST',
     aliases: ['SWSH5', 'SWSH05'],
-    nameFr: 'Styles de Combat',
+    nameFr: 'Styles de combat',
     nameEn: 'Battle Styles',
     serie: 'swsh',
     officialCount: 163,
@@ -351,7 +490,7 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
   {
     setId: 'swsh7.5',
     ptcglCode: 'CEL',
-    aliases: ['SWSH7.5', 'SWSH07.5'],
+    aliases: ['CEL25', 'SWSH7.5'],
     nameFr: 'Célébrations',
     nameEn: 'Celebrations',
     serie: 'swsh',
@@ -448,101 +587,435 @@ const VERIFIED_SETS_SEED: SetMappingEntry[] = [
     setId: 'swshp',
     ptcglCode: 'PR-SW',
     aliases: ['SWSHP', 'PR-SWSH', 'SWSH'],
-    nameFr: 'Promos Épée et Bouclier',
-    nameEn: 'Sword & Shield Promos',
+    nameFr: 'Promo SWSH',
+    nameEn: 'SWSH Black Star Promos',
     serie: 'swsh',
     officialCount: 307,
     releaseDate: '2019-11-15',
     legalStandard: false,
     legalExpanded: true,
   },
+
+  // === Série Soleil & Lune (Sun & Moon - sm) ===
+  {
+    setId: 'sm1',
+    ptcglCode: 'SUM',
+    aliases: ['SM1'],
+    nameFr: 'Soleil et Lune',
+    nameEn: 'Sun & Moon',
+    serie: 'sm',
+    officialCount: 149,
+    releaseDate: '2017-02-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm2',
+    ptcglCode: 'GRI',
+    aliases: ['SM2'],
+    nameFr: 'Gardiens Ascendants',
+    nameEn: 'Guardians Rising',
+    serie: 'sm',
+    officialCount: 145,
+    releaseDate: '2017-05-05',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm3',
+    ptcglCode: 'BUS',
+    aliases: ['SM3'],
+    nameFr: 'Ombres Ardentes',
+    nameEn: 'Burning Shadows',
+    serie: 'sm',
+    officialCount: 147,
+    releaseDate: '2017-08-04',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm3.5',
+    ptcglCode: 'SLG',
+    aliases: ['SM3.5'],
+    nameFr: 'Légendes Brillantes',
+    nameEn: 'Shining Legends',
+    serie: 'sm',
+    officialCount: 73,
+    releaseDate: '2017-10-06',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm4',
+    ptcglCode: 'CIN',
+    aliases: ['SM4'],
+    nameFr: 'Invasion Carmin',
+    nameEn: 'Crimson Invasion',
+    serie: 'sm',
+    officialCount: 111,
+    releaseDate: '2017-11-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm5',
+    ptcglCode: 'UPR',
+    aliases: ['SM5'],
+    nameFr: 'Ultra-Prisme',
+    nameEn: 'Ultra Prism',
+    serie: 'sm',
+    officialCount: 156,
+    releaseDate: '2018-02-02',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm6',
+    ptcglCode: 'FLI',
+    aliases: ['SM6'],
+    nameFr: 'Lumière Interdite',
+    nameEn: 'Forbidden Light',
+    serie: 'sm',
+    officialCount: 131,
+    releaseDate: '2018-05-04',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm7',
+    ptcglCode: 'CES',
+    aliases: ['SM7'],
+    nameFr: 'Tempête Céleste',
+    nameEn: 'Celestial Storm',
+    serie: 'sm',
+    officialCount: 168,
+    releaseDate: '2018-08-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm7.5',
+    ptcglCode: 'DRM',
+    aliases: ['SM7.5'],
+    nameFr: 'Majesté Des Dragons',
+    nameEn: 'Dragon Majesty',
+    serie: 'sm',
+    officialCount: 70,
+    releaseDate: '2018-09-07',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm8',
+    ptcglCode: 'LOT',
+    aliases: ['SM8'],
+    nameFr: 'Tonnerre Perdu',
+    nameEn: 'Lost Thunder',
+    serie: 'sm',
+    officialCount: 214,
+    releaseDate: '2018-11-02',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm9',
+    ptcglCode: 'TEU',
+    aliases: ['SM9'],
+    nameFr: 'Duo de Choc',
+    nameEn: 'Team Up',
+    serie: 'sm',
+    officialCount: 181,
+    releaseDate: '2019-02-01',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm10',
+    ptcglCode: 'UNB',
+    aliases: ['SM10'],
+    nameFr: 'Alliance Infaillible',
+    nameEn: 'Unbroken Bonds',
+    serie: 'sm',
+    officialCount: 214,
+    releaseDate: '2019-05-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm11',
+    ptcglCode: 'UNM',
+    aliases: ['SM11'],
+    nameFr: 'Harmonie des Esprits',
+    nameEn: 'Unified Minds',
+    serie: 'sm',
+    officialCount: 236,
+    releaseDate: '2019-08-02',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm115',
+    ptcglCode: 'HIF',
+    aliases: ['SM11.5', 'SM115'],
+    nameFr: 'Destinées Occultes',
+    nameEn: 'Hidden Fates',
+    serie: 'sm',
+    officialCount: 68,
+    releaseDate: '2019-08-23',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'sm12',
+    ptcglCode: 'CEC',
+    aliases: ['SM12'],
+    nameFr: 'Éclipse Cosmique',
+    nameEn: 'Cosmic Eclipse',
+    serie: 'sm',
+    officialCount: 236,
+    releaseDate: '2019-11-01',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'smp',
+    ptcglCode: 'PR-SM',
+    aliases: ['SMP'],
+    nameFr: 'Promo SM',
+    nameEn: 'SM Black Star Promos',
+    serie: 'sm',
+    officialCount: 244,
+    releaseDate: '2017-02-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+
+  // === Série XY (xy) ===
+  {
+    setId: 'xy1',
+    ptcglCode: 'XY',
+    aliases: ['XY1'],
+    nameFr: 'XY',
+    nameEn: 'XY',
+    serie: 'xy',
+    officialCount: 146,
+    releaseDate: '2014-02-05',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy2',
+    ptcglCode: 'FLF',
+    aliases: ['XY2'],
+    nameFr: 'Étincelles',
+    nameEn: 'Flashfire',
+    serie: 'xy',
+    officialCount: 106,
+    releaseDate: '2014-05-07',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy3',
+    ptcglCode: 'FFI',
+    aliases: ['XY3'],
+    nameFr: 'Poings Furieux',
+    nameEn: 'Furious Fists',
+    serie: 'xy',
+    officialCount: 111,
+    releaseDate: '2014-08-13',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy4',
+    ptcglCode: 'PHF',
+    aliases: ['XY4'],
+    nameFr: 'Vigueur Spectrale',
+    nameEn: 'Phantom Forces',
+    serie: 'xy',
+    officialCount: 119,
+    releaseDate: '2014-11-05',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy5',
+    ptcglCode: 'PRC',
+    aliases: ['XY5'],
+    nameFr: 'Primo-Choc',
+    nameEn: 'Primal Clash',
+    serie: 'xy',
+    officialCount: 160,
+    releaseDate: '2015-02-04',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy6',
+    ptcglCode: 'ROS',
+    aliases: ['XY6'],
+    nameFr: 'Ciel Rugissant',
+    nameEn: 'Roaring Skies',
+    serie: 'xy',
+    officialCount: 108,
+    releaseDate: '2015-05-06',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy7',
+    ptcglCode: 'AOR',
+    aliases: ['XY7'],
+    nameFr: 'Origines Antiques',
+    nameEn: 'Ancient Origins',
+    serie: 'xy',
+    officialCount: 98,
+    releaseDate: '2015-08-12',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy8',
+    ptcglCode: 'BKT',
+    aliases: ['XY8'],
+    nameFr: 'Impulsion Turbo',
+    nameEn: 'BREAKthrough',
+    serie: 'xy',
+    officialCount: 162,
+    releaseDate: '2015-11-04',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy9',
+    ptcglCode: 'BKP',
+    aliases: ['XY9'],
+    nameFr: 'Rupture Turbo',
+    nameEn: 'BREAKpoint',
+    serie: 'xy',
+    officialCount: 122,
+    releaseDate: '2016-02-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy10',
+    ptcglCode: 'FCO',
+    aliases: ['XY10'],
+    nameFr: 'Impact des Destins',
+    nameEn: 'Fates Collide',
+    serie: 'xy',
+    officialCount: 124,
+    releaseDate: '2016-05-02',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy11',
+    ptcglCode: 'STS',
+    aliases: ['XY11'],
+    nameFr: 'Offensive Vapeur',
+    nameEn: 'Steam Siege',
+    serie: 'xy',
+    officialCount: 114,
+    releaseDate: '2016-08-03',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xy12',
+    ptcglCode: 'EVO',
+    aliases: ['XY12'],
+    nameFr: 'Évolutions',
+    nameEn: 'Evolutions',
+    serie: 'xy',
+    officialCount: 108,
+    releaseDate: '2016-11-02',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'g1',
+    ptcglCode: 'GEN',
+    aliases: ['G1'],
+    nameFr: 'Générations',
+    nameEn: 'Generations',
+    serie: 'xy',
+    officialCount: 83,
+    releaseDate: '2016-02-22',
+    legalStandard: false,
+    legalExpanded: true,
+  },
+  {
+    setId: 'xyp',
+    ptcglCode: 'PR-XY',
+    aliases: ['XYP'],
+    nameFr: 'Promo XY',
+    nameEn: 'XY Black Star Promos',
+    serie: 'xy',
+    officialCount: 211,
+    releaseDate: '2013-10-12',
+    legalStandard: false,
+    legalExpanded: true,
+  },
 ]
 
 /**
- * Table d'alias directe issue de osamc/pokemon-tcg-deck-parser
+ * Table d'alias étendue couvrant toutes les variantes
  */
 const EXTRA_ALIASES: Record<string, string> = {
+  // Mega Evolution
+  ASC: 'me02.5',
+  HER: 'me02.5',
+  POR: 'me03',
+  ORP: 'me03',
+  MEG: 'me01',
+  PFL: 'me02',
+  PFF: 'me02',
+  CRI: 'me04',
+  CHA: 'me04',
+  PBL: 'me05',
+  DKN: 'me05',
+  MEE: 'mee',
+  MEP: 'mep',
+  'PR-ME': 'mep',
+  '30C': '30th',
+  '30TH': '30th',
+  '30CC': '30th-c',
+  '30TH-C': '30th-c',
+
+  // Scarlet & Violet
+  WHT: 'sv10.5w',
+  BLK: 'sv10.5b',
+  'PR-SV': 'svp',
+  'PR-SVI': 'svp',
+  SVP: 'svp',
+  SVE: 'sve',
+
+  // Sword & Shield
   'PR-SW': 'swshp',
   'PR-SWSH': 'swshp',
   SWSHP: 'swshp',
   SWSH: 'swshp',
-  'PR-SV': 'svp',
-  'PR-SVI': 'svp',
-  SVP: 'svp',
+  TRR: 'ex7',
+
+  // Sun & Moon
   'PR-SM': 'smp',
   SMP: 'smp',
+
+  // XY
   'PR-XY': 'xyp',
   XYP: 'xyp',
+
+  // Black & White
   'PR-BW': 'bwp',
   'PR-BLW': 'bwp',
   BWP: 'bwp',
-  SVE: 'sve',
-  MEE: 'sve',
-  ENERGY: 'sve',
-}
-
-interface TcgdexSetSummary {
-  id: string
-  name: string
-  cardCount?: {
-    total?: number
-    official?: number
-  }
-}
-
-async function tryFetchTcgdexSets(lang: 'en' | 'fr'): Promise<TcgdexSetSummary[] | null> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3500)
-    const res = await fetch(`https://api.tcgdex.net/v2/${lang}/sets`, {
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
-    if (!res.ok) return null
-    return (await res.json()) as TcgdexSetSummary[]
-  } catch {
-    return null
-  }
 }
 
 async function generateMapping() {
-  const args = process.argv.slice(2)
-  const shouldFetch = args.includes('--fetch')
-
-  let sourceLabel = 'seed-verified + osamc/pokemon-tcg-deck-parser aliases'
   const setsList: SetMappingEntry[] = structuredClone(VERIFIED_SETS_SEED)
-
-  if (shouldFetch) {
-    console.log('Tentative de synchronisation avec https://api.tcgdex.net/v2 ...')
-    const [enSets, frSets] = await Promise.all([
-      tryFetchTcgdexSets('en'),
-      tryFetchTcgdexSets('fr'),
-    ])
-
-    if (enSets && frSets) {
-      sourceLabel = 'live-tcgdex-api + osamc/pokemon-tcg-deck-parser aliases'
-      const frById = new Map(frSets.map((s) => [s.id, s]))
-      const enById = new Map(enSets.map((s) => [s.id, s]))
-
-      for (const entry of setsList) {
-        const enMatch = enById.get(entry.setId)
-        const frMatch = frById.get(entry.setId)
-        if (enMatch) {
-          entry.nameEn = enMatch.name
-          if (enMatch.cardCount?.official) {
-            entry.officialCount = enMatch.cardCount.official
-          }
-        }
-        if (frMatch) {
-          entry.nameFr = frMatch.name
-        }
-      }
-      console.log(`Synchronisation TCGdex réussie (${enSets.length} extensions inspectées).`)
-    } else {
-      console.log('Mode hors-ligne détecté : utilisation de la base de référence vérifiée.')
-    }
-  }
-
   const byPtcglCode: Record<string, SetMappingEntry> = {}
   const byTcgdexId: Record<string, SetMappingEntry> = {}
   const setCodeAliases: Record<string, string> = { ...EXTRA_ALIASES }
@@ -562,11 +1035,19 @@ async function generateMapping() {
     }
   }
 
+  // Enregistrer également les EXTRA_ALIASES dans byPtcglCode
+  for (const [code, targetId] of Object.entries(EXTRA_ALIASES)) {
+    const upper = code.toUpperCase()
+    if (!byPtcglCode[upper] && byTcgdexId[targetId.toLowerCase()]) {
+      byPtcglCode[upper] = byTcgdexId[targetId.toLowerCase()]!
+    }
+  }
+
   const db: MappingDatabase = {
     generatedAt: new Date().toISOString(),
-    version: '1.0.0',
-    source: sourceLabel,
-    totalSets: setsList.length,
+    version: '2.0.0',
+    source: 'seed-verified-full-tcgdex-me-sv-swsh-sm-xy',
+    totalSets: Object.keys(byTcgdexId).length,
     byPtcglCode,
     byTcgdexId,
     setCodeAliases,
@@ -576,8 +1057,8 @@ async function generateMapping() {
   fs.mkdirSync(path.dirname(outPath), { recursive: true })
   fs.writeFileSync(outPath, JSON.stringify(db, null, 2) + '\n', 'utf-8')
 
-  console.log(`Table de correspondance générée avec succès : ${outPath}`)
-  console.log(`Total extensions mappées : ${db.totalSets} (${Object.keys(byPtcglCode).length} codes et alias PTCGL actifs)`)
+  console.log(`Table de correspondance régénérée avec succès : ${outPath}`)
+  console.log(`Total extensions : ${db.totalSets} (${Object.keys(byPtcglCode).length} codes PTCGL actifs)`)
 }
 
 generateMapping()

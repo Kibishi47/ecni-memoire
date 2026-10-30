@@ -81,6 +81,45 @@ Energy: 7
 Total Cards: 60`,
   },
   {
+    id: 'mega_dragonite',
+    name: 'Méga Dracolosse ex (ASC / POR / MEG)',
+    subtitle: 'Série Méga-Évolution & Ascended Heroes',
+    lang: 'EN',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    ptcglText: `Pokémon: 18
+2 Mega Dragonite ex ASC 152
+2 Dragonair ASC 151
+3 Dratini OBF 157
+1 Mega Eelektross ex ASC 61
+3 Eelektrik ASC 60
+3 Tynamo ASC 59
+1 Zekrom ex BLK 34
+1 Zeraora DRI 78
+1 Fezandipiti ex ASC 142
+1 Mew ex MEW 151
+
+Trainer: 34
+4 Lillie's Determination MEG 120
+3 Professor's Research SVI 189
+2 Boss's Orders PAL 172
+2 Iono PAL 185
+4 Buddy-Buddy Poffin TEF 144
+4 Earthen Vessel PAR 163
+4 Ultra Ball SVI 196
+2 Night Stretcher ASC 196
+2 Poke Pad POR 110
+2 Rare Candy SVI 191
+2 Switch SVI 194
+1 Prime Catcher TEF 157
+2 Energy Switch MEG 115
+
+Energy: 8
+5 Basic {L} Energy SVE 4
+3 Basic {W} Energy SVE 3
+
+Total Cards: 60`,
+  },
+  {
     id: 'chien_pao_en',
     name: 'Chien-Pao ex / Baxcalibur',
     subtitle: 'Test syntaxe Énergie PTCGL {W}',
