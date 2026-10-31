@@ -66,6 +66,8 @@ export interface ParsedDeck {
   unresolvedCards: ParsedDeckEntry[]
   warnings: ParseWarning[]
   synergyAudit: SynergyAuditItem[]
+  aceSpecCount: number
+  isStandardLegal: boolean
 }
 
 export interface ExportOptions {

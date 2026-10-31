@@ -99,6 +99,11 @@ export function computePokemonThreatScore(
   else if (role === 'TUTOR_ENGINE_POKEMON') score += 55
   else if (role === 'DRAW_ENGINE_POKEMON') score += 35
   else if (role === 'ENERGY_ACCELERATOR') score += 40
+  else if (role === 'SNIPER_BENCH_ATTACKER') score += 40
+  else if (role === 'CONTROL_LOCK_DISRUPTION') score += 35
+  else if (role === 'DEFENSIVE_TANK_WALL') score += 30
+  else if (role === 'PASSIVE_STAT_BUFFER') score += 30
+  else if (role === 'HEALER_SUPPORT') score += 25
 
   // Valeur des énergies attachées jusqu'au coût d'attaque principal
   const reqEnergy = getMainAttackEnergyRequirement(card)
@@ -159,6 +164,10 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
   }
 
   // 3. Évaluation du Plateau du Joueur vs Plateau de l'Adversaire
+  const myAllPoke = [myBoard.activePokemon, ...myBoard.bench].filter(
+    (p): p is InPlayPokemon => p !== null,
+  )
+
   if (myBoard.activePokemon) {
     totalScore += computePokemonThreatScore(myBoard.activePokemon, state.turnNumber, true)
   } else {
@@ -176,6 +185,65 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     totalScore -= 25
   } else {
     totalScore += Math.min(4, myBoard.bench.length) * 14
+  }
+
+  // Pondération des 5 nouveaux rôles stratégiques :
+  // 1. SNIPER_BENCH_ATTACKER : bonus si le banc adverse contient des cibles fragiles à faibles PV ou Rule Box affaiblis
+  const hasSniper = myAllPoke.some(
+    (p) => p.card.strategicEvaluator.primaryRole === 'SNIPER_BENCH_ATTACKER',
+  )
+  if (hasSniper) {
+    const fragileOppTargets = oppBoard.bench.filter((p) => {
+      const rem = getRemainingHp(p)
+      return rem <= 90 || (Boolean(p.card.pokemonStats?.isRuleBox) && p.damage >= 50)
+    })
+    totalScore += fragileOppTargets.length * 25
+  }
+
+  // 2. CONTROL_LOCK_DISRUPTION : bonus pour le blocage d'Objets ou de Talents adverses
+  if (oppBoard.itemLockActive) totalScore += 55
+  const hasControlLock = myAllPoke.some(
+    (p) => p.card.strategicEvaluator.primaryRole === 'CONTROL_LOCK_DISRUPTION',
+  )
+  if (hasControlLock) totalScore += 35
+
+  // 3. DEFENSIVE_TANK_WALL : bonus de survie si les PV restants sont élevés
+  for (const p of myAllPoke) {
+    if (p.card.strategicEvaluator.primaryRole === 'DEFENSIVE_TANK_WALL') {
+      const remHp = getRemainingHp(p)
+      const maxHp = Math.max(40, p.card.pokemonStats?.hp ?? 100)
+      if (remHp >= maxHp * 0.7) {
+        totalScore += 30 + Math.round((remHp / maxHp) * 20)
+      }
+    }
+  }
+
+  // 4. PASSIVE_STAT_BUFFER : bonus si actif/en jeu et améliorant les dégâts ou PV de l'équipe
+  const statBuffers = myAllPoke.filter(
+    (p) => p.card.strategicEvaluator.primaryRole === 'PASSIVE_STAT_BUFFER',
+  )
+  totalScore += statBuffers.length * 30
+
+  // 5. HEALER_SUPPORT : bonus proportionnel aux dégâts soignés sur des Pokémon clés
+  const healerSupports = myAllPoke.filter(
+    (p) => p.card.strategicEvaluator.primaryRole === 'HEALER_SUPPORT',
+  )
+  if (healerSupports.length > 0) {
+    const damagedKeyPoke = myAllPoke.filter(
+      (p) =>
+        (p.card.subCategory === 'STAGE_2' || Boolean(p.card.pokemonStats?.isRuleBox)) &&
+        p.damage > 0,
+    )
+    totalScore += Math.min(60, damagedKeyPoke.length * 20)
+  }
+
+  // Bonus TAKE_EXTRA_PRIZE_CARDS : action offrant une récompense supplémentaire en cas de K.O.
+  if (
+    myBoard.activePokemon?.card.playableActions.some((a) =>
+      a.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS'),
+    )
+  ) {
+    totalScore += 60
   }
 
   // Soustraction de la valeur du plateau adverse
@@ -196,7 +264,7 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
   // 4. Évaluation dynamique de la Main (`intrinsicBaseScore`, `turnPhaseWeights`, `inGameDeadCardConditions`, `holdForNextTurnBonus`)
   const seenHandCardIds = new Set<string>()
   for (const card of myBoard.hand) {
-    if (isCardDeadInHand(card, myBoard, oppBoard)) {
+    if (isCardDeadInHand(card, myBoard, oppBoard, state.activeStadium)) {
       // Une carte morte en main vaut 0 point stratégique
       continue
     }
@@ -281,13 +349,31 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
   const passiveBoard = getPassiveBoard(state)
 
   switch (action.type) {
-    case 'DECLARE_ATTACK':
-      return 300 + (action.estimatedDamage || 0)
+    case 'DECLARE_ATTACK': {
+      let atkScore = 300 + (action.estimatedDamage || 0)
+      if (activeBoard.activePokemon) {
+        const attackAction = activeBoard.activePokemon.card.playableActions.find(
+          (a) => a.actionId === action.actionId,
+        )
+        if (attackAction?.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS')) {
+          atkScore += 180
+        }
+      }
+      return atkScore
+    }
 
     case 'NORMAL_EVOLVE':
       return 240
 
     case 'PLAY_TRAINER': {
+      const trainerCard = activeBoard.hand.find((c) => c.cardId === action.cardId)
+      if (
+        trainerCard?.playableActions.some((a) =>
+          a.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS'),
+        )
+      ) {
+        return 340
+      }
       if (action.cardId === 'sv04-125') return 260 // Super Bonbon
       if (action.cardId === 'sv05-144') return state.turnNumber <= 2 ? 250 : 160 // Poffin Copain-Copain
       if (action.cardId === 'sv01-181') return state.turnNumber <= 2 ? 235 : 155 // Faiblo Ball
@@ -318,9 +404,74 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
       return 185
     }
 
-    case 'USE_ABILITY':
+    case 'USE_ABILITY': {
+      const sourcePoke =
+        action.sourceSlot === 'ACTIVE'
+          ? activeBoard.activePokemon
+          : typeof action.sourceSlot === 'number'
+            ? activeBoard.bench[action.sourceSlot] ?? null
+            : null
+      const pAction = sourcePoke?.card.playableActions.find((a) => a.actionId === action.actionId)
+
+      // Gestion stratégique du coût KNOCK_OUT_SELF
+      const hasSelfKoCost = pAction?.costs.some((c) => c.type === 'KNOCK_OUT_SELF')
+      if (hasSelfKoCost) {
+        // Condition 1 : L'adversaire doit avoir >= 2 cartes Récompense restantes (ne pas donner la dernière Récompense de victoire !)
+        if (passiveBoard.prizes.length <= 1) {
+          return -500
+        }
+
+        // Condition 2 : Le sacrifice doit permettre d'éliminer immédiatement un Pokémon adverse clé (Rule Box, attaquant principal) ou préparer un KO décisif
+        const dmgEff = pAction?.effects.find(
+          (e) =>
+            e.primitive === 'PLACE_DAMAGE_COUNTERS' ||
+            e.primitive === 'DEAL_DAMAGE_ACTIVE' ||
+            e.primitive === 'DEAL_DAMAGE_BENCH',
+        )
+        const dmgToDeal = dmgEff?.count ? dmgEff.count * 10 : (dmgEff?.baseDamage ?? 0)
+
+        const allOppPokes = [passiveBoard.activePokemon, ...passiveBoard.bench].filter(
+          (p): p is InPlayPokemon => p !== null,
+        )
+        const canKoKey = allOppPokes.some((p) => {
+          const rem = getRemainingHp(p)
+          const isKey =
+            Boolean(p.card.pokemonStats?.isRuleBox) ||
+            p.card.strategicEvaluator.primaryRole === 'MAIN_ATTACKER' ||
+            p.card.subCategory === 'STAGE_2'
+          return isKey && rem <= dmgToDeal
+        })
+
+        // Combo KO avec le Pokémon actif ce tour
+        let maxActiveDmg = 0
+        if (activeBoard.activePokemon) {
+          for (const act of activeBoard.activePokemon.card.playableActions) {
+            if (act.sourceType === 'ATTACK') {
+              const d = computeAttackDamageToActive(activeBoard, passiveBoard, act).activeDamage
+              if (d > maxActiveDmg) maxActiveDmg = d
+            }
+          }
+        }
+        const canComboKoActive =
+          passiveBoard.activePokemon &&
+          getRemainingHp(passiveBoard.activePokemon) <= dmgToDeal + maxActiveDmg &&
+          (Boolean(passiveBoard.activePokemon.card.pokemonStats?.isRuleBox) ||
+            passiveBoard.activePokemon.card.subCategory === 'STAGE_2')
+
+        if (canKoKey || canComboKoActive) {
+          return 320
+        } else {
+          return -200
+        }
+      }
+
+      if (pAction?.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS')) {
+        return 350
+      }
+
       if (action.endsTurnImmediately) return 140
       return 225
+    }
 
     case 'ATTACH_MANUAL_ENERGY':
       return action.targetSlot === 'ACTIVE' ? 210 : 195
