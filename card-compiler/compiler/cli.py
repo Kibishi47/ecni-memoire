@@ -172,6 +172,7 @@ def _execute_run_pipeline(
     if llm_provider == LLMProvider.lm_studio:
         engine_preview = LMStudioCardCompiler(tier=effective_tier, ssh_password=ssh_password)
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (Distant SSH / Local REST)[/bold cyan]"
+        model_display = engine_preview.model_name or "Auto-détection (modèle actuellement actif sur le serveur)"
         if engine_preview.ssh_host:
             auth_info = (
                 "[green]Mot de passe (SSH_PASSWORD)[/green]"
@@ -183,13 +184,13 @@ def _execute_run_pipeline(
                 f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
                 f"• [bold]Authentification[/bold] : {auth_info}\n"
                 f"• [bold]Tunnel SSH[/bold] : {'Actif (port local ' + str(engine_preview.local_port) + ' -> distant ' + str(engine_preview.remote_port) + ')' if engine_preview.use_tunnel else 'Désactivé (connexion directe)'}\n"
-                f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — Modèle distant : [cyan]{engine_preview.model_name}[/cyan]"
+                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
             )
         else:
             llm_lines = (
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Local REST)[/bold magenta]\n"
                 f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — Modèle local : [cyan]{engine_preview.model_name}[/cyan]"
+                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
             )
     else:
         engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
@@ -287,10 +288,16 @@ def _execute_run_pipeline(
             ssh_password=ssh_password,
         )
         try:
-            with console.status(
-                f"[bold magenta]Étape 3a : Connexion & initialisation du moteur {compiler_engine.repo_id} ({compiler_engine.filename})...[/bold magenta]"
-            ):
-                compiler_engine.load_model_in_memory()
+            try:
+                with console.status(
+                    f"[bold magenta]Étape 3a : Connexion au serveur {compiler_engine.repo_id} et détection du modèle...[/bold magenta]"
+                ):
+                    compiler_engine.load_model_in_memory()
+            except Exception as init_err:
+                console.print(
+                    f"\n[bold red]✗ Erreur d'initialisation du serveur LLM :[/bold red] {init_err}"
+                )
+                raise typer.Exit(code=1)
 
             console.print(
                 f"[green]✓[/green] Moteur LLM [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) prêt."
