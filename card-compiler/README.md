@@ -109,6 +109,10 @@ python -m compiler.cli run --llm-provider lm_studio -j 4 --ids sv06.5-001,sv04-1
 # ou sur tout un set :
 python -m compiler.cli run --llm-provider lm_studio --parallel 4 --standard --limit 50
 
+# Compiler un lot en ignorant les erreurs pour passer à la suite (-k / --continue-on-error)
+python -m compiler.cli run --llm-provider lm_studio -j 4 -k --standard
+# À la fin, seules les cartes échouées restent à traiter !
+
 # Compilation du format Standard complet (avec reprise sur cache)
 python -m compiler.cli run --standard --limit 50
 
@@ -124,6 +128,7 @@ python -m compiler.cli run --ids sv03-125 --force
 - `--thinking <niveau>` (`-tk`) : Niveau de réflexion/thinking pour modèles raisonnants (`null` pour désactiver, ou `low`, `medium`, `high`, nombre de tokens). Si le modèle gère uniquement un booléen (`enable_thinking`), `null` vaut `false` et toute autre valeur vaut `true`.
 - `--no-think` / `--disable-thinking` : Raccourci pour désactiver le mode réflexion/thinking (équivalent à `--thinking null`).
 - `--parallel <N>` / `-j <N>` / `--concurrency <N>` : Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement). Permet de configurer le nombre de workers simultanés (défaut : 1). Également configurable via le fichier `.env` ou variable d'environnement (`LM_STUDIO_PARALLEL=4`, `PARALLEL=4`). L'affichage Rich gère les X flux de cartes en temps réel avec une barre globale et des lignes de streaming dédiées par slot.
+- `--continue-on-error` / `-k` / `--ignore-errors` / `--skip-errors` : Ignore les erreurs survenant sur une carte et passe immédiatement à la suivante au lieu d'interrompre le programme (défaut : faux). Idéal pour compiler des centaines de cartes d'un coup et récapituler les cartes récalcitrantes à la fin dans un tableau dédié. Configurable via `CONTINUE_ON_ERROR=true` dans `.env`.
 - `--tier qwen3|max|fast` (`-t`) : Palier de modèle en mode local (`qwen3` 14B Q6_K, `max` 30B/32B, `fast` 7B).
 - `--fast` : Raccourci pour `--tier fast`.
 - `--provider sdk|rest` (`-p`) : Fournisseur d'accès TCGdex (`sdk` : tcgdex-sdk officiel, `rest` : API HTTP directe).
