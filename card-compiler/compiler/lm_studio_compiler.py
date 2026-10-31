@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import httpx
 
 from compiler import load_env_file
-from compiler.llm_engine import ModelTier
+from compiler.llm_engine import ModelTier, extract_json_payload
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import (
     CompilationMetadata,
@@ -104,71 +104,7 @@ def is_valid_json_object(text: str) -> bool:
         return False
 
 
-def extract_json_payload(text: str) -> str:
-    """Extrait et nettoie le JSON généré par le LLM en isolant l'objet `LLMCompiledCardPart` racine."""
-    if not text:
-        return ""
-    text = text.strip()
 
-    # 1. Retrait des balises de réflexion fermées type <think>...</think>
-    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
-
-    # 2. Si un bloc <think> n'a pas été fermé (ex: modèle interrompu ou token limit)
-    if "<think>" in cleaned:
-        first_brace = cleaned.find("{")
-        if first_brace != -1:
-            cleaned = cleaned[first_brace:]
-        else:
-            cleaned = ""
-
-    # 3. Extraction de tous les blocs markdown ```json ... ``` ou ``` ... ```
-    md_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
-    candidates: List[str] = [b.strip() for b in md_blocks if b.strip()]
-    if not candidates:
-        candidates = [cleaned]
-    else:
-        candidates.append(cleaned)
-
-    # 4. Recherche prioritaire de l'objet racine complet LLMCompiledCardPart
-    # (doit contenir 'playableActions' ou 'strategicEvaluator' et ne pas être un effet isolé)
-    card_candidate = ""
-    fallback_candidate = ""
-
-    for cand in candidates:
-        first_brace = cand.find("{")
-        if first_brace == -1:
-            continue
-        last_brace = cand.rfind("}")
-        while last_brace > first_brace:
-            sub = cand[first_brace : last_brace + 1].strip()
-            try:
-                val = json.loads(sub)
-                if isinstance(val, dict):
-                    # Cas idéal : l'objet racine complet LLMCompiledCardPart
-                    if any(k in val for k in ("playableActions", "strategicEvaluator", "reasoningAnalysis")):
-                        if "primitive" not in val and "actionId" not in val:
-                            return sub
-                        elif not card_candidate:
-                            card_candidate = sub
-                    elif not fallback_candidate:
-                        fallback_candidate = sub
-            except Exception:
-                pass
-            last_brace = cand.rfind("}", first_brace, last_brace)
-
-    if card_candidate:
-        return card_candidate
-    if fallback_candidate:
-        return fallback_candidate
-
-    # Découpe brute de secours
-    for cand in candidates:
-        first_brace = cand.find("{")
-        last_brace = cand.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            return cand[first_brace : last_brace + 1].strip()
-
-    return ""
 
 
 def parse_lms_ls_output(stdout: str) -> List[str]:
@@ -179,7 +115,6 @@ def parse_lms_ls_output(stdout: str) -> List[str]:
     cleaned = strip_ansi_codes(stdout).strip()
     models: List[str] = []
 
-    # 1. Tentative de décodage JSON (ex: lms ls --json ou GET /v1/models)
     try:
         data = json.loads(cleaned)
         items: List[Any] = []
@@ -204,7 +139,6 @@ def parse_lms_ls_output(stdout: str) -> List[str]:
     except Exception:
         pass
 
-    # 2. Analyse ligne par ligne du format texte (tableaux ASCII, listes avec puces, etc.)
     noise_words = {
         "NAME", "MODEL", "ID", "IDENTIFIER", "SIZE", "FORMAT", "STATUS",
         "PATH", "TYPE", "LLMS", "EMBEDDING", "MODELS", "YOU", "HAVE",
@@ -216,11 +150,9 @@ def parse_lms_ls_output(stdout: str) -> List[str]:
         if not line_clean or line_clean.startswith(("─", "═", "+", "┌", "└", "├", "┬", "┴", "┼")):
             continue
 
-        # Retrait des bordures de tableaux
         if line_clean.startswith("│") and line_clean.endswith("│"):
             line_clean = line_clean[1:-1].strip()
 
-        # Retrait des puces, tirets et séparateurs initiaux
         line_clean = re.sub(r"^[•\*\-\+\>\│\|\s]+", "", line_clean).strip()
         line_clean = line_clean.replace("│", " ").replace("|", " ").strip()
         if not line_clean:
@@ -239,7 +171,6 @@ def parse_lms_ls_output(stdout: str) -> List[str]:
             continue
 
         candidate = parts[0].strip("(),:;'\"")
-        # Retrait des annotations entre parenthèses
         candidate = re.sub(r"\(.*?\)", "", candidate).strip()
 
         if not candidate or candidate.upper() in noise_words:
@@ -261,23 +192,19 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
     t_clean = strip_ansi_codes(target).strip()
     t_l = t_clean.lower()
 
-    # 1. Correspondance exacte ou insensible à la casse
     for c in candidates:
         if c == t_clean or c.lower() == t_l:
             return c
 
-    # 2. Correspondance sous-chaîne normalisée
     t_norm = re.sub(r"[^a-zA-Z0-9]", "", t_l)
     for c in candidates:
         c_norm = re.sub(r"[^a-zA-Z0-9]", "", c.lower())
         if t_norm in c_norm or c_norm in t_norm:
             return c
 
-    # 3. Famille Qwen (priorité élevée car modèle de référence du compilateur)
     is_qwen_target = any(q in t_l for q in ["qwen", "qwen3.8", "qwen3", "qwen2.5", "qwen2"])
     qwen_cands = [c for c in candidates if "qwen" in c.lower()]
     if is_qwen_target and qwen_cands:
-        # Priorité absolue pour Qwen3.8 27B si demandé
         if ("3.8" in t_l or "38" in t_l) and "27b" in t_l:
             for c in qwen_cands:
                 cl = c.lower()
@@ -288,7 +215,6 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
                 if "3.8" in cl or "38" in cl:
                     return c
 
-        # Recherche par taille demandée
         if "27b" in t_l:
             for pref in ["27b", "28b", "30b", "32b", "14b", "7b"]:
                 for c in qwen_cands:
@@ -309,13 +235,12 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
                 for c in qwen_cands:
                     if pref in c.lower():
                         return c
-        # Préférer les modèles 'coder'
+
         for c in qwen_cands:
             if "coder" in c.lower():
                 return c
         return qwen_cands[0]
 
-    # 4. Correspondance par taille de modèle demandée (familles génériques)
     if any(s in t_l for s in ["27b", "30b", "32b"]):
         for preferred in ["32b", "30b", "27b", "28b", "14b", "7b"]:
             for c in candidates:
@@ -332,7 +257,6 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
                 if preferred in c.lower():
                     return c
 
-    # 5. Autres familles de modèles (Llama, DeepSeek, Mistral, Gemma, Phi)
     for family in ["llama", "deepseek", "mistral", "gemma", "phi"]:
         if family in t_l:
             for c in candidates:
@@ -371,7 +295,6 @@ class LMStudioCardCompiler:
 
         self.tier = tier
 
-        # Mode Thinking / Raisonnement (pour modèles tels que Qwen, DeepSeek, QwQ)
         env_thinking = (
             os.environ.get("LM_STUDIO_THINKING")
             or os.environ.get("LM_STUDIO_THINKING_LEVEL")
@@ -407,7 +330,6 @@ class LMStudioCardCompiler:
             self.thinking = None
             self.disable_thinking = False
 
-        # 1. Résolution de l'URL REST LM Studio (Directe IP/port ou tunnel SSH)
         env_base_url = os.environ.get("LM_STUDIO_BASE_URL")
         explicit_url = api_base_url or env_base_url
         if explicit_url:
@@ -424,7 +346,6 @@ class LMStudioCardCompiler:
             self.remote_host = remote_host or env_host
             self.remote_port = int(remote_port or os.environ.get("LM_STUDIO_PORT") or 1234)
 
-            # Option tunnel SSH (uniquement si explicitement activé via LM_STUDIO_USE_TUNNEL=true)
             env_tunnel = os.environ.get("LM_STUDIO_USE_TUNNEL", "false").lower() in {"1", "true", "yes"}
             self.ssh_host = ssh_host or os.environ.get("SSH_HOST") or None
             self.use_tunnel = use_tunnel if use_tunnel is not None else (env_tunnel if self.ssh_host else False)
@@ -438,7 +359,6 @@ class LMStudioCardCompiler:
             else:
                 self.api_base_url = f"http://127.0.0.1:{self.remote_port}/v1"
 
-        # 2. Paramètres SSH optionnels
         self.ssh_port = int(ssh_port or os.environ.get("SSH_PORT") or 22)
         self.ssh_user = ssh_user or os.environ.get("SSH_USER") or None
         self.ssh_key_path = ssh_key_path or os.environ.get("SSH_KEY_PATH") or None
@@ -654,11 +574,9 @@ class LMStudioCardCompiler:
         if self._ready:
             return
 
-        # 1. Établissement du tunnel SSH sécurisé UNIQUEMENT si explicitement configuré
         if self.use_tunnel and self.ssh_host:
             self._start_ssh_tunnel()
 
-        # 2. Vérification HTTP directe de l'API REST de LM Studio
         models_url = f"{self.api_base_url}/models"
         try:
             with httpx.Client(timeout=15.0) as client:
@@ -672,14 +590,12 @@ class LMStudioCardCompiler:
                     if isinstance(m, dict) and m.get("id")
                 ] if isinstance(models_list, list) else []
 
-                # Si aucun modèle n'est chargé, on arrête immédiatement avec un message clair
                 if not active_ids:
                     raise RuntimeError(
                         f"Aucun modèle n'est actuellement chargé sur le serveur LM Studio ({self.api_base_url}).\n"
                         f"Veuillez charger le modèle de votre choix dans l'interface LM Studio avant de lancer le compilateur."
                     )
 
-                # Si un modèle spécifique a été expressément demandé par l'utilisateur
                 if self.model_name:
                     matched = find_best_model_candidate(active_ids, self.model_name)
                     if not matched:
@@ -690,7 +606,6 @@ class LMStudioCardCompiler:
                         )
                     self.model_name = matched
                 else:
-                    # Utilisation directe du modèle actuellement chargé sur le serveur
                     self.model_name = active_ids[0]
 
         except Exception as exc:
@@ -945,7 +860,6 @@ class LMStudioCardCompiler:
 
                 t0 = time.perf_counter()
 
-                # Construction du payload OpenAI-compatible pour LM Studio
                 payload: Dict[str, Any] = {
                     "model": model_to_request,
                     "messages": [
@@ -957,14 +871,12 @@ class LMStudioCardCompiler:
                 }
 
                 if thinking_level == "null" or is_thinking_disabled:
-                    # Modèle ne gérant que le booléen : null = false
                     payload["chat_template_kwargs"] = {"enable_thinking": False}
                     payload["chat_template_args"] = {"enable_thinking": False}
                     payload["enable_thinking"] = False
                     payload["reasoning_effort"] = "none"
                     payload["reasoning"] = {"effort": "none"}
                 elif thinking_level is not None:
-                    # Modèle ne gérant que le booléen : le reste = true
                     payload["chat_template_kwargs"] = {"enable_thinking": True}
                     payload["chat_template_args"] = {"enable_thinking": True}
                     payload["enable_thinking"] = True
@@ -974,9 +886,6 @@ class LMStudioCardCompiler:
                     elif thinking_level.isdigit():
                         payload["max_thinking_tokens"] = int(thinking_level)
 
-                # Cascade de formats supportés par LM Studio :
-                # 1. 'json_schema' (Structured Outputs avec grammaire GBNF)
-                # 2. 'none' (sans response_format, LM Studio rejette strictement 'json_object' avec HTTP 400)
                 formats_to_try: List[str] = []
                 if self._use_json_schema_format:
                     formats_to_try.append("json_schema")
@@ -1160,7 +1069,6 @@ class LMStudioCardCompiler:
                     try:
                         raw_dict = json.loads(cleaned_json)
                         if isinstance(raw_dict, dict):
-                            # Cas A : Le LLM a renvoyé uniquement un ActionEffect à la racine (primitive, etc.)
                             if "primitive" in raw_dict and "playableActions" not in raw_dict:
                                 attack_label = "Attaque 1"
                                 if bundle.raw_fr.get("attacks"):
@@ -1193,7 +1101,6 @@ class LMStudioCardCompiler:
                                     },
                                 }
 
-                            # Cas B : Le LLM a renvoyé directement une PlayableAction à la racine (actionId, etc.)
                             elif "actionId" in raw_dict and "playableActions" not in raw_dict:
                                 raw_dict = {
                                     "reasoningAnalysis": f"Encapsulation automatique de l'action '{raw_dict.get('actionId')}' pour {bundle.card_id}.",
@@ -1295,7 +1202,6 @@ class LMStudioCardCompiler:
             finally:
                 self._tunnel_proc = None
 
-        # 3. Nettoyage du fichier askpass temporaire
         if self._askpass_file and os.path.exists(self._askpass_file):
             try:
                 os.unlink(self._askpass_file)

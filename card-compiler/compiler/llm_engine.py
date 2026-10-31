@@ -96,7 +96,6 @@ def resolve_best_gguf_for_tier(
     """Sélectionne le meilleur fichier .gguf disponible en tenant compte du cache local et de l'espace disque."""
     candidates = TIER_CANDIDATES.get(tier, TIER_CANDIDATES[ModelTier.qwen3])
 
-    # 1. Vérification prioritaire si un modèle compatible est déjà présent dans le cache local
     for repo_id, preferred_quants, fallback_file in candidates:
         all_quants = list(preferred_quants) + ["q4_k_m", "q5_k_m", "q6_k"]
         for q in all_quants:
@@ -117,7 +116,6 @@ def resolve_best_gguf_for_tier(
                 except Exception:
                     pass
 
-    # 2. Vérification de l'espace disque disponible
     try:
         free_gb = shutil.disk_usage(Path.home()).free / (1024**3)
     except Exception:
@@ -125,7 +123,6 @@ def resolve_best_gguf_for_tier(
 
     for repo_id, preferred_quants, fallback_file in candidates:
         quants_to_try = list(preferred_quants)
-        # Si l'espace disque est restreint (< 14 Go), éviter de télécharger un fichier Q6_K de 13 Go
         if free_gb < 14.0:
             quants_to_try = [q for q in ["q4_k_m", "q5_k_m", "q4_0"] if q in quants_to_try] or ["q4_k_m"]
 
@@ -149,7 +146,6 @@ def resolve_best_gguf_for_tier(
         except Exception:
             continue
 
-    # 3. Fallback déterministe
     fallback_repo, _, fallback_file = candidates[-1]
     if free_gb < 14.0 and "14b" in fallback_file.lower():
         fallback_file = "qwen2.5-coder-14b-instruct-q4_k_m.gguf"
@@ -166,12 +162,10 @@ def resolve_gguf_from_spec(
     """
     spec = model_spec.strip()
 
-    # 1. Chemin direct vers un fichier local (.gguf) existant
     expanded = Path(os.path.expanduser(spec))
     if expanded.is_file():
         return "LOCAL_FILE", expanded.name, expanded.resolve()
 
-    # 2. Format 'repo_id:filename' ou 'repo_id/filename.gguf'
     if ":" in spec:
         parts = spec.split(":", 1)
         return parts[0].strip(), parts[1].strip(), None
@@ -180,7 +174,6 @@ def resolve_gguf_from_spec(
         r_id, f_name = spec.rsplit("/", 1)
         return r_id.strip(), f_name.strip(), None
 
-    # 3. Format repo HF seul (ex: 'Qwen/Qwen3-14B-GGUF' ou 'bartowski/Qwen2.5-Coder-32B-Instruct-GGUF')
     if "/" in spec:
         repo_id = spec.strip()
         try:
@@ -202,11 +195,9 @@ def resolve_gguf_from_spec(
             pass
         return repo_id, f"{repo_id.split('/')[-1]}.gguf", None
 
-    # 4. Fichier .gguf seul (sans slash)
     if spec.lower().endswith(".gguf"):
         return DEFAULT_MODEL_REPO_ID, spec, None
 
-    # 5. Alias de palier historique (compatibilité)
     low_spec = spec.lower()
     if low_spec in TIER_CANDIDATES:
         cand = TIER_CANDIDATES[ModelTier(low_spec)][0]
@@ -536,6 +527,52 @@ Réponds UNIQUEMENT avec l'objet JSON valide respectant strictement le schéma `
 """
 
 
+def extract_json_payload(text: str) -> str:
+    """Extrait et nettoie le JSON généré par le LLM en isolant l'objet `LLMCompiledCardPart` racine."""
+    if not text:
+        return ""
+    text = text.strip()
+
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    if "<think>" in cleaned:
+        first_brace = cleaned.find("{")
+        cleaned = cleaned[first_brace:] if first_brace != -1 else ""
+
+    md_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    candidates: List[str] = [b.strip() for b in md_blocks if b.strip()]
+    candidates.append(cleaned)
+
+    card_candidate = ""
+    fallback_candidate = ""
+
+    for cand in candidates:
+        first_brace = cand.find("{")
+        if first_brace == -1:
+            continue
+        last_brace = cand.rfind("}")
+        while last_brace > first_brace:
+            sub = cand[first_brace : last_brace + 1].strip()
+            try:
+                val = json.loads(sub)
+                if isinstance(val, dict):
+                    if any(k in val for k in ("playableActions", "strategicEvaluator", "reasoningAnalysis")):
+                        if "primitive" not in val and "actionId" not in val:
+                            return sub
+                        elif not card_candidate:
+                            card_candidate = sub
+                    elif not fallback_candidate:
+                        fallback_candidate = sub
+            except Exception:
+                pass
+            last_brace = cand.rfind("}", first_brace, last_brace)
+
+    if card_candidate:
+        return card_candidate
+    if fallback_candidate:
+        return fallback_candidate
+    return cleaned
+
+
 def build_user_prompt(bundle: FetchedCardBundle, disable_thinking: bool = False) -> str:
     """Construit le prompt utilisateur détaillé injectant toutes les données TCGdex (FR + EN + lignée)."""
     identity = bundle.identity
@@ -790,7 +827,6 @@ class LocalLLMCardCompiler:
         if self.model_path is not None and self.model_path.exists():
             return self.model_path
 
-        # Si un repo_id et filename ont été explicitement résolus
         if self._resolved and self.repo_id and self.filename:
             try:
                 cached = try_to_load_from_cache(self.repo_id, self.filename)
@@ -818,7 +854,6 @@ class LocalLLMCardCompiler:
             )
             self._resolved = True
 
-        # Vérifie d'abord si le fichier résolu est déjà présent dans le cache local
         try:
             cached = try_to_load_from_cache(self.repo_id, self.filename)
             if cached is not None and isinstance(cached, (str, Path)) and Path(cached).exists():
@@ -827,7 +862,6 @@ class LocalLLMCardCompiler:
         except Exception:
             pass
 
-        # Liste de paires de candidats et de secours (y compris les versions Q4_K_M plus légères)
         tried_pairs: List[Tuple[str, str]] = [(self.repo_id, self.filename)]
         for cand_repo, _, cand_file in TIER_CANDIDATES.get(self.tier, []):
             for candidate_filename in [
@@ -840,7 +874,6 @@ class LocalLLMCardCompiler:
                 if pair not in tried_pairs:
                     tried_pairs.append(pair)
 
-        # Passe 1 : recherche instantanée dans le cache local (0 Mo à télécharger)
         for r_id, f_name in tried_pairs:
             try:
                 cached = try_to_load_from_cache(r_id, f_name)
@@ -852,7 +885,6 @@ class LocalLLMCardCompiler:
             except Exception:
                 continue
 
-        # Passe 2 : téléchargement via hf_hub_download (avec Xet désactivé pour éviter les plantages)
         last_err: Optional[Exception] = None
         for r_id, f_name in tried_pairs:
             try:
@@ -920,12 +952,34 @@ class LocalLLMCardCompiler:
 
         if effective_thinking is not None:
             cleaned_tk = str(effective_thinking).strip().lower()
-            is_thinking_disabled = cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}
+            if not cleaned_tk:
+                is_thinking_disabled = self.disable_thinking
+                thinking_level = self.thinking
+            elif cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+                is_thinking_disabled = True
+                thinking_level: Optional[str] = "null"
+            else:
+                is_thinking_disabled = False
+                thinking_level = cleaned_tk
         else:
             is_thinking_disabled = self.disable_thinking
+            thinking_level = "null" if is_thinking_disabled else None
 
         user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
-        current_max_tokens = max_tokens
+        sys_prompt = SYSTEM_PROMPT
+        if is_thinking_disabled:
+            sys_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
+                "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
+                "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."
+            )
+
+        if is_thinking_disabled and max_tokens == 4096:
+            current_max_tokens = 2048
+        else:
+            current_max_tokens = max_tokens
+
         last_error: Optional[Exception] = None
         compiled_part: Optional[LLMCompiledCardPart] = None
         elapsed: float = 0.0
@@ -937,28 +991,58 @@ class LocalLLMCardCompiler:
 
             t0 = time.perf_counter()
 
-            # Reset strict de l'état interne de llama.cpp (KV Cache C++) pour garantir une inférence 100% stateless
             if hasattr(self._llm, "reset"):
                 try:
                     self._llm.reset()
                 except Exception:
                     pass
 
+            chat_kwargs: Dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {
+                    "type": "json_object",
+                    "schema": self._json_schema,
+                },
+                "temperature": temperature,
+                "max_tokens": current_max_tokens,
+            }
+            if thinking_level == "null" or is_thinking_disabled:
+                chat_kwargs["chat_template_kwargs"] = {"enable_thinking": False}
+                chat_kwargs["chat_template_args"] = {"enable_thinking": False}
+                chat_kwargs["enable_thinking"] = False
+                chat_kwargs["reasoning_effort"] = "none"
+            elif thinking_level is not None:
+                chat_kwargs["chat_template_kwargs"] = {"enable_thinking": True}
+                chat_kwargs["chat_template_args"] = {"enable_thinking": True}
+                chat_kwargs["enable_thinking"] = True
+                if thinking_level in {"low", "medium", "high"}:
+                    chat_kwargs["reasoning_effort"] = thinking_level
+                elif thinking_level.isdigit():
+                    chat_kwargs["max_thinking_tokens"] = int(thinking_level)
+
+            def _call_create_chat(stream_flag: bool) -> Any:
+                kwargs = dict(chat_kwargs)
+                if stream_flag:
+                    kwargs["stream"] = True
+                try:
+                    return self._llm.create_chat_completion(**kwargs)
+                except TypeError:
+                    basic = {
+                        "messages": kwargs["messages"],
+                        "response_format": kwargs["response_format"],
+                        "temperature": kwargs["temperature"],
+                        "max_tokens": kwargs["max_tokens"],
+                    }
+                    if stream_flag:
+                        basic["stream"] = True
+                    return self._llm.create_chat_completion(**basic)
+
             if should_stream:
                 try:
-                    stream_resp = self._llm.create_chat_completion(
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        response_format={
-                            "type": "json_object",
-                            "schema": self._json_schema,
-                        },
-                        temperature=temperature,
-                        max_tokens=current_max_tokens,
-                        stream=True,
-                    )
+                    stream_resp = _call_create_chat(True)
                     accumulated_content = []
                     token_count = 0
                     last_cb_time = 0.0
@@ -1041,51 +1125,28 @@ class LocalLLMCardCompiler:
                         "tokens_per_second": tps,
                     }
                 except (AttributeError, TypeError):
-                    completion = self._llm.create_chat_completion(
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        response_format={
-                            "type": "json_object",
-                            "schema": self._json_schema,
-                        },
-                        temperature=temperature,
-                        max_tokens=current_max_tokens,
-                    )
+                    completion = _call_create_chat(False)
             else:
-                completion = self._llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    response_format={
-                        "type": "json_object",
-                        "schema": self._json_schema,
-                    },
-                    temperature=temperature,
-                    max_tokens=current_max_tokens,
-                )
+                completion = _call_create_chat(False)
 
             elapsed = max(0.001, round(time.perf_counter() - t0, 3))
             choice = completion["choices"][0]
             finish_reason = choice.get("finish_reason")
             raw_content = choice["message"]["content"]
 
-            # Si le modèle s'est arrêté prématurément pour cause de limite de tokens (troncation)
             if finish_reason == "length" and attempt < max_retries:
                 continue
 
+            clean_json_str = extract_json_payload(raw_content)
+
             try:
-                compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
+                compiled_part = LLMCompiledCardPart.model_validate_json(clean_json_str)
                 break
             except Exception as val_err:
                 last_error = val_err
-                # Tentative de rattrapage sur les pondérations si le JSON est valide
                 try:
-                    raw_dict = json.loads(raw_content)
+                    raw_dict = json.loads(clean_json_str)
                     if isinstance(raw_dict, dict):
-                        # Cas A : Le LLM a renvoyé uniquement un ActionEffect à la racine (primitive, etc.)
                         if "primitive" in raw_dict and "playableActions" not in raw_dict:
                             attack_label = "Attaque 1"
                             if bundle.raw_fr.get("attacks"):
@@ -1118,7 +1179,6 @@ class LocalLLMCardCompiler:
                                 },
                             }
 
-                        # Cas B : Le LLM a renvoyé directement une PlayableAction à la racine (actionId, etc.)
                         elif "actionId" in raw_dict and "playableActions" not in raw_dict:
                             raw_dict = {
                                 "reasoningAnalysis": f"Encapsulation automatique de l'action '{raw_dict.get('actionId')}' pour {bundle.card_id}.",
@@ -1151,7 +1211,6 @@ class LocalLLMCardCompiler:
                 except Exception:
                     pass
 
-                # Si l'erreur est une fin de JSON inattendue (EOF / JSONDecodeError) et qu'il reste des tentatives
                 err_str = str(val_err).lower()
                 if (
                     "eof" in err_str
@@ -1164,7 +1223,6 @@ class LocalLLMCardCompiler:
 
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
-        # Calcul des métriques de débit (tokens par seconde) basées sur le temps effectif de génération
         usage = completion.get("usage") if isinstance(completion, dict) else {}
         completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
         generation_duration = completion.get("generation_duration") if isinstance(completion, dict) else None
@@ -1202,7 +1260,6 @@ class LocalLLMCardCompiler:
             compilationMetadata=metadata,
         )
 
-        # Post-processing déterministe des règles métier Pokémon TCG
         engine_card = sanitize_and_enrich_card(bundle, engine_card)
         return engine_card
 

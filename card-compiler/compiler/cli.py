@@ -258,7 +258,6 @@ def sync_cards_database(
     compiled_dir = data_dir / "compiled_cards"
     compiled_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Charger les cartes compilées sur le disque
     disk_cards: Dict[str, Dict[str, Any]] = {}
     corrupted_files: List[tuple[str, str]] = []
 
@@ -275,7 +274,6 @@ def sync_cards_database(
         except Exception as e:
             corrupted_files.append((fpath.name, str(e)))
 
-    # 2. Charger le fichier JSON global existant ou initialiser
     db_data: Any = None
     db_format = "list"
     existing_ids: set[str] = set()
@@ -318,7 +316,6 @@ def sync_cards_database(
         db_data = []
         db_format = "list"
 
-    # 3. Déterminer les cartes manquantes et celles à mettre à jour
     added_ids: List[str] = []
     updated_ids: List[str] = []
 
@@ -330,7 +327,6 @@ def sync_cards_database(
 
     missing_on_disk_ids = sorted(list(existing_ids - set(disk_cards.keys())))
 
-    # 4. Appliquer les ajouts et modifications (si non dry_run)
     if not dry_run and (added_ids or updated_ids or not target_db.exists()):
         if db_format == "list":
             for cid in added_ids:
@@ -516,6 +512,7 @@ def _execute_run_pipeline(
     if llm_provider == LLMProvider.lm_studio:
         engine_preview = LMStudioCardCompiler(
             tier=effective_tier,
+            model_name=model,
             ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
@@ -557,6 +554,7 @@ def _execute_run_pipeline(
         engine_preview = LocalLLMCardCompiler(
             tier=effective_tier,
             fast=fast,
+            model=model,
             hf_token=hf_token,
             disable_thinking=disable_thinking,
             thinking=thinking,
@@ -573,9 +571,15 @@ def _execute_run_pipeline(
             thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
         else:
             thinking_display = "[green]Activé / Standard[/green]"
+
+        if getattr(engine_preview, "model_spec", None):
+            local_model_display = f"[bold green]{engine_preview.model_spec}[/bold green] ([yellow]{engine_preview.repo_id}[/yellow] / [green]{engine_preview.filename}[/green])"
+        else:
+            local_model_display = f"[yellow]{engine_preview.repo_id}[/yellow] ([green]{engine_preview.filename}[/green])"
+
         llm_lines = (
             f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Metal in-memory)[/bold magenta]\n"
-            f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{engine_preview.repo_id}[/yellow] ([green]{engine_preview.filename}[/green])\n"
+            f"• [bold]Modèle[/bold] : {local_model_display}\n"
             f"• [bold]HF Token[/bold] : {token_status}\n"
             f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
             f"• [bold]Mode Thinking[/bold] : {thinking_display}"
@@ -613,7 +617,6 @@ def _execute_run_pipeline(
         console.print("[yellow]Aucune carte à compiler.[/yellow]")
         return
 
-    # Séparation entre cartes statiques, cartes déjà compilées (batch resume) et cartes nécessitant l'inférence LLM
     bundles_to_compile = []
     compiled_results: List[EngineCardModel] = []
     skipped_ids: set[str] = set()
@@ -622,7 +625,6 @@ def _execute_run_pipeline(
     for bundle in bundles:
         out_path = compiled_dir / f"{bundle.card_id}.json"
 
-        # 1. Court-circuit déterministe pour les Énergies de Base (0 token, 0s, 0 hallucination)
         if is_basic_energy(bundle):
             static_model = build_basic_energy_model(bundle)
             out_path.write_text(
@@ -633,7 +635,6 @@ def _execute_run_pipeline(
             static_energy_ids.add(bundle.card_id)
             continue
 
-        # 2. Séparation entre cartes déjà compilées (batch resume) et cartes nécessitant l'inférence LLM
         if out_path.exists() and not force:
             try:
                 existing_model = EngineCardModel.model_validate_json(out_path.read_text(encoding="utf-8"))
@@ -1089,14 +1090,14 @@ def run_command(
         "--no-think",
         "--disable-thinking",
         envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK", "DISABLE_THINKING"],
-        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
+        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) en mode Local et LM Studio.",
     ),
     thinking: Optional[str] = typer.Option(
         None,
         "--thinking",
         "-tk",
         envvar=["LM_STUDIO_THINKING", "THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
-        help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
+        help="Niveau de réflexion / thinking pour les modèles raisonnants (Local et LM Studio) : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
     parallel: int = typer.Option(
         1,
@@ -1202,14 +1203,14 @@ def compile_alias(
         "--no-think",
         "--disable-thinking",
         envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK", "DISABLE_THINKING"],
-        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
+        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) en mode Local et LM Studio.",
     ),
     thinking: Optional[str] = typer.Option(
         None,
         "--thinking",
         "-tk",
         envvar=["LM_STUDIO_THINKING", "THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
-        help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
+        help="Niveau de réflexion / thinking pour les modèles raisonnants (Local et LM Studio) : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
     parallel: int = typer.Option(
         1,
