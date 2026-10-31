@@ -357,6 +357,7 @@ class LMStudioCardCompiler:
         ssh_password: Optional[str] = None,
         local_port: Optional[int] = None,
         use_tunnel: Optional[bool] = None,
+        model: Optional[str] = None,
         model_name: Optional[str] = None,
         cli_path: Optional[str] = None,
         auto_start: Optional[bool] = None,
@@ -446,11 +447,10 @@ class LMStudioCardCompiler:
         self.local_port = getattr(self, "local_port", 12345)
 
         # 3. Modèle d'inférence
-        env_model = os.environ.get("LM_STUDIO_MODEL") or os.environ.get("LLM_MODEL") or os.environ.get("MODEL")
-        if model_name and model_name.strip():
-            self.model_name = model_name.strip()
-        elif env_model and env_model.strip():
-            self.model_name = env_model.strip()
+        env_model = os.environ.get("LLM_MODEL") or os.environ.get("MODEL") or os.environ.get("LM_STUDIO_MODEL")
+        chosen_model = model_name or model or env_model
+        if chosen_model and str(chosen_model).strip():
+            self.model_name = str(chosen_model).strip()
         else:
             self.model_name = None  # Auto-détecté depuis le modèle actuellement chargé sur le serveur
 
