@@ -1145,6 +1145,138 @@ class TestLMStudioCompiler(unittest.TestCase):
         )
         self.assertTrue(engine.disable_thinking)
 
+    def test_thinking_levels_init_and_env(self):
+        # 1. 'null' désactive le thinking
+        with patch.dict("os.environ", {}, clear=True):
+            compiler_null = LMStudioCardCompiler(remote_host="127.0.0.1", thinking="null")
+            self.assertEqual(compiler_null.thinking, "null")
+            self.assertTrue(compiler_null.disable_thinking)
+
+            # 2. 'low', 'medium', 'high' activent le thinking
+            compiler_low = LMStudioCardCompiler(remote_host="127.0.0.1", thinking="low")
+            self.assertEqual(compiler_low.thinking, "low")
+            self.assertFalse(compiler_low.disable_thinking)
+
+            compiler_high = LMStudioCardCompiler(remote_host="127.0.0.1", thinking="high")
+            self.assertEqual(compiler_high.thinking, "high")
+            self.assertFalse(compiler_high.disable_thinking)
+
+        # 3. Via variable d'environnement LM_STUDIO_THINKING
+        with patch.dict("os.environ", {"LM_STUDIO_THINKING": "medium"}):
+            compiler_env = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertEqual(compiler_env.thinking, "medium")
+            self.assertFalse(compiler_env.disable_thinking)
+
+        # 4. Via variable d'environnement LM_STUDIO_THINKING=null
+        with patch.dict("os.environ", {"LM_STUDIO_THINKING": "null"}):
+            compiler_env_null = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertEqual(compiler_env_null.thinking, "null")
+            self.assertTrue(compiler_env_null.disable_thinking)
+
+        # 5. create_compiler_engine transmet thinking
+        engine_null = create_compiler_engine(
+            provider=LLMProvider.lm_studio,
+            thinking="null",
+        )
+        self.assertEqual(engine_null.thinking, "null")
+        self.assertTrue(engine_null.disable_thinking)
+
+        engine_low = create_compiler_engine(
+            provider=LLMProvider.lm_studio,
+            thinking="low",
+        )
+        self.assertEqual(engine_low.thinking, "low")
+        self.assertFalse(engine_low.disable_thinking)
+
+    @patch("httpx.Client")
+    def test_compile_card_with_thinking_levels(self, mock_client_cls):
+        """Vérifie la règle : null = false (disable), tout autre niveau = true (enable) + reasoning_effort."""
+        fake_card_json = {
+            "reasoningAnalysis": "Test thinking levels.",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [
+                {
+                    "actionId": "play_item",
+                    "label": "Test Item",
+                    "sourceType": "TRAINER_PLAY",
+                    "timing": "ONCE_PER_CARD",
+                    "canUseTurn1GoingFirst": True,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [],
+                    "effects": [{"primitive": "DRAW_CARDS", "count": 2}],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "CONSISTENCY_TUTOR",
+                "intrinsicBaseScore": 70,
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 50},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {"id": "sv01-181", "name": "Faiblo Ball", "category": "Dresseur", "trainerType": "Objet"}
+        identity, pstats = fetcher.build_deterministic_models("sv01-181", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv01-181",
+            resolved_tcgdex_id="sv01-181",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv01-181.json"),
+        )
+
+        compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+        compiler._ready = True
+
+        # Cas 1 : thinking='null' -> enable_thinking=False, reasoning_effort='none'
+        compiler.compile_card(bundle, thinking="null")
+        sent_payload_null = mock_instance.post.call_args[1]["json"]
+        self.assertIs(sent_payload_null.get("enable_thinking"), False)
+        self.assertEqual(sent_payload_null.get("chat_template_kwargs"), {"enable_thinking": False})
+        self.assertEqual(sent_payload_null.get("reasoning_effort"), "none")
+
+        # Cas 2 : thinking='low' -> enable_thinking=True, reasoning_effort='low'
+        compiler.compile_card(bundle, thinking="low")
+        sent_payload_low = mock_instance.post.call_args[1]["json"]
+        self.assertIs(sent_payload_low.get("enable_thinking"), True)
+        self.assertEqual(sent_payload_low.get("chat_template_kwargs"), {"enable_thinking": True})
+        self.assertEqual(sent_payload_low.get("reasoning_effort"), "low")
+        self.assertEqual(sent_payload_low.get("reasoning"), {"effort": "low"})
+
+        # Cas 3 : thinking='high' -> enable_thinking=True, reasoning_effort='high'
+        compiler.compile_card(bundle, thinking="high")
+        sent_payload_high = mock_instance.post.call_args[1]["json"]
+        self.assertIs(sent_payload_high.get("enable_thinking"), True)
+        self.assertEqual(sent_payload_high.get("chat_template_kwargs"), {"enable_thinking": True})
+        self.assertEqual(sent_payload_high.get("reasoning_effort"), "high")
+
+        # Cas 4 : thinking='4096' (nombre de tokens) -> enable_thinking=True, max_thinking_tokens=4096
+        compiler.compile_card(bundle, thinking="4096")
+        sent_payload_tokens = mock_instance.post.call_args[1]["json"]
+        self.assertIs(sent_payload_tokens.get("enable_thinking"), True)
+        self.assertEqual(sent_payload_tokens.get("max_thinking_tokens"), 4096)
+
     @patch("httpx.Client")
     def test_compile_card_with_disable_thinking_injects_payload_and_prompts(self, mock_client_cls):
         compiler = LMStudioCardCompiler(

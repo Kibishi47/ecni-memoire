@@ -363,6 +363,7 @@ class LMStudioCardCompiler:
         timeout_seconds: float = 180.0,
         tier: ModelTier = ModelTier.qwen3,
         disable_thinking: Optional[bool] = None,
+        thinking: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         load_env_file()
@@ -370,16 +371,39 @@ class LMStudioCardCompiler:
         self.tier = tier
 
         # Mode Thinking / Raisonnement (pour modèles tels que Qwen, DeepSeek, QwQ)
+        env_thinking = (
+            os.environ.get("LM_STUDIO_THINKING")
+            or os.environ.get("LM_STUDIO_THINKING_LEVEL")
+            or os.environ.get("THINKING")
+            or os.environ.get("THINKING_LEVEL")
+        )
         env_disable_thinking = (
             os.environ.get("LM_STUDIO_DISABLE_THINKING")
             or os.environ.get("LM_STUDIO_NO_THINK")
             or os.environ.get("NO_THINK")
         )
-        if disable_thinking is not None:
-            self.disable_thinking = bool(disable_thinking)
-        elif env_disable_thinking:
-            self.disable_thinking = env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+
+        resolved_thinking = thinking
+        if resolved_thinking is None and env_thinking:
+            resolved_thinking = env_thinking.strip()
+
+        if disable_thinking is True or (
+            resolved_thinking is None and env_disable_thinking and env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+        ):
+            resolved_thinking = "null"
+        elif disable_thinking is False and resolved_thinking is None:
+            resolved_thinking = None
+
+        if resolved_thinking is not None:
+            cleaned_tk = str(resolved_thinking).strip().lower()
+            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+                self.thinking: Optional[str] = "null"
+                self.disable_thinking: bool = True
+            else:
+                self.thinking = cleaned_tk
+                self.disable_thinking = False
         else:
+            self.thinking = None
             self.disable_thinking = False
 
         # 1. Résolution de l'URL REST LM Studio (Directe IP/port ou tunnel SSH)
@@ -800,6 +824,7 @@ class LMStudioCardCompiler:
         stream: Optional[bool] = None,
         on_token: Optional[Callable[[int, float], None]] = None,
         disable_thinking: Optional[bool] = None,
+        thinking: Optional[str] = None,
     ) -> EngineCardModel:
         """Compile une carte Pokémon TCG via LM Studio (remote SSH / local REST) avec format contraint."""
         from compiler.llm_engine import SYSTEM_PROMPT, build_user_prompt, enforce_ptcg_invariants
@@ -809,7 +834,26 @@ class LMStudioCardCompiler:
             return build_basic_energy_model(bundle)
 
         self.load_model_in_memory()
-        is_thinking_disabled = self.disable_thinking if disable_thinking is None else disable_thinking
+
+        # Résolution du niveau de réflexion / thinking pour cette compilation
+        effective_thinking = thinking if thinking is not None else self.thinking
+        if disable_thinking is True:
+            effective_thinking = "null"
+        elif disable_thinking is False and effective_thinking == "null":
+            effective_thinking = None
+
+        if effective_thinking is not None:
+            cleaned_tk = str(effective_thinking).strip().lower()
+            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+                is_thinking_disabled = True
+                thinking_level: Optional[str] = "null"
+            else:
+                is_thinking_disabled = False
+                thinking_level = cleaned_tk
+        else:
+            is_thinking_disabled = self.disable_thinking
+            thinking_level = "null" if is_thinking_disabled else None
+
         user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
         sys_prompt = SYSTEM_PROMPT
         if is_thinking_disabled:
@@ -846,12 +890,23 @@ class LMStudioCardCompiler:
                     "max_tokens": current_max_tokens,
                 }
 
-                if is_thinking_disabled:
+                if thinking_level == "null" or is_thinking_disabled:
+                    # Modèle ne gérant que le booléen : null = false
                     payload["chat_template_kwargs"] = {"enable_thinking": False}
                     payload["chat_template_args"] = {"enable_thinking": False}
                     payload["enable_thinking"] = False
                     payload["reasoning_effort"] = "none"
                     payload["reasoning"] = {"effort": "none"}
+                elif thinking_level is not None:
+                    # Modèle ne gérant que le booléen : le reste = true
+                    payload["chat_template_kwargs"] = {"enable_thinking": True}
+                    payload["chat_template_args"] = {"enable_thinking": True}
+                    payload["enable_thinking"] = True
+                    if thinking_level in {"low", "medium", "high"}:
+                        payload["reasoning_effort"] = thinking_level
+                        payload["reasoning"] = {"effort": thinking_level}
+                    elif thinking_level.isdigit():
+                        payload["max_thinking_tokens"] = int(thinking_level)
 
                 # Cascade de formats : json_schema -> json_object -> none (prompt direct)
                 formats_to_try: List[str] = []

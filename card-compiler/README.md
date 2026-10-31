@@ -8,7 +8,7 @@ Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il int
   - **Local Apple Metal (`local`)** : Chargement direct du modèle GGUF en RAM/VRAM unifiée via `llama-cpp-python` (`n_gpu_layers=-1`, Metal M4 natif, 0 démon externe).
   - **LM Studio (`lm_studio`)** : Connexion à un serveur LM Studio distant ou local via son API REST standard (`/v1/chat/completions`), soit en accès direct par IP/Port, soit au travers d'un tunnel SSH automatisé. Les modèles déjà chargés dans LM Studio sont auto-détectés.
 - **Débit en Temps Réel (Streaming SSE & Tokens/sec)** : Affichage dynamique du débit d'inférence en direct dans la barre de progression Rich (`t/s` et tokens générés) et récapitulatif dans le tableau final.
-- **Option Désactivation du Thinking (`--no-think`)** : Prise en charge des modèles raisonnants (DeepSeek-R1, Qwen 2.5 / 3.8, QwQ) avec injection des paramètres Jinja `chat_template_kwargs={"enable_thinking": False}`, `reasoning_effort="none"` et des balises anti-thinking (`<|think_off|>`, `/no_think`) pour réduire la latence et économiser les tokens.
+- **Contrôle Fin du Thinking & Raisonnement (`--thinking`, `--no-think`)** : Prise en charge universelle des modèles raisonnants (DeepSeek-R1, Qwen 2.5 / 3.8, QwQ). Permet de spécifier un niveau de réflexion (`--thinking low|medium|high|<tokens>`) ou `null` pour le désactiver. Si le modèle ne gère que les booléens (`enable_thinking`), `null` vaut `false` et tout autre niveau vaut `true`. Pour les modèles supportant `reasoning_effort`, le niveau est directement injecté avec les balises d'inhibition adaptées.
 - **Normalisation Robuste des Enums & Auto-Guérison** : Validateurs Pydantic V2 pré-évaluation (`mode="before"`) avec dictionnaire de synonymes et correspondance floue (`difflib`) pour normaliser automatiquement les primitives (`EffectPrimitive`), motifs de carte morte (`DeadCardReason`), rôles stratégiques et timings sans plantage.
 - **Court-circuit Déterministe des Énergies de Base** : Compilation instantanée (0 token, 0.00s) pour les Énergies de base.
 - **Résolution de lignée d'évolution** : Calcul automatique du Pokémon de base racine (`rootBasicName`, `evolvesFrom`, `evolutionChain`) via l'index TCGdex pour alimenter les synergies et conditions de cartes mortes (ex. *Super Bonbon*).
@@ -64,7 +64,10 @@ LM_STUDIO_PORT=1234
 # Laissez VIDE pour utiliser automatiquement le modèle actuellement chargé dans LM Studio
 LM_STUDIO_MODEL=
 
-# Option : Désactiver le thinking des modèles raisonnants (DeepSeek, Qwen, QwQ)
+# Niveau de thinking pour les modèles raisonnants (DeepSeek, Qwen, QwQ) :
+# 'null' (ou LM_STUDIO_DISABLE_THINKING=true) : Désactive le thinking (booléen -> false, reasoning_effort -> none)
+# 'low', 'medium', 'high' : Active le thinking avec ce niveau d'effort (booléen -> true, reasoning_effort -> niveau)
+LM_STUDIO_THINKING=
 LM_STUDIO_DISABLE_THINKING=false
 
 # 3. Tunnel SSH (Requis uniquement si le port 1234 n'est pas ouvert publiquement)
@@ -95,6 +98,11 @@ python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001
 
 # Désactiver le thinking / raisonnement pour LM Studio (gain de temps et économie de tokens)
 python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --no-think
+# ou équivalent via niveau 'null' :
+python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking null
+
+# Définir un niveau d'effort de thinking ('low', 'medium', 'high' ou nombre de tokens)
+python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking low
 
 # Compilation du format Standard complet (avec reprise sur cache)
 python -m compiler.cli run --standard --limit 50
@@ -108,7 +116,8 @@ python -m compiler.cli run --ids sv03-125 --force
 - `--test` / `--standard` : Raccourcis pour forcer le mode test ou standard.
 - `--ids <ID1,ID2>` : Liste d'identifiants TCGdex séparés par des virgules (ex: `sv06.5-001,sv03-125`).
 - `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Metal ou `lm_studio` REST).
-- `--no-think` / `--disable-thinking` : Désactive le mode réflexion/thinking des modèles raisonnants sous LM Studio.
+- `--thinking <niveau>` (`-tk`) : Niveau de réflexion/thinking pour modèles raisonnants (`null` pour désactiver, ou `low`, `medium`, `high`, nombre de tokens). Si le modèle gère uniquement un booléen (`enable_thinking`), `null` vaut `false` et toute autre valeur vaut `true`.
+- `--no-think` / `--disable-thinking` : Raccourci pour désactiver le mode réflexion/thinking (équivalent à `--thinking null`).
 - `--tier qwen3|max|fast` (`-t`) : Palier de modèle en mode local (`qwen3` 14B Q6_K, `max` 30B/32B, `fast` 7B).
 - `--fast` : Raccourci pour `--tier fast`.
 - `--provider sdk|rest` (`-p`) : Fournisseur d'accès TCGdex (`sdk` : tcgdex-sdk officiel, `rest` : API HTTP directe).

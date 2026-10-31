@@ -419,11 +419,23 @@ def create_compiler_engine(
     hf_token: Optional[str] = None,
     ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
+    thinking: Optional[str] = None,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
-        return LMStudioCardCompiler(tier=tier, ssh_password=ssh_password, disable_thinking=disable_thinking)
-    return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token, disable_thinking=disable_thinking)
+        return LMStudioCardCompiler(
+            tier=tier,
+            ssh_password=ssh_password,
+            disable_thinking=disable_thinking,
+            thinking=thinking,
+        )
+    return LocalLLMCardCompiler(
+        tier=tier,
+        fast=fast,
+        hf_token=hf_token,
+        disable_thinking=disable_thinking,
+        thinking=thinking,
+    )
 
 
 def _execute_run_pipeline(
@@ -440,6 +452,7 @@ def _execute_run_pipeline(
     hf_token: Optional[str] = None,
     ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
+    thinking: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -468,14 +481,16 @@ def _execute_run_pipeline(
             tier=effective_tier,
             ssh_password=ssh_password,
             disable_thinking=disable_thinking,
+            thinking=thinking,
         )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (API REST)[/bold cyan]"
         model_display = engine_preview.model_name or "Auto-détection (modèle actuellement actif sur le serveur)"
-        thinking_display = (
-            "[yellow]Désactivé (--no-think)[/yellow]"
-            if engine_preview.disable_thinking
-            else "[green]Activé / Standard[/green]"
-        )
+        if engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
+            thinking_display = "[yellow]Désactivé (null / --no-think)[/yellow]"
+        elif getattr(engine_preview, "thinking", None) is not None:
+            thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
+        else:
+            thinking_display = "[green]Activé / Standard[/green]"
         if engine_preview.use_tunnel and engine_preview.ssh_host:
             auth_info = (
                 "[green]Mot de passe (SSH_PASSWORD)[/green]"
@@ -505,6 +520,7 @@ def _execute_run_pipeline(
             fast=fast,
             hf_token=hf_token,
             disable_thinking=disable_thinking,
+            thinking=thinking,
         )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]"
         token_status = (
@@ -512,11 +528,12 @@ def _execute_run_pipeline(
             if engine_preview.hf_token
             else "[yellow]Non renseigné (anonyme)[/yellow]"
         )
-        thinking_display = (
-            "[yellow]Désactivé (--no-think)[/yellow]"
-            if engine_preview.disable_thinking
-            else "[green]Activé / Standard[/green]"
-        )
+        if engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
+            thinking_display = "[yellow]Désactivé (null / --no-think)[/yellow]"
+        elif getattr(engine_preview, "thinking", None) is not None:
+            thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
+        else:
+            thinking_display = "[green]Activé / Standard[/green]"
         llm_lines = (
             f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Metal in-memory)[/bold magenta]\n"
             f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{engine_preview.repo_id}[/yellow] ([green]{engine_preview.filename}[/green])\n"
@@ -605,6 +622,7 @@ def _execute_run_pipeline(
             hf_token=hf_token,
             ssh_password=ssh_password,
             disable_thinking=disable_thinking,
+            thinking=thinking,
         )
         try:
             try:
@@ -885,12 +903,21 @@ def run_command(
         envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
         help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
     ),
+    thinking: Optional[str] = typer.Option(
+        None,
+        "--thinking",
+        "-tk",
+        envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
+        help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
         import getpass
 
         ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
+
+    effective_thinking = "null" if no_think else thinking
 
     _execute_run_pipeline(
         mode=mode,
@@ -906,6 +933,7 @@ def run_command(
         hf_token=hf_token,
         ssh_password=ssh_password,
         disable_thinking=no_think,
+        thinking=effective_thinking,
     )
 
 
@@ -957,12 +985,21 @@ def compile_alias(
         envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
         help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
     ),
+    thinking: Optional[str] = typer.Option(
+        None,
+        "--thinking",
+        "-tk",
+        envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
+        help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
         import getpass
 
         ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
+
+    effective_thinking = "null" if no_think else thinking
 
     _execute_run_pipeline(
         mode=mode,
@@ -978,6 +1015,7 @@ def compile_alias(
         hf_token=hf_token,
         ssh_password=ssh_password,
         disable_thinking=no_think,
+        thinking=effective_thinking,
     )
 
 

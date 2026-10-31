@@ -631,20 +631,44 @@ class LocalLLMCardCompiler:
         n_gpu_layers: int = -1,
         verbose: bool = False,
         disable_thinking: Optional[bool] = None,
+        thinking: Optional[str] = None,
     ) -> None:
         load_env_file()
         self.hf_token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
+        env_thinking = (
+            os.environ.get("LM_STUDIO_THINKING")
+            or os.environ.get("LM_STUDIO_THINKING_LEVEL")
+            or os.environ.get("THINKING")
+            or os.environ.get("THINKING_LEVEL")
+        )
         env_disable_thinking = (
             os.environ.get("LM_STUDIO_DISABLE_THINKING")
             or os.environ.get("LM_STUDIO_NO_THINK")
             or os.environ.get("NO_THINK")
         )
-        if disable_thinking is not None:
-            self.disable_thinking = bool(disable_thinking)
-        elif env_disable_thinking:
-            self.disable_thinking = env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+
+        resolved_thinking = thinking
+        if resolved_thinking is None and env_thinking:
+            resolved_thinking = env_thinking.strip()
+
+        if disable_thinking is True or (
+            resolved_thinking is None and env_disable_thinking and env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+        ):
+            resolved_thinking = "null"
+        elif disable_thinking is False and resolved_thinking is None:
+            resolved_thinking = None
+
+        if resolved_thinking is not None:
+            cleaned_tk = str(resolved_thinking).strip().lower()
+            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+                self.thinking: Optional[str] = "null"
+                self.disable_thinking: bool = True
+            else:
+                self.thinking = cleaned_tk
+                self.disable_thinking = False
         else:
+            self.thinking = None
             self.disable_thinking = False
 
         if fast and tier == ModelTier.qwen3:
@@ -764,6 +788,7 @@ class LocalLLMCardCompiler:
         stream: Optional[bool] = None,
         on_token: Optional[Callable[[int, float], None]] = None,
         disable_thinking: Optional[bool] = None,
+        thinking: Optional[str] = None,
     ) -> EngineCardModel:
         """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`.
 
@@ -775,7 +800,18 @@ class LocalLLMCardCompiler:
 
         self.load_model_in_memory()
 
-        is_thinking_disabled = self.disable_thinking if disable_thinking is None else disable_thinking
+        effective_thinking = thinking if thinking is not None else self.thinking
+        if disable_thinking is True:
+            effective_thinking = "null"
+        elif disable_thinking is False and effective_thinking == "null":
+            effective_thinking = None
+
+        if effective_thinking is not None:
+            cleaned_tk = str(effective_thinking).strip().lower()
+            is_thinking_disabled = cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}
+        else:
+            is_thinking_disabled = self.disable_thinking
+
         user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
         current_max_tokens = max_tokens
         last_error: Optional[Exception] = None
