@@ -468,6 +468,7 @@ def _execute_run_pipeline(
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
     parallel: int = 1,
+    continue_on_error: bool = False,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -582,7 +583,8 @@ def _execute_run_pipeline(
             f"• [bold]Mode[/bold] : {mode_label}\n"
             f"• [bold]Fournisseur TCGdex[/bold] : [bold green]{provider.value.upper()}[/bold green] (SDK Python par défaut)\n"
             f"{llm_lines}\n"
-            f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}",
+            f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}\n"
+            f"• [bold]Gestion des erreurs[/bold] : {'Ignorer et passer à la suivante (--continue-on-error)' if continue_on_error else 'Arrêt immédiat (défaut)'}",
             border_style="cyan",
         )
     )
@@ -746,11 +748,12 @@ def _execute_run_pipeline(
                             )
                         except Exception as card_err:
                             console.print(
-                                f"\n[bold red]✗ Erreur critique lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
+                                f"\n[bold red]✗ Erreur lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
                             )
                             failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
-                            # Arrêt immédiat dès la première erreur selon la directive utilisateur
-                            raise typer.Exit(code=1)
+                            if not continue_on_error:
+                                # Arrêt immédiat dès la première erreur si continue_on_error est False
+                                raise typer.Exit(code=1)
                         finally:
                             progress.advance(task_id)
                 else:
@@ -837,11 +840,12 @@ def _execute_run_pipeline(
                                 f"  [green]✓[/green] [bold]{b.card_id}[/bold] ({b.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{gen_text}{tok_count}{tps_text} [dim](Slot {slot_id + 1})[/dim]"
                             )
                         except Exception as card_err:
-                            abort_event.set()
+                            if not continue_on_error:
+                                abort_event.set()
                             with failed_lock:
                                 failed_cards.append((b.card_id, b.identity.nameFr, str(card_err)))
                             progress.console.print(
-                                f"\n[bold red]✗ Erreur critique lors de la compilation de {b.card_id} ({b.identity.nameFr}) sur Slot {slot_id + 1}:[/bold red] {card_err}"
+                                f"\n[bold red]✗ Erreur lors de la compilation de {b.card_id} ({b.identity.nameFr}) sur Slot {slot_id + 1}:[/bold red] {card_err}"
                             )
                         finally:
                             progress.update(
@@ -862,7 +866,7 @@ def _execute_run_pipeline(
                     for s_task in slot_tasks:
                         progress.update(s_task, visible=False)
 
-                    if failed_cards:
+                    if failed_cards and not continue_on_error:
                         raise typer.Exit(code=1)
 
             if failed_cards:
@@ -977,6 +981,26 @@ def _execute_run_pipeline(
             f"{tok_info} ([dim]{len(tps_values)} carte(s) compilée(s)[/dim])"
         )
 
+    if failed_cards:
+        failed_table = Table(
+            title=f"⚠️ Récapitulatif des Cartes en Échec ({len(failed_cards)} carte(s) à recompiler)",
+            show_lines=True,
+            border_style="red",
+            header_style="bold red",
+        )
+        failed_table.add_column("ID", style="bold yellow", no_wrap=True)
+        failed_table.add_column("Nom", style="bold white")
+        failed_table.add_column("Détail de l'Erreur", style="red")
+        for cid, cname, err_desc in failed_cards:
+            short_err = err_desc.strip().replace("\n", " ")
+            if len(short_err) > 120:
+                short_err = short_err[:117] + "..."
+            failed_table.add_row(cid, cname, short_err)
+        console.print(failed_table)
+        console.print(
+            f"[yellow]💡 Astuce : Relancez la commande pour ne recompiler que ces {len(failed_cards)} cartes restantes (reprise automatique sur cache).[/yellow]"
+        )
+
 
 @app.command("run")
 def run_command(
@@ -1075,6 +1099,15 @@ def run_command(
         envvar=["LM_STUDIO_PARALLEL", "PARALLEL", "CONCURRENCY", "COMPILER_CONCURRENCY"],
         help="Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement).",
     ),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution (idéal pour les grands lots).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
@@ -1100,6 +1133,7 @@ def run_command(
         disable_thinking=no_think,
         thinking=effective_thinking,
         parallel=parallel,
+        continue_on_error=continue_on_error,
     )
 
 
@@ -1166,6 +1200,15 @@ def compile_alias(
         envvar=["LM_STUDIO_PARALLEL", "PARALLEL", "CONCURRENCY", "COMPILER_CONCURRENCY"],
         help="Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement).",
     ),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution (idéal pour les grands lots).",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
@@ -1191,6 +1234,7 @@ def compile_alias(
         disable_thinking=no_think,
         thinking=effective_thinking,
         parallel=parallel,
+        continue_on_error=continue_on_error,
     )
 
 
