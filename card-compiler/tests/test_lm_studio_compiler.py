@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 from compiler.cli import LLMProvider, create_compiler_engine
 from compiler.llm_engine import ModelTier
-from compiler.lm_studio_compiler import LMStudioCardCompiler, find_available_port
+from compiler.lm_studio_compiler import (
+    LMStudioCardCompiler,
+    extract_json_payload,
+    find_available_port,
+)
 from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel
 
 
@@ -303,6 +307,324 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(model.subCategory, CardSubCategory.ITEM)
         self.assertEqual(model.strategicEvaluator.primaryRole.value, "BENCH_DEPLOYER")
         self.assertEqual(model.compilationMetadata.modelRepoId, "LM_STUDIO_LOCAL")
+
+    def test_extract_json_payload(self):
+        # 1. JSON pur
+        self.assertEqual(extract_json_payload('{"a": 1}'), '{"a": 1}')
+        # 2. Markdown fence ```json
+        self.assertEqual(extract_json_payload('```json\n{"a": 1}\n```'), '{"a": 1}')
+        # 3. Markdown fence sans langage ```
+        self.assertEqual(extract_json_payload('```\n{"a": 1}\n```'), '{"a": 1}')
+        # 4. Balises <think> (modèles raisonnants type DeepSeek R1 / Qwen QwQ)
+        self.assertEqual(
+            extract_json_payload('<think>Analyse interne...</think>\n```json\n{"a": 1}\n```'),
+            '{"a": 1}',
+        )
+        # 5. Texte libre avant et après le JSON
+        self.assertEqual(
+            extract_json_payload('Voici la carte générée :\n{"a": 1}\nBonne compilation !'),
+            '{"a": 1}',
+        )
+
+    @patch("httpx.Client")
+    def test_load_model_in_memory_model_fallback(self, mock_client_cls):
+        # Si le modèle cible ("Qwen3.8-27B") n'est pas chargé, mais qu'un autre modèle actif existe
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": [{"id": "meta-llama-3-8b-instruct"}]
+        }
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        compiler.load_model_in_memory()
+        # Doit impérativement adopter le modèle actuellement chargé dans LM Studio
+        self.assertEqual(compiler.model_name, "meta-llama-3-8b-instruct")
+        compiler.close()
+
+    @patch("httpx.Client")
+    def test_load_model_in_memory_smart_matching(self, mock_client_cls):
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": [
+                {"id": "qwen2.5-coder-7b-instruct"},
+                {"id": "qwen3.8-27b-chat@q6_k"},
+            ]
+        }
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        compiler.load_model_in_memory()
+        self.assertEqual(compiler.model_name, "qwen3.8-27b-chat@q6_k")
+        compiler.close()
+
+    @patch("httpx.Client")
+    def test_compile_card_400_fallback_cascade(self, mock_client_cls):
+        # Simule le cas où json_schema retourne 400, json_object retourne 400,
+        # puis le format brut sans response_format retourne 200 avec Markdown JSON.
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="test-model",
+            auto_start=False,
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test fallback",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "TECH_UTILITY",
+                "intrinsicBaseScore": 50,
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 0,
+            },
+        }
+
+        resp_400_schema = MagicMock()
+        resp_400_schema.is_success = False
+        resp_400_schema.status_code = 400
+        resp_400_schema.json.return_value = {"error": {"message": "Invalid response_format: json_schema not supported"}}
+        resp_400_schema.text = "json_schema not supported"
+
+        resp_400_obj = MagicMock()
+        resp_400_obj.is_success = False
+        resp_400_obj.status_code = 400
+        resp_400_obj.json.return_value = {"error": {"message": "Invalid response_format: json_object not supported"}}
+        resp_400_obj.text = "json_object not supported"
+
+        resp_200_raw = MagicMock()
+        resp_200_raw.is_success = True
+        resp_200_raw.status_code = 200
+        resp_200_raw.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": f"<think>thinking...</think>\n```json\n{json.dumps(fake_card_json)}\n```",
+                    },
+                }
+            ]
+        }
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.post.side_effect = [resp_400_schema, resp_400_obj, resp_200_raw]
+        mock_client_cls.return_value = mock_client
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "requestedId": "test-001",
+            "fr": {
+                "id": "test-001",
+                "name": "Test",
+                "category": "Dresseur",
+                "trainerType": "Objet",
+                "localId": "001",
+                "set": {"id": "test", "name": "Test Set"},
+            },
+        }
+        identity, pstats = fetcher.build_deterministic_models(
+            raw_card["requestedId"],
+            raw_card["fr"],
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="test-001",
+            resolved_tcgdex_id="test-001",
+            raw_fr=raw_card["fr"],
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("dummy"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertIsInstance(model, EngineCardModel)
+        self.assertEqual(model.cardId, "test-001")
+        self.assertEqual(model.category, CardCategory.TRAINER)
+        # Vérifie que _use_json_schema_format a été désactivé pour les appels ultérieurs
+        self.assertFalse(compiler._use_json_schema_format)
+        compiler.close()
+
+    @patch("httpx.Client")
+    def test_compile_card_400_model_hot_update(self, mock_client_cls):
+        # Simule le cas où LM Studio renvoie 400 'model not loaded',
+        # puis le compilateur ré-interroge /models, trouve le modèle actif et réussit l'appel
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="unloaded-model",
+            auto_start=False,
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test model hot update",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "TECH_UTILITY",
+                "intrinsicBaseScore": 50,
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 0,
+            },
+        }
+
+        resp_400_model = MagicMock()
+        resp_400_model.is_success = False
+        resp_400_model.status_code = 400
+        resp_400_model.json.return_value = {"error": {"message": "Model 'unloaded-model' not found or not loaded"}}
+        resp_400_model.text = "Model not found"
+
+        resp_200_ok = MagicMock()
+        resp_200_ok.is_success = True
+        resp_200_ok.status_code = 200
+        resp_200_ok.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": json.dumps(fake_card_json),
+                    },
+                }
+            ]
+        }
+
+        models_resp = MagicMock()
+        models_resp.is_success = True
+        models_resp.json.return_value = {"data": [{"id": "active-live-model"}]}
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.post.side_effect = [resp_400_model, resp_200_ok]
+        mock_client.get.return_value = models_resp
+        mock_client_cls.return_value = mock_client
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "requestedId": "test-002",
+            "fr": {
+                "id": "test-002",
+                "name": "Test 2",
+                "category": "Dresseur",
+                "trainerType": "Objet",
+                "localId": "002",
+                "set": {"id": "test", "name": "Test Set"},
+            },
+        }
+        identity, pstats = fetcher.build_deterministic_models(
+            raw_card["requestedId"],
+            raw_card["fr"],
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="test-002",
+            resolved_tcgdex_id="test-002",
+            raw_fr=raw_card["fr"],
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("dummy"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertIsInstance(model, EngineCardModel)
+        self.assertEqual(compiler.model_name, "active-live-model")
+        compiler.close()
+
+    @patch("httpx.Client")
+    def test_compile_card_400_error_detail_transparency(self, mock_client_cls):
+        # Vérifie que l'exception RuntimeError finale contient bien le détail exact de l'erreur LM Studio
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="test-model",
+            auto_start=False,
+        )
+        compiler._ready = True
+
+        resp_400 = MagicMock()
+        resp_400.is_success = False
+        resp_400.status_code = 400
+        resp_400.json.return_value = {
+            "error": {"message": "Model 'test-model' is not loaded in memory and no server is serving it"}
+        }
+        resp_400.text = "Model not loaded"
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.post.return_value = resp_400
+        # models endpoint retourne vide
+        models_resp = MagicMock()
+        models_resp.is_success = True
+        models_resp.json.return_value = {"data": []}
+        mock_client.get.return_value = models_resp
+        mock_client_cls.return_value = mock_client
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "requestedId": "test-001",
+            "fr": {
+                "id": "test-001",
+                "name": "Test",
+                "category": "Dresseur",
+                "trainerType": "Objet",
+                "localId": "001",
+                "set": {"id": "test", "name": "Test Set"},
+            },
+        }
+        identity, pstats = fetcher.build_deterministic_models(
+            raw_card["requestedId"],
+            raw_card["fr"],
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="test-001",
+            resolved_tcgdex_id="test-001",
+            raw_fr=raw_card["fr"],
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("dummy"),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            compiler.compile_card(bundle, max_retries=0)
+
+        self.assertIn("Model 'test-model' is not loaded", str(ctx.exception))
+        compiler.close()
 
 
 if __name__ == "__main__":
