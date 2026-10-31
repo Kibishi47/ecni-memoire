@@ -281,26 +281,40 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
       return false
     }
   }
+  if (filter.minHp !== null && filter.minHp !== undefined) {
+    if (!card.pokemonStats || card.pokemonStats.hp < filter.minHp) {
+      return false
+    }
+  }
   if (filter.energyType) {
     const reqType = normalizeCardNameForMatch(filter.energyType)
     if (reqType !== 'incolore' && reqType !== 'colorless') {
       if (card.category === 'ENERGY') {
         const cardNameNorm = normalizeCardNameForMatch(card.identity.nameFr + ' ' + (card.identity.nameEn || ''))
         const isLuminous = card.subCategory === 'SPECIAL_ENERGY' && cardNameNorm.includes('lumineuse')
-        if (!isLuminous && !cardNameNorm.includes(reqType)) {
-          // Check English equivalents (Fire <-> Feu, Grass <-> Plante, etc.)
+        if (!isLuminous) {
+          const basic = detectBasicEnergy(card.identity.nameFr) || detectBasicEnergy(card.identity.nameEn || '')
+          const cardTypeNorm = basic
+            ? normalizeCardNameForMatch(basic.energyTypeFr)
+            : normalizeCardNameForMatch(cardNameNorm)
+          const targetTypeNorm = normalizeCardNameForMatch(reqType)
+
           const typeAliases: Record<string, string[]> = {
-            feu: ['fire', 'r', 'feu'],
-            plante: ['grass', 'g', 'plante'],
-            eau: ['water', 'w', 'eau'],
-            electrique: ['lightning', 'electrik', 'l', 'electrique'],
-            psy: ['psychic', 'p', 'psy'],
-            combat: ['fighting', 'f', 'combat'],
-            obscurite: ['darkness', 'd', 'obscurite'],
-            metal: ['metal', 'm'],
+            feu: ['fire', 'feu'],
+            plante: ['grass', 'plante'],
+            eau: ['water', 'eau'],
+            electrique: ['lightning', 'electrik', 'electrique'],
+            psy: ['psychic', 'psy'],
+            combat: ['fighting', 'combat'],
+            obscurite: ['darkness', 'obscurite'],
+            metal: ['metal'],
+            fee: ['fairy', 'fee'],
           }
-          const aliases = typeAliases[reqType] || [reqType]
-          if (!aliases.some((al) => cardNameNorm.includes(al))) {
+          const targetAliases = typeAliases[targetTypeNorm] || [targetTypeNorm]
+          const matches = targetAliases.some(
+            (al) => cardTypeNorm.includes(al) || cardNameNorm.includes(al),
+          )
+          if (!matches) {
             return false
           }
         }
@@ -316,7 +330,64 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
     const targetNorm = normalizeCardNameForMatch(filter.specificCardName)
     const frNorm = normalizeCardNameForMatch(card.identity.nameFr)
     const enNorm = card.identity.nameEn ? normalizeCardNameForMatch(card.identity.nameEn) : ''
-    if (frNorm !== targetNorm && enNorm !== targetNorm && !frNorm.includes(targetNorm)) {
+    const rootNorm = card.pokemonStats?.rootBasicName
+      ? normalizeCardNameForMatch(card.pokemonStats.rootBasicName)
+      : ''
+    if (
+      frNorm !== targetNorm &&
+      enNorm !== targetNorm &&
+      rootNorm !== targetNorm &&
+      !frNorm.includes(targetNorm) &&
+      !enNorm.includes(targetNorm)
+    ) {
+      return false
+    }
+  }
+  if (filter.isRuleBox !== null && filter.isRuleBox !== undefined) {
+    const ruleBox = Boolean(card.pokemonStats?.isRuleBox)
+    if (ruleBox !== filter.isRuleBox) {
+      return false
+    }
+  }
+  if (filter.isEvolution !== null && filter.isEvolution !== undefined) {
+    const isEvo = card.subCategory === 'STAGE_1' || card.subCategory === 'STAGE_2'
+    if (isEvo !== filter.isEvolution) {
+      return false
+    }
+  }
+  if (filter.isFuture !== null && filter.isFuture !== undefined) {
+    const isFuture = Boolean(
+      card.pokemonStats?.isFuture || card.identity.isFuture || card.identity.mechanicTag === 'FUTURE',
+    )
+    if (isFuture !== filter.isFuture) {
+      return false
+    }
+  }
+  if (filter.isAncient !== null && filter.isAncient !== undefined) {
+    const isAncient = Boolean(
+      card.pokemonStats?.isAncient || card.identity.isAncient || card.identity.mechanicTag === 'ANCIENT',
+    )
+    if (isAncient !== filter.isAncient) {
+      return false
+    }
+  }
+  if (filter.isTera !== null && filter.isTera !== undefined) {
+    const isTera = Boolean(card.pokemonStats?.isTera)
+    if (isTera !== filter.isTera) {
+      return false
+    }
+  }
+  if (filter.hasAbility !== null && filter.hasAbility !== undefined) {
+    const hasAbil = Boolean(
+      card.pokemonStats?.hasAbility ||
+        card.playableActions.some((a) => a.sourceType.startsWith('ABILITY')),
+    )
+    if (hasAbil !== filter.hasAbility) {
+      return false
+    }
+  }
+  if (filter.maxRetreatCost !== null && filter.maxRetreatCost !== undefined) {
+    if (!card.pokemonStats || card.pokemonStats.retreatCost > filter.maxRetreatCost) {
       return false
     }
   }

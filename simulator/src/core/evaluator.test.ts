@@ -178,6 +178,8 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
       attachedTools: [],
       turnPlayed: 1,
       evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
     }
     state.opponent.activePokemon = {
       instanceId: 'p_target_active',
@@ -188,6 +190,8 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
       attachedTools: [],
       turnPlayed: 2,
       evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
     }
     state.opponent.bench = [
       {
@@ -199,6 +203,8 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
         attachedTools: [],
         turnPlayed: 2,
         evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
       },
     ]
 

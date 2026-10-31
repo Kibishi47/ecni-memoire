@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
+import { matchesCardFilter, UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { createNativeBasicEnergyModel } from '../utils/energy'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
 import type { EngineCardModel } from '../types/cardModel'
 import {
   applyAction,
+  canPayEnergyCost,
   createInitialMatchState,
   getLegalActions,
+  getMaxBenchSlots,
   startTurn,
 } from './engine'
 
@@ -189,6 +191,8 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
       attachedTools: [],
       turnPlayed: 1,
       evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
     }
 
     // Place une cible adverse (70 PV) en Poste Actif adverse et sur le Banc adverse
@@ -201,6 +205,8 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
       attachedTools: [],
       turnPlayed: 2,
       evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
     }
     state.opponent.bench = [
       {
@@ -212,6 +218,8 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
         attachedTools: [],
         turnPlayed: 2,
         evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
       },
     ]
 
@@ -247,5 +255,119 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
     expect(afterAttackState.opponent.koSufferedLastOpponentTurn).toBe(true)
     expect(afterAttackState.turnNumber).toBe(4)
     expect(afterAttackState.activePlayerIndex).toBe(1)
+  })
+
+  it('multi-type energy solver correctly resolves elemental and colorless costs', () => {
+    const fireEnergy = createNativeBasicEnergyModel('Feu')
+    const waterEnergy = createNativeBasicEnergyModel('Eau')
+    const lightningEnergy = createNativeBasicEnergyModel('Électrique')
+    const fightingEnergy = createNativeBasicEnergyModel('Combat')
+
+    // 0 cost always payable
+    expect(canPayEnergyCost([], [])).toBe(true)
+    expect(canPayEnergyCost([], undefined)).toBe(true)
+
+    // Mono-type
+    expect(canPayEnergyCost([fireEnergy], ['Feu'])).toBe(true)
+    expect(canPayEnergyCost([waterEnergy], ['Feu'])).toBe(false)
+
+    // Multi-type (e.g. Ire-Foudre ex: Lightning + Fighting)
+    expect(canPayEnergyCost([lightningEnergy, fightingEnergy], ['Électrique', 'Combat'])).toBe(true)
+    expect(canPayEnergyCost([lightningEnergy, fireEnergy], ['Électrique', 'Combat'])).toBe(false)
+
+    // Colorless cost paid by any energy
+    expect(canPayEnergyCost([fireEnergy, waterEnergy], ['Feu', 'Incolore'])).toBe(true)
+    expect(canPayEnergyCost([fireEnergy], ['Feu', 'Incolore'])).toBe(false)
+  })
+
+  it('extended CardFilter matches all 13 criteria', () => {
+    const card: EngineCardModel = {
+      ...mockCharmander,
+      pokemonStats: {
+        ...mockCharmander.pokemonStats!,
+        hp: 70,
+        isRuleBox: false,
+        isTera: true,
+        isFuture: true,
+        isAncient: false,
+        hasAbility: true,
+        retreatCost: 1,
+      },
+      subCategory: 'BASIC',
+    }
+
+    expect(matchesCardFilter(card, { isTera: true })).toBe(true)
+    expect(matchesCardFilter(card, { isTera: false })).toBe(false)
+    expect(matchesCardFilter(card, { isFuture: true })).toBe(true)
+    expect(matchesCardFilter(card, { isAncient: true })).toBe(false)
+    expect(matchesCardFilter(card, { isRuleBox: false })).toBe(true)
+    expect(matchesCardFilter(card, { isEvolution: false })).toBe(true)
+    expect(matchesCardFilter(card, { isEvolution: true })).toBe(false)
+    expect(matchesCardFilter(card, { minHp: 60 })).toBe(true)
+    expect(matchesCardFilter(card, { minHp: 80 })).toBe(false)
+    expect(matchesCardFilter(card, { maxRetreatCost: 1 })).toBe(true)
+    expect(matchesCardFilter(card, { maxRetreatCost: 0 })).toBe(false)
+    expect(matchesCardFilter(card, { hasAbility: true })).toBe(true)
+  })
+
+  it('handles dynamic bench capacity with Area Zero Underdepths and Tera Pokemon', () => {
+    const pBoard = {
+      deck: [],
+      hand: [],
+      prizes: [],
+      discard: [],
+      activePokemon: {
+        instanceId: 'p1',
+        card: {
+          ...mockCharmander,
+          pokemonStats: { ...mockCharmander.pokemonStats!, isTera: true },
+        },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+      bench: [],
+      lostZone: [],
+      extraTurnGranted: false,
+      itemLockActive: false,
+      supporterPlayedThisTurn: false,
+      energyAttachedThisTurn: false,
+      retreatUsedThisTurn: false,
+      usedOncePerTurnAbilities: new Set<string>(),
+      abilityUsageCountsThisTurn: {},
+      vstarPowerUsed: false,
+      koSufferedLastOpponentTurn: false,
+      mulliganCount: 0,
+      initialHandSnapshot: [],
+      initialPrizesSnapshot: [],
+      prizesKnownByPlayer: false,
+      firstSearchTurn: null,
+    }
+
+    // Default bench capacity is 5
+    expect(getMaxBenchSlots(pBoard, null)).toBe(5)
+
+    // With Area Zero Underdepths Stadium and Tera Pokemon in play -> 8
+    const stadiumCard: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'sv07-131',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'sv07-131',
+        nameFr: 'Abîme Zéro',
+        nameEn: 'Area Zero Underdepths',
+        subCategory: 'STADIUM',
+      },
+      category: 'TRAINER',
+      subCategory: 'STADIUM',
+      pokemonStats: null,
+    }
+
+    expect(getMaxBenchSlots(pBoard, { card: stadiumCard, ownerIndex: 0, usedThisTurn: false })).toBe(8)
   })
 })
