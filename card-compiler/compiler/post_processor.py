@@ -27,12 +27,14 @@ from compiler.schemas import (
     CardFilter,
     CardSubCategory,
     CostType,
+    DamageScalingType,
     DeadCardCondition,
     DeadCardReason,
     EffectPrimitive,
     EngineCardModel,
     PlayableAction,
     PreconditionType,
+    SpecialConditionType,
     StrategicRole,
     SynergyRequirement,
     TurnPhaseWeights,
@@ -163,6 +165,68 @@ def _dominant_energy_type(cost_list: List[str]) -> Optional[str]:
     return str(cost_list[0])
 
 
+def _detect_special_condition(lower_eff: str) -> Optional[SpecialConditionType]:
+    """Détecte un État Spécial infligé dans le texte d'une attaque ou d'un talent."""
+    if "empoisonné" in lower_eff or "poisoned" in lower_eff:
+        return SpecialConditionType.POISONED
+    if "brûlé" in lower_eff or "burned" in lower_eff:
+        return SpecialConditionType.BURNED
+    if "paralysé" in lower_eff or "paralyzed" in lower_eff:
+        return SpecialConditionType.PARALYZED
+    if "endormi" in lower_eff or "asleep" in lower_eff:
+        return SpecialConditionType.ASLEEP
+    if "confus" in lower_eff or "confused" in lower_eff:
+        return SpecialConditionType.CONFUSED
+    return None
+
+
+def _detect_attack_scaling(
+    raw_dmg_field: Any,
+    base_dmg: Optional[int],
+    prize_scaling: Optional[int],
+    lower_eff: str,
+) -> Tuple[Optional[DamageScalingType], Optional[int]]:
+    """Détecte le type et la valeur du bonus/multiplicateur de dégâts d'une attaque."""
+    if prize_scaling is not None:
+        return DamageScalingType.PER_OPPONENT_PRIZE_TAKEN, prize_scaling
+
+    dmg_str = str(raw_dmg_field or "")
+    m_extra = re.search(
+        r"(\d+)\s*(?:dégâts supplémentaires|more damage|damage for each|dégâts pour chaque)",
+        lower_eff,
+    )
+    scaling_val = int(m_extra.group(1)) if m_extra else base_dmg
+
+    if (
+        "pour chaque énergie" in lower_eff
+        or "pour chaque carte énergie" in lower_eff
+        or "pour chaque carte défaussée" in lower_eff
+        or "for each energy" in lower_eff
+        or "for each basic energy" in lower_eff
+        or "for each card you discarded" in lower_eff
+    ):
+        if "défauss" in lower_eff or "discard" in lower_eff:
+            return DamageScalingType.PER_ENERGY_DISCARDED, scaling_val
+        if "tous vos pokémon" in lower_eff or "all of your pokémon" in lower_eff:
+            return DamageScalingType.PER_ENERGY_ATTACHED_ALL, scaling_val
+        if "adversaire" in lower_eff or "opponent" in lower_eff:
+            return DamageScalingType.PER_ENERGY_ATTACHED_TARGET, scaling_val
+        return DamageScalingType.PER_ENERGY_ATTACHED_SELF, scaling_val
+
+    if "marqueur de dégâts sur ce pokémon" in lower_eff or "damage counter on this pokémon" in lower_eff:
+        return DamageScalingType.PER_DAMAGE_COUNTER_ON_SELF, scaling_val
+    if "marqueur de dégâts sur le pokémon actif de votre adversaire" in lower_eff or "damage counter on your opponent's active" in lower_eff:
+        return DamageScalingType.PER_DAMAGE_COUNTER_ON_TARGET, scaling_val
+    if ("pokémon de banc" in lower_eff or "benched pokémon" in lower_eff) and ("pour chaque" in lower_eff or "for each" in lower_eff):
+        return DamageScalingType.PER_BENCHED_POKEMON, scaling_val
+    if ("pile ou face" in lower_eff or "flip a coin" in lower_eff or "flip" in lower_eff) and ("×" in dmg_str or "+" in dmg_str or "pour chaque côté face" in lower_eff or "for each heads" in lower_eff):
+        return DamageScalingType.PER_COIN_FLIP_HEADS, scaling_val
+    if ("pile de défausse" in lower_eff or "zone perdue" in lower_eff or "discard pile" in lower_eff or "lost zone" in lower_eff) and ("pour chaque" in lower_eff or "for each" in lower_eff):
+        return DamageScalingType.PER_CARD_IN_DISCARD_OR_LOST_ZONE, scaling_val
+
+    return None, None
+
+
 def _build_deterministic_attack_action(
     atk_fr: Dict[str, Any],
     atk_en: Optional[Dict[str, Any]],
@@ -178,11 +242,11 @@ def _build_deterministic_attack_action(
 
     cost_list = [str(c) for c in (atk_fr.get("cost") or (atk_en or {}).get("cost") or [])]
     energy_count = len(cost_list)
-    energy_type = _dominant_energy_type(cost_list)
 
     raw_dmg_field = atk_fr.get("damage") if atk_fr.get("damage") is not None else (atk_en or {}).get("damage")
     base_dmg = _extract_int_from_damage(raw_dmg_field, combined_eff)
     prize_scaling = _extract_prize_scaling_damage(combined_eff)
+    scaling_type, scaling_val = _detect_attack_scaling(raw_dmg_field, base_dmg, prize_scaling, lower_eff)
 
     is_stage_evo = sub_category in {CardSubCategory.STAGE_1, CardSubCategory.STAGE_2}
 
@@ -195,17 +259,55 @@ def _build_deterministic_attack_action(
         )
     ]
     if energy_count > 0:
-        preconditions.append(
-            ActionPrecondition(
-                type=PreconditionType.SELF_HAS_ENERGY_COST,
-                zone=ZoneType.ACTIVE,
-                minCount=energy_count,
-                targetFilter=CardFilter(
-                    category=CardCategory.ENERGY,
-                    energyType=energy_type,
-                ),
+        # Comptage précis par type d'énergie non-Incolore (évite d'écraser les coûts multi-types comme ["Électrique", "Combat"])
+        typed_counts: Dict[str, int] = {}
+        colorless_count = 0
+        for c in cost_list:
+            if c.lower() in {"incolore", "colorless"}:
+                colorless_count += 1
+            else:
+                typed_counts[c] = typed_counts.get(c, 0) + 1
+
+        if len(typed_counts) > 1 or (len(typed_counts) == 1 and colorless_count > 0):
+            for etype, cnt in typed_counts.items():
+                preconditions.append(
+                    ActionPrecondition(
+                        type=PreconditionType.SELF_HAS_ENERGY_COST,
+                        zone=ZoneType.ACTIVE,
+                        minCount=cnt,
+                        targetFilter=CardFilter(
+                            category=CardCategory.ENERGY,
+                            energyType=etype,
+                        ),
+                    )
+                )
+            if colorless_count > 0:
+                preconditions.append(
+                    ActionPrecondition(
+                        type=PreconditionType.SELF_HAS_ENERGY_COST,
+                        zone=ZoneType.ACTIVE,
+                        minCount=energy_count,
+                        targetFilter=CardFilter(
+                            category=CardCategory.ENERGY,
+                            energyType=None,
+                        ),
+                    )
+                )
+        else:
+            energy_type = _dominant_energy_type(cost_list)
+            if energy_type and energy_type.lower() in {"incolore", "colorless"}:
+                energy_type = None
+            preconditions.append(
+                ActionPrecondition(
+                    type=PreconditionType.SELF_HAS_ENERGY_COST,
+                    zone=ZoneType.ACTIVE,
+                    minCount=energy_count,
+                    targetFilter=CardFilter(
+                        category=CardCategory.ENERGY,
+                        energyType=energy_type,
+                    ),
+                )
             )
-        )
 
     costs: List[ActionCost] = []
     # 1. Coût de défausse d'énergies en jeu (ex: Tempête Éclats / Bellowing Thunder d'Ire-Foudre-ex)
@@ -243,6 +345,33 @@ def _build_deterministic_attack_action(
             )
         )
 
+    # Coût d'impossibilité d'attaquer au prochain tour
+    if (
+        "ne peut pas attaquer pendant votre prochain tour" in lower_eff
+        or "can't attack during your next turn" in lower_eff
+    ):
+        costs.append(
+            ActionCost(
+                type=CostType.CANT_ATTACK_NEXT_TURN,
+                count=1,
+                targetFilter=None,
+            )
+        )
+
+    # Coût de dégâts de recul (self-damage)
+    m_self_dmg = re.search(
+        r"(?:ce pokémon s'inflige|this pokémon also does)\s+(\d+)\s+(?:dégâts|damage)",
+        lower_eff,
+    )
+    if m_self_dmg:
+        costs.append(
+            ActionCost(
+                type=CostType.SELF_DAMAGE,
+                count=int(m_self_dmg.group(1)),
+                targetFilter=None,
+            )
+        )
+
     effects: List[AtomicEffect] = []
 
     # 2. Attaque de rafraîchissement de main / pioche sans dégâts (ex: Explosion Hurlante / Burst Roar d'Ire-Foudre-ex)
@@ -264,8 +393,23 @@ def _build_deterministic_attack_action(
             )
         )
     elif base_dmg is None:
+        m_draw_until = re.search(
+            r"(?:piochez des cartes jusqu'à en avoir|draw cards until you have)\s+(\d+)",
+            lower_eff,
+        )
         m_draw_only = re.search(r"(?:piochez|draw)\s+(\d+)\s+(?:cartes|cards)", lower_eff)
-        if m_draw_only:
+        if m_draw_until:
+            effects.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.DRAW_UNTIL_HAND_SIZE,
+                    sourceZone=ZoneType.DECK,
+                    targetZone=ZoneType.HAND,
+                    count=int(m_draw_until.group(1)),
+                    upTo=False,
+                    targetFilter=None,
+                )
+            )
+        elif m_draw_only:
             effects.append(
                 AtomicEffect(
                     primitive=EffectPrimitive.DRAW_CARDS,
@@ -290,6 +434,41 @@ def _build_deterministic_attack_action(
                 targetFilter=None,
                 baseDamage=base_dmg if base_dmg is not None else 0,
                 damageScalingPerOpponentPrizeTaken=prize_scaling,
+                damageScalingType=scaling_type,
+                damageScalingValue=scaling_val,
+            )
+        )
+
+    # Effet additionnel d'État Spécial infligé au Pokémon Actif adverse
+    spec_cond = _detect_special_condition(lower_eff)
+    if spec_cond is not None and ("pokémon actif de votre adversaire" in lower_eff or "opponent's active pokémon" in lower_eff or "pokémon défenseur" in lower_eff):
+        effects.append(
+            AtomicEffect(
+                primitive=EffectPrimitive.APPLY_SPECIAL_CONDITION,
+                sourceZone=ZoneType.ACTIVE,
+                targetZone=ZoneType.OPPONENT_ACTIVE,
+                count=1,
+                upTo=False,
+                targetFilter=None,
+                specialCondition=spec_cond,
+            )
+        )
+
+    # Effet additionnel de dégâts sur le Banc adverse
+    m_bench_dmg = re.search(
+        r"(\d+)\s+(?:dégâts à l'un des pokémon de banc|damage to 1 of your opponent's benched)",
+        lower_eff,
+    )
+    if m_bench_dmg:
+        effects.append(
+            AtomicEffect(
+                primitive=EffectPrimitive.DEAL_DAMAGE_BENCH,
+                sourceZone=ZoneType.ACTIVE,
+                targetZone=ZoneType.OPPONENT_BENCH,
+                count=1,
+                upTo=False,
+                targetFilter=CardFilter(category=CardCategory.POKEMON),
+                baseDamage=int(m_bench_dmg.group(1)),
             )
         )
 
@@ -300,6 +479,7 @@ def _build_deterministic_attack_action(
         timing=ActionTiming.END_OF_TURN_ATTACK,
         canUseTurn1GoingFirst=False,
         canUseTurn1GoingSecond=not is_stage_evo,
+        energyCost=cost_list,
         preconditions=preconditions,
         costs=costs,
         effects=effects,
@@ -321,52 +501,231 @@ def _build_deterministic_ability_action(
 
     is_stage_evo = sub_category in {CardSubCategory.STAGE_1, CardSubCategory.STAGE_2}
 
-    # 1. Talent déclenché à l'évolution (ex: Règne Infernal de Dracaufeu-ex avec Énergie {R} / Feu)
+    # 1. Talent déclenché à l'évolution (ex: Règne Infernal de Dracaufeu-ex, Chercheur de Joyaux de Noarfang)
     if (
         "lorsque vous jouez ce pokémon de votre main pour faire évoluer" in lower_eff
         or "when you play this pokémon from your hand to evolve" in lower_eff
     ):
-        m_count = re.search(r"(?:jusqu'à|up to)\s+(\d+)", lower_eff)
-        count = int(m_count.group(1)) if m_count else 3
-        energy_type = _extract_energy_type_from_text(combined_eff)
-        if energy_type is None and ("infernal" in name_fr.lower() or "infernal" in name_en.lower()):
-            energy_type = "Feu"
-        energy_filter = CardFilter(
-            category=CardCategory.ENERGY,
-            subCategory=CardSubCategory.BASIC_ENERGY,
-            energyType=energy_type,
-        )
+        # 1a. Attachement d'énergie depuis le deck (ex: Règne Infernal)
+        if "cherchez dans votre deck" in lower_eff and ("énergie" in lower_eff or "energy" in lower_eff):
+            m_count = re.search(r"(?:jusqu'à|up to)\s+(\d+)", lower_eff)
+            count = int(m_count.group(1)) if m_count else 3
+            energy_type = _extract_energy_type_from_text(combined_eff)
+            if energy_type is None and ("infernal" in name_fr.lower() or "infernal" in name_en.lower()):
+                energy_type = "Feu"
+            energy_filter = CardFilter(
+                category=CardCategory.ENERGY,
+                subCategory=CardSubCategory.BASIC_ENERGY,
+                energyType=energy_type,
+            )
+            return PlayableAction(
+                actionId=f"ability_{_slugify(name_en)}",
+                label=name_fr,
+                sourceType=ActionSourceType.ABILITY_ON_EVOLVE,
+                timing=ActionTiming.ON_EVOLVE_TRIGGER,
+                canUseTurn1GoingFirst=False,
+                canUseTurn1GoingSecond=False,
+                preconditions=[
+                    ActionPrecondition(
+                        type=PreconditionType.ZONE_HAS_MATCHING_CARD,
+                        zone=ZoneType.DECK,
+                        minCount=1,
+                        targetFilter=energy_filter,
+                    )
+                ],
+                costs=[],
+                effects=[
+                    AtomicEffect(
+                        primitive=EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
+                        sourceZone=ZoneType.DECK,
+                        targetZone=ZoneType.IN_PLAY_ALL,
+                        count=count,
+                        upTo=True,
+                        targetFilter=energy_filter,
+                        baseDamage=None,
+                        damageScalingPerOpponentPrizeTaken=None,
+                    )
+                ],
+            )
+
+        # 1b. Recherche de Dresseurs avec condition Téracristal (ex: Noarfang sv07-115 Chercheur de Joyaux)
+        if "téracristal" in lower_eff or "tera pokémon" in lower_eff:
+            m_count = re.search(r"(?:jusqu'à|up to)\s+(\d+)", lower_eff)
+            count = int(m_count.group(1)) if m_count else 2
+            trainer_filter = CardFilter(category=CardCategory.TRAINER)
+            return PlayableAction(
+                actionId=f"ability_{_slugify(name_en)}",
+                label=name_fr,
+                sourceType=ActionSourceType.ABILITY_ON_EVOLVE,
+                timing=ActionTiming.ON_EVOLVE_TRIGGER,
+                canUseTurn1GoingFirst=False,
+                canUseTurn1GoingSecond=False,
+                preconditions=[
+                    ActionPrecondition(
+                        type=PreconditionType.HAS_TERA_POKEMON_IN_PLAY,
+                        zone=ZoneType.IN_PLAY_ALL,
+                        minCount=1,
+                        targetFilter=CardFilter(category=CardCategory.POKEMON, isTera=True),
+                    ),
+                    ActionPrecondition(
+                        type=PreconditionType.ZONE_HAS_MATCHING_CARD,
+                        zone=ZoneType.DECK,
+                        minCount=1,
+                        targetFilter=trainer_filter,
+                    ),
+                ],
+                costs=[],
+                effects=[
+                    AtomicEffect(
+                        primitive=EffectPrimitive.SEARCH_DECK_TO_HAND,
+                        sourceZone=ZoneType.DECK,
+                        targetZone=ZoneType.HAND,
+                        count=count,
+                        upTo=True,
+                        targetFilter=trainer_filter,
+                    )
+                ],
+            )
+
+    # 2. Talent déclenché à la pose de la main sur le Banc (ex: Vert-de-Fer-ex Vernier Rapide, Brutalibré)
+    if (
+        "lorsque vous jouez ce pokémon de votre main sur votre banc" in lower_eff
+        or "when you play this pokémon from your hand onto your bench" in lower_eff
+    ):
+        effects_on_play: List[AtomicEffect] = []
+        if "poste actif" in lower_eff or "pokémon actif" in lower_eff or "active spot" in lower_eff or "active pokémon" in lower_eff:
+            effects_on_play.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.SWITCH_ACTIVE_POKEMON,
+                    sourceZone=ZoneType.BENCH,
+                    targetZone=ZoneType.ACTIVE,
+                    count=1,
+                )
+            )
+        if ("déplacez" in lower_eff or "déplacer" in lower_eff or "move" in lower_eff) and ("énergie" in lower_eff or "energy" in lower_eff):
+            effects_on_play.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.MOVE_ENERGY_BETWEEN_POKEMON,
+                    sourceZone=ZoneType.IN_PLAY_ALL,
+                    targetZone=ZoneType.ACTIVE,
+                    count=1,
+                    upTo=True,
+                    targetFilter=CardFilter(category=CardCategory.ENERGY),
+                )
+            )
+        if "marqueur" in lower_eff or "damage counter" in lower_eff:
+            m_dc = re.search(r"(\d+)\s+marqueur", lower_eff)
+            effects_on_play.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+                    sourceZone=ZoneType.BENCH,
+                    targetZone=ZoneType.OPPONENT_BENCH,
+                    count=int(m_dc.group(1)) if m_dc else 1,
+                )
+            )
+        if not effects_on_play:
+            effects_on_play.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.DRAW_CARDS,
+                    sourceZone=ZoneType.DECK,
+                    targetZone=ZoneType.HAND,
+                    count=1,
+                )
+            )
         return PlayableAction(
             actionId=f"ability_{_slugify(name_en)}",
             label=name_fr,
-            sourceType=ActionSourceType.ABILITY_ON_EVOLVE,
-            timing=ActionTiming.ON_EVOLVE_TRIGGER,
+            sourceType=ActionSourceType.ABILITY_ON_PLAY_FROM_HAND,
+            timing=ActionTiming.ON_PLAY_FROM_HAND_TRIGGER,
+            canUseTurn1GoingFirst=True,
+            canUseTurn1GoingSecond=True,
+            preconditions=[],
+            costs=[],
+            effects=effects_on_play,
+        )
+
+    # 3. Talent réactif aux dégâts subis ou au K.O. (ex: Rosélia Point Poison, Momartik-ex, Craparoi-ex)
+    if (
+        "subit les dégâts d'une attaque" in lower_eff
+        or "damaged by an attack" in lower_eff
+        or "est mis k.o. par les dégâts d'une attaque" in lower_eff
+        or "is knocked out by damage from an attack" in lower_eff
+    ):
+        spec_cond = _detect_special_condition(lower_eff)
+        reactive_effects: List[AtomicEffect] = []
+        if spec_cond is not None:
+            reactive_effects.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.APPLY_SPECIAL_CONDITION,
+                    sourceZone=ZoneType.ACTIVE,
+                    targetZone=ZoneType.OPPONENT_ACTIVE,
+                    count=1,
+                    specialCondition=spec_cond,
+                )
+            )
+        else:
+            m_dc = re.search(r"(\d+)\s+(?:marqueurs? de dégâts|damage counters?)", lower_eff)
+            reactive_effects.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+                    sourceZone=ZoneType.ACTIVE,
+                    targetZone=ZoneType.OPPONENT_ACTIVE,
+                    count=int(m_dc.group(1)) if m_dc else 2,
+                )
+            )
+        return PlayableAction(
+            actionId=f"ability_{_slugify(name_en)}",
+            label=name_fr,
+            sourceType=ActionSourceType.ABILITY_REACTIVE,
+            timing=ActionTiming.ON_DAMAGED_OR_KO_TRIGGER,
             canUseTurn1GoingFirst=False,
             canUseTurn1GoingSecond=False,
             preconditions=[
                 ActionPrecondition(
-                    type=PreconditionType.ZONE_HAS_MATCHING_CARD,
-                    zone=ZoneType.DECK,
+                    type=PreconditionType.SELF_IS_ACTIVE,
+                    zone=ZoneType.ACTIVE,
                     minCount=1,
-                    targetFilter=energy_filter,
                 )
             ],
             costs=[],
+            effects=reactive_effects,
+        )
+
+    # 4. Talent activé avec auto-K.O. et pose de marqueurs de dégâts (ex: Noctunoir sv06.5-020 Explosion Maudite)
+    if (
+        ("ce pokémon est mis k.o." in lower_eff or "this pokémon is knocked out" in lower_eff)
+        and ("marqueurs de dégâts" in lower_eff or "damage counters" in lower_eff)
+    ):
+        m_dc = re.search(r"(\d+)\s+(?:marqueurs? de dégâts|damage counters?)", lower_eff)
+        dc_count = int(m_dc.group(1)) if m_dc else 13
+        return PlayableAction(
+            actionId=f"ability_{_slugify(name_en)}",
+            label=name_fr,
+            sourceType=ActionSourceType.ABILITY_ACTIVATED,
+            timing=ActionTiming.ONCE_PER_TURN_ABILITY,
+            canUseTurn1GoingFirst=not is_stage_evo,
+            canUseTurn1GoingSecond=not is_stage_evo,
+            preconditions=[],
+            costs=[
+                ActionCost(
+                    type=CostType.KNOCK_OUT_SELF,
+                    count=1,
+                    targetFilter=None,
+                )
+            ],
             effects=[
                 AtomicEffect(
-                    primitive=EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
-                    sourceZone=ZoneType.DECK,
-                    targetZone=ZoneType.IN_PLAY_ALL,
-                    count=count,
-                    upTo=True,
-                    targetFilter=energy_filter,
-                    baseDamage=None,
-                    damageScalingPerOpponentPrizeTaken=None,
+                    primitive=EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+                    sourceZone=ZoneType.IN_PLAY_ALL,
+                    targetZone=ZoneType.OPPONENT_IN_PLAY_ALL,
+                    count=dc_count,
+                    upTo=False,
+                    targetFilter=CardFilter(category=CardCategory.POKEMON),
                 )
             ],
         )
 
-    # 2. Talent activé conditionné par un KO au tour précédent (ex: Retour Renversant / Flip the Script de Favianos-ex)
+    # 5. Talent activé conditionné par un KO au tour précédent (ex: Retour Renversant / Flip the Script de Favianos-ex)
     if (
         "mis k.o. pendant le dernier tour de votre adversaire" in lower_eff
         or "knocked out during your opponent's last turn" in lower_eff
@@ -403,7 +762,7 @@ def _build_deterministic_ability_action(
             ],
         )
 
-    # 3. Talent de tutorat universel dans le deck (ex: Recherche Rapide / Quick Search de Roucarnage-ex)
+    # 6. Talent de tutorat universel dans le deck (ex: Recherche Rapide / Quick Search de Roucarnage-ex)
     if (
         ("chercher dans votre deck une carte" in lower_eff or "search your deck for a card" in lower_eff)
         and ("ajoutez-la à votre main" in lower_eff or "put it into your hand" in lower_eff)
@@ -438,6 +797,106 @@ def _build_deterministic_ability_action(
             ],
         )
 
+    # 7. Talent activé de pioche jusqu'à X cartes en main (ex: Mew-ex Reprise, Vrombotor Vrombi-Moteur)
+    m_draw_until = re.search(
+        r"(?:piochez des cartes jusqu'à en avoir|draw cards until you have)\s+(\d+)",
+        lower_eff,
+    )
+    if m_draw_until and ("pendant votre tour" in lower_eff or "during your turn" in lower_eff):
+        hand_target = int(m_draw_until.group(1))
+        costs_until: List[ActionCost] = []
+        if "défaussez une carte énergie" in lower_eff or "discard an energy card" in lower_eff:
+            costs_until.append(
+                ActionCost(
+                    type=CostType.DISCARD_FROM_HAND,
+                    count=1,
+                    targetFilter=CardFilter(category=CardCategory.ENERGY),
+                )
+            )
+        return PlayableAction(
+            actionId=f"ability_{_slugify(name_en)}",
+            label=name_fr,
+            sourceType=ActionSourceType.ABILITY_ACTIVATED,
+            timing=ActionTiming.ONCE_PER_TURN_ABILITY,
+            canUseTurn1GoingFirst=not is_stage_evo,
+            canUseTurn1GoingSecond=not is_stage_evo,
+            preconditions=[],
+            costs=costs_until,
+            effects=[
+                AtomicEffect(
+                    primitive=EffectPrimitive.DRAW_UNTIL_HAND_SIZE,
+                    sourceZone=ZoneType.DECK,
+                    targetZone=ZoneType.HAND,
+                    count=hand_target,
+                    upTo=False,
+                    targetFilter=None,
+                )
+            ],
+        )
+
+    # 8. Talents passifs continus (aucun marqueur d'activation ou de pose depuis la main)
+    is_activated_or_triggered = any(
+        marker in lower_eff
+        for marker in (
+            "pendant votre tour",
+            "during your turn",
+            "lorsque vous jouez",
+            "when you play",
+            "lorsque ce pokémon",
+            "when this pokémon",
+        )
+    )
+    if not is_activated_or_triggered:
+        passive_timing = (
+            ActionTiming.BETWEEN_TURNS_CHECKUP
+            if ("contrôle pokémon" in lower_eff or "pokémon checkup" in lower_eff)
+            else ActionTiming.PASSIVE_CONTINUOUS
+        )
+        m_red = re.search(r"subit\s+(\d+)\s+dégâts\s+de\s+moins|takes\s+(\d+)\s+less\s+damage", lower_eff)
+        m_boost = re.search(r"infligent\s+(\d+)\s+dégâts\s+supplémentaires|do\s+(\d+)\s+more\s+damage", lower_eff)
+
+        if m_red:
+            val = int(m_red.group(1) or m_red.group(2))
+            prim = EffectPrimitive.PASSIVE_DAMAGE_REDUCTION
+        elif m_boost:
+            val = int(m_boost.group(1) or m_boost.group(2))
+            prim = EffectPrimitive.PASSIVE_DAMAGE_BOOST
+        elif "coût de retraite" in lower_eff or "retreat cost" in lower_eff:
+            val = 1
+            prim = EffectPrimitive.PASSIVE_RETREAT_COST_MOD
+        elif (
+            "n'ont pas de talent" in lower_eff
+            or "have no abilities" in lower_eff
+            or "ne peut pas jouer de cartes objet" in lower_eff
+            or "can't play any item cards" in lower_eff
+        ):
+            val = 1
+            prim = EffectPrimitive.PASSIVE_ABILITY_OR_ITEM_LOCK
+        else:
+            val = 1
+            prim = EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS
+
+        return PlayableAction(
+            actionId=f"ability_{_slugify(name_en)}",
+            label=name_fr,
+            sourceType=ActionSourceType.ABILITY_PASSIVE,
+            timing=passive_timing,
+            canUseTurn1GoingFirst=not is_stage_evo,
+            canUseTurn1GoingSecond=not is_stage_evo,
+            preconditions=[],
+            costs=[],
+            effects=[
+                AtomicEffect(
+                    primitive=prim,
+                    sourceZone=ZoneType.IN_PLAY_ALL,
+                    targetZone=ZoneType.IN_PLAY_ALL,
+                    count=val,
+                    upTo=False,
+                    targetFilter=None,
+                )
+            ],
+        )
+
     return None
 
 
@@ -462,17 +921,23 @@ def _sanitize_pokemon_card(
 
     # Si le Pokémon n'a AUCUN talent dans ses données TCGdex brutes :
     # PURGE STRICTE ET ABSOLUE de tout talent fantôme halluciné ou contaminé
+    ability_source_types = {
+        ActionSourceType.ABILITY_ACTIVATED,
+        ActionSourceType.ABILITY_ON_EVOLVE,
+        ActionSourceType.ABILITY_ON_PLAY_FROM_HAND,
+        ActionSourceType.ABILITY_REACTIVE,
+        ActionSourceType.ABILITY_PASSIVE,
+    }
     if not all_raw_abilities:
         compiled_model.playableActions = [
             act for act in compiled_model.playableActions
-            if act.sourceType not in {
-                ActionSourceType.ABILITY_ACTIVATED,
-                ActionSourceType.ABILITY_ON_EVOLVE,
-                ActionSourceType.ABILITY_PASSIVE,
-            }
+            if act.sourceType not in ability_source_types
             and act.timing not in {
                 ActionTiming.ONCE_PER_TURN_ABILITY,
+                ActionTiming.AS_OFTEN_AS_YOU_LIKE,
                 ActionTiming.ON_EVOLVE_TRIGGER,
+                ActionTiming.ON_PLAY_FROM_HAND_TRIGGER,
+                ActionTiming.ON_DAMAGED_OR_KO_TRIGGER,
             }
         ]
         final_abilities: List[PlayableAction] = []
@@ -497,11 +962,7 @@ def _sanitize_pokemon_card(
         else:
             existing_abilities = [
                 act for act in compiled_model.playableActions
-                if act.sourceType in {
-                    ActionSourceType.ABILITY_ACTIVATED,
-                    ActionSourceType.ABILITY_ON_EVOLVE,
-                    ActionSourceType.ABILITY_PASSIVE,
-                }
+                if act.sourceType in ability_source_types
             ]
             final_abilities = [
                 act for act in existing_abilities
@@ -696,7 +1157,6 @@ def _sanitize_trainer_card(
     """Corrige les actions, préconditions, coûts, effets, rôles et synergies d'une carte TRAINER."""
     sub_cat = compiled_model.subCategory
     is_supporter = sub_cat == CardSubCategory.SUPPORTER
-    timing = ActionTiming.ONCE_PER_TURN_SUPPORTER if is_supporter else ActionTiming.ONCE_PER_CARD
 
     name_fr = compiled_model.identity.nameFr
     name_en = compiled_model.identity.nameEn or name_fr
@@ -705,12 +1165,44 @@ def _sanitize_trainer_card(
     combined_text = f"{text_fr} {text_en}".strip()
     lower_text = combined_text.lower()
 
+    if is_supporter:
+        default_source = ActionSourceType.TRAINER_PLAY
+        timing = ActionTiming.ONCE_PER_TURN_SUPPORTER
+    elif sub_cat == CardSubCategory.STADIUM:
+        default_source = ActionSourceType.STADIUM_EFFECT
+        if "une fois pendant le tour" in lower_text or "once during each player's turn" in lower_text:
+            timing = ActionTiming.ONCE_PER_TURN_STADIUM
+        else:
+            timing = ActionTiming.PASSIVE_CONTINUOUS
+    elif sub_cat == CardSubCategory.TOOL:
+        default_source = ActionSourceType.TOOL_EFFECT
+        if "puissance vstar" in lower_text or "vstar power" in lower_text:
+            timing = ActionTiming.ONCE_PER_GAME_VSTAR
+        else:
+            timing = ActionTiming.PASSIVE_CONTINUOUS
+    else:
+        default_source = ActionSourceType.TRAINER_PLAY
+        timing = ActionTiming.ONCE_PER_CARD
+
+    # Cas particulier des Capsules Techniques (Technical Machines) : Outils qui confèrent une attaque
+    if compiled_model.identity.isTechnicalMachine and (raw_fr.get("attacks") or (raw_en or {}).get("attacks")):
+        atks_fr = [a for a in (raw_fr.get("attacks") or []) if isinstance(a, dict)]
+        atks_en = [a for a in ((raw_en or {}).get("attacks") or []) if isinstance(a, dict)]
+        if atks_fr:
+            tm_atk = _build_deterministic_attack_action(
+                atks_fr[0],
+                atks_en[0] if atks_en else None,
+                CardSubCategory.BASIC,
+            )
+            compiled_model.playableActions = [tm_atk]
+            return
+
     if not compiled_model.playableActions:
         compiled_model.playableActions = [
             PlayableAction(
                 actionId=f"play_{_slugify(name_en)}",
                 label=name_fr,
-                sourceType=ActionSourceType.TRAINER_PLAY,
+                sourceType=default_source,
                 timing=timing,
                 canUseTurn1GoingFirst=not is_supporter,
                 canUseTurn1GoingSecond=True,
@@ -721,7 +1213,7 @@ def _sanitize_trainer_card(
         ]
 
     action = compiled_model.playableActions[0]
-    action.sourceType = ActionSourceType.TRAINER_PLAY
+    action.sourceType = default_source
     action.timing = timing
     if is_supporter:
         action.canUseTurn1GoingFirst = False
@@ -740,7 +1232,7 @@ def _sanitize_trainer_card(
     hand_discard_cost = _extract_hand_discard_cost(combined_text)
 
     # -------------------------------------------------------------------------
-    # CAS 1 : Déploiement sur le Banc depuis le Deck (Faiblo Ball, Poffin Copain-Copain)
+    # CAS 1 : Déploiement sur le Banc depuis le Deck (Faiblo Ball, Poffin Copain-Copain, Cuencia)
     # -------------------------------------------------------------------------
     if (
         "placez-le sur votre banc" in lower_text
@@ -752,6 +1244,10 @@ def _sanitize_trainer_card(
         count = int(m_up_to.group(1)) if m_up_to else 1
         m_hp = re.search(r"(\d+)\s*(?:pv|hp)\s*(?:ou moins|or less|maximum)", lower_text)
         max_hp = int(m_hp.group(1)) if m_hp else None
+        no_rule_box = (
+            "n'ayant pas d'encadré règle" in lower_text
+            or "doesn't have a rule box" in lower_text
+        )
 
         target_filter = CardFilter(
             category=CardCategory.POKEMON,
@@ -759,6 +1255,7 @@ def _sanitize_trainer_card(
             maxHp=max_hp,
             energyType=None,
             specificCardName=None,
+            isRuleBox=False if no_rule_box else None,
         )
         action.actionId = f"play_{_slugify(name_en)}"
         action.label = name_fr

@@ -486,6 +486,10 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
         "deterministicSubCategory": identity.subCategory.value,
         "regulationMark": identity.regulationMark,
         "legalStandard": identity.legalStandard,
+        "isAceSpec": identity.isAceSpec,
+        "isAncient": identity.isAncient,
+        "isFuture": identity.isFuture,
+        "isTechnicalMachine": identity.isTechnicalMachine,
         "rawRulesText": identity.rawRulesText,
     }
 
@@ -493,15 +497,22 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
         payload["pokemonStats"] = {
             "hp": pstats.hp,
             "types": pstats.types,
+            "dexId": pstats.dexId,
             "stage": pstats.stage,
             "evolvesFrom": pstats.evolvesFrom,
             "rootBasicName": pstats.rootBasicName,
             "evolutionChain": pstats.evolutionChain,
             "retreatCost": pstats.retreatCost,
             "weaknesses": pstats.weaknesses,
+            "weaknessMultiplier": pstats.weaknessMultiplier,
             "resistances": pstats.resistances,
+            "resistanceModifier": pstats.resistanceModifier,
             "prizeCardsGiven": pstats.prizeCardsGiven,
             "isRuleBox": pstats.isRuleBox,
+            "isTera": pstats.isTera,
+            "isAncient": pstats.isAncient,
+            "isFuture": pstats.isFuture,
+            "hasAbility": pstats.hasAbility,
         }
 
     if bundle.raw_fr.get("abilities"):
@@ -545,11 +556,16 @@ def enforce_ptcg_invariants(
             if act.sourceType not in {
                 ActionSourceType.ABILITY_ACTIVATED,
                 ActionSourceType.ABILITY_ON_EVOLVE,
+                ActionSourceType.ABILITY_ON_PLAY_FROM_HAND,
+                ActionSourceType.ABILITY_REACTIVE,
                 ActionSourceType.ABILITY_PASSIVE,
             }
             and act.timing not in {
                 ActionTiming.ONCE_PER_TURN_ABILITY,
+                ActionTiming.AS_OFTEN_AS_YOU_LIKE,
                 ActionTiming.ON_EVOLVE_TRIGGER,
+                ActionTiming.ON_PLAY_FROM_HAND_TRIGGER,
+                ActionTiming.ON_DAMAGED_OR_KO_TRIGGER,
             }
         ]
 

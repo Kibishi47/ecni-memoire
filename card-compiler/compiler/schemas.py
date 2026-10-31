@@ -41,6 +41,7 @@ class CardSubCategory(str, Enum):
 class StrategicRole(str, Enum):
     MAIN_ATTACKER = "MAIN_ATTACKER"
     SECONDARY_ATTACKER = "SECONDARY_ATTACKER"
+    SNIPER_BENCH_ATTACKER = "SNIPER_BENCH_ATTACKER"
     DRAW_ENGINE_POKEMON = "DRAW_ENGINE_POKEMON"
     TUTOR_ENGINE_POKEMON = "TUTOR_ENGINE_POKEMON"
     ENERGY_ACCELERATOR = "ENERGY_ACCELERATOR"
@@ -53,6 +54,10 @@ class StrategicRole(str, Enum):
     RECOVERY_RECYCLER = "RECOVERY_RECYCLER"
     MOBILITY_SWITCH = "MOBILITY_SWITCH"
     RESOURCE_ENERGY = "RESOURCE_ENERGY"
+    CONTROL_LOCK_DISRUPTION = "CONTROL_LOCK_DISRUPTION"
+    DEFENSIVE_TANK_WALL = "DEFENSIVE_TANK_WALL"
+    PASSIVE_STAT_BUFFER = "PASSIVE_STAT_BUFFER"
+    HEALER_SUPPORT = "HEALER_SUPPORT"
     TECH_UTILITY = "TECH_UTILITY"
 
 
@@ -60,16 +65,27 @@ class ActionSourceType(str, Enum):
     TRAINER_PLAY = "TRAINER_PLAY"
     ABILITY_ACTIVATED = "ABILITY_ACTIVATED"
     ABILITY_ON_EVOLVE = "ABILITY_ON_EVOLVE"
+    ABILITY_ON_PLAY_FROM_HAND = "ABILITY_ON_PLAY_FROM_HAND"
+    ABILITY_REACTIVE = "ABILITY_REACTIVE"
     ABILITY_PASSIVE = "ABILITY_PASSIVE"
     ATTACK = "ATTACK"
+    STADIUM_EFFECT = "STADIUM_EFFECT"
+    TOOL_EFFECT = "TOOL_EFFECT"
+    SPECIAL_ENERGY_EFFECT = "SPECIAL_ENERGY_EFFECT"
 
 
 class ActionTiming(str, Enum):
     ONCE_PER_CARD = "ONCE_PER_CARD"
     ONCE_PER_TURN_ABILITY = "ONCE_PER_TURN_ABILITY"
+    AS_OFTEN_AS_YOU_LIKE = "AS_OFTEN_AS_YOU_LIKE"
     ONCE_PER_TURN_SUPPORTER = "ONCE_PER_TURN_SUPPORTER"
+    ONCE_PER_TURN_STADIUM = "ONCE_PER_TURN_STADIUM"
     ONCE_PER_GAME_VSTAR = "ONCE_PER_GAME_VSTAR"
     ON_EVOLVE_TRIGGER = "ON_EVOLVE_TRIGGER"
+    ON_PLAY_FROM_HAND_TRIGGER = "ON_PLAY_FROM_HAND_TRIGGER"
+    ON_DAMAGED_OR_KO_TRIGGER = "ON_DAMAGED_OR_KO_TRIGGER"
+    BETWEEN_TURNS_CHECKUP = "BETWEEN_TURNS_CHECKUP"
+    PASSIVE_CONTINUOUS = "PASSIVE_CONTINUOUS"
     END_OF_TURN_ATTACK = "END_OF_TURN_ATTACK"
 
 
@@ -81,7 +97,14 @@ class PreconditionType(str, Enum):
     KO_SUFFERED_LAST_TURN = "KO_SUFFERED_LAST_TURN"
     BASIC_IN_PLAY_PREVIOUS_TURN = "BASIC_IN_PLAY_PREVIOUS_TURN"
     SELF_IS_ACTIVE = "SELF_IS_ACTIVE"
+    SELF_IS_ON_BENCH = "SELF_IS_ON_BENCH"
     SELF_HAS_ENERGY_COST = "SELF_HAS_ENERGY_COST"
+    HAS_TERA_POKEMON_IN_PLAY = "HAS_TERA_POKEMON_IN_PLAY"
+    STADIUM_IN_PLAY = "STADIUM_IN_PLAY"
+    OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION = "OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION"
+    OPPONENT_PRIZES_EXACT_COUNT = "OPPONENT_PRIZES_EXACT_COUNT"
+    NO_ENERGY_IN_PLAY = "NO_ENERGY_IN_PLAY"
+    SECOND_PLAYER_TURN_1 = "SECOND_PLAYER_TURN_1"
 
 
 class CostType(str, Enum):
@@ -89,12 +112,18 @@ class CostType(str, Enum):
     DISCARD_ENERGY_FROM_PLAY = "DISCARD_ENERGY_FROM_PLAY"
     PUT_DAMAGE_COUNTERS_ON_SELF = "PUT_DAMAGE_COUNTERS_ON_SELF"
     END_TURN_IMMEDIATELY = "END_TURN_IMMEDIATELY"
+    KNOCK_OUT_SELF = "KNOCK_OUT_SELF"
+    SELF_DAMAGE = "SELF_DAMAGE"
+    SHUFFLE_ATTACHED_ENERGY_TO_DECK = "SHUFFLE_ATTACHED_ENERGY_TO_DECK"
+    CANT_ATTACK_NEXT_TURN = "CANT_ATTACK_NEXT_TURN"
+    PUT_HAND_CARD_BOTTOM_DECK = "PUT_HAND_CARD_BOTTOM_DECK"
 
 
 class EffectPrimitive(str, Enum):
     SEARCH_DECK_TO_HAND = "SEARCH_DECK_TO_HAND"
     SEARCH_DECK_TO_BENCH = "SEARCH_DECK_TO_BENCH"
     DRAW_CARDS = "DRAW_CARDS"
+    DRAW_UNTIL_HAND_SIZE = "DRAW_UNTIL_HAND_SIZE"
     DISCARD_HAND_AND_DRAW = "DISCARD_HAND_AND_DRAW"
     SHUFFLE_HAND_AND_DRAW = "SHUFFLE_HAND_AND_DRAW"
     SHUFFLE_HAND_BOTTOM_DRAW_PRIZES = "SHUFFLE_HAND_BOTTOM_DRAW_PRIZES"
@@ -104,12 +133,31 @@ class EffectPrimitive(str, Enum):
     SEARCH_AND_ATTACH_ENERGY = "SEARCH_AND_ATTACH_ENERGY"
     ATTACH_ENERGY_FROM_DISCARD = "ATTACH_ENERGY_FROM_DISCARD"
     ATTACH_EXTRA_ENERGY_FROM_HAND = "ATTACH_EXTRA_ENERGY_FROM_HAND"
+    MOVE_ENERGY_BETWEEN_POKEMON = "MOVE_ENERGY_BETWEEN_POKEMON"
     RECOVER_DISCARD_TO_HAND = "RECOVER_DISCARD_TO_HAND"
     SHUFFLE_DISCARD_TO_DECK = "SHUFFLE_DISCARD_TO_DECK"
+    RETURN_POKEMON_TO_HAND = "RETURN_POKEMON_TO_HAND"
     SWITCH_ACTIVE_POKEMON = "SWITCH_ACTIVE_POKEMON"
     GUST_OPPONENT_BENCH = "GUST_OPPONENT_BENCH"
     DEAL_DAMAGE_ACTIVE = "DEAL_DAMAGE_ACTIVE"
+    DEAL_DAMAGE_BENCH = "DEAL_DAMAGE_BENCH"
     DISTRIBUTE_DAMAGE_COUNTERS_BENCH = "DISTRIBUTE_DAMAGE_COUNTERS_BENCH"
+    PLACE_DAMAGE_COUNTERS = "PLACE_DAMAGE_COUNTERS"
+    MOVE_DAMAGE_COUNTERS = "MOVE_DAMAGE_COUNTERS"
+    HEAL_DAMAGE = "HEAL_DAMAGE"
+    APPLY_SPECIAL_CONDITION = "APPLY_SPECIAL_CONDITION"
+    DISCARD_OPPONENT_ENERGY = "DISCARD_OPPONENT_ENERGY"
+    DISCARD_TOOL_OR_STADIUM = "DISCARD_TOOL_OR_STADIUM"
+    MILL_OPPONENT_DECK = "MILL_OPPONENT_DECK"
+    DISCARD_FROM_OPPONENT_HAND = "DISCARD_FROM_OPPONENT_HAND"
+    DEVOLVE_OPPONENT_POKEMON = "DEVOLVE_OPPONENT_POKEMON"
+    TAKE_EXTRA_PRIZE_CARDS = "TAKE_EXTRA_PRIZE_CARDS"
+    PASSIVE_DAMAGE_REDUCTION = "PASSIVE_DAMAGE_REDUCTION"
+    PASSIVE_DAMAGE_BOOST = "PASSIVE_DAMAGE_BOOST"
+    PASSIVE_HP_BOOST = "PASSIVE_HP_BOOST"
+    PASSIVE_RETREAT_COST_MOD = "PASSIVE_RETREAT_COST_MOD"
+    PASSIVE_PREVENT_DAMAGE_OR_EFFECTS = "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS"
+    PASSIVE_ABILITY_OR_ITEM_LOCK = "PASSIVE_ABILITY_OR_ITEM_LOCK"
 
 
 class ZoneType(str, Enum):
@@ -120,6 +168,14 @@ class ZoneType(str, Enum):
     ACTIVE = "ACTIVE"
     IN_PLAY_ALL = "IN_PLAY_ALL"
     PRIZES = "PRIZES"
+    OPPONENT_ACTIVE = "OPPONENT_ACTIVE"
+    OPPONENT_BENCH = "OPPONENT_BENCH"
+    OPPONENT_IN_PLAY_ALL = "OPPONENT_IN_PLAY_ALL"
+    OPPONENT_HAND = "OPPONENT_HAND"
+    OPPONENT_DECK = "OPPONENT_DECK"
+    OPPONENT_DISCARD = "OPPONENT_DISCARD"
+    STADIUM = "STADIUM"
+    LOST_ZONE = "LOST_ZONE"
 
 
 class DeadCardReason(str, Enum):
@@ -129,6 +185,34 @@ class DeadCardReason(str, Enum):
     BENCH_ALREADY_FULL = "BENCH_ALREADY_FULL"
     NOT_BEHIND_ON_PRIZES = "NOT_BEHIND_ON_PRIZES"
     DISCARD_PILE_EMPTY = "DISCARD_PILE_EMPTY"
+    NO_TERA_POKEMON_IN_PLAY = "NO_TERA_POKEMON_IN_PLAY"
+    HAND_ALREADY_FULL_OR_AT_LIMIT = "HAND_ALREADY_FULL_OR_AT_LIMIT"
+    NO_DAMAGE_ON_OWN_POKEMON = "NO_DAMAGE_ON_OWN_POKEMON"
+    NO_KO_LAST_TURN = "NO_KO_LAST_TURN"
+    STADIUM_ALREADY_IN_PLAY_SAME_NAME = "STADIUM_ALREADY_IN_PLAY_SAME_NAME"
+
+
+class DamageScalingType(str, Enum):
+    PER_COIN_FLIP_HEADS = "PER_COIN_FLIP_HEADS"
+    PER_ENERGY_ATTACHED_SELF = "PER_ENERGY_ATTACHED_SELF"
+    PER_ENERGY_ATTACHED_ALL = "PER_ENERGY_ATTACHED_ALL"
+    PER_ENERGY_ATTACHED_TARGET = "PER_ENERGY_ATTACHED_TARGET"
+    PER_DAMAGE_COUNTER_ON_SELF = "PER_DAMAGE_COUNTER_ON_SELF"
+    PER_DAMAGE_COUNTER_ON_FRIENDLY = "PER_DAMAGE_COUNTER_ON_FRIENDLY"
+    PER_DAMAGE_COUNTER_ON_TARGET = "PER_DAMAGE_COUNTER_ON_TARGET"
+    PER_ENERGY_DISCARDED = "PER_ENERGY_DISCARDED"
+    PER_OPPONENT_PRIZE_TAKEN = "PER_OPPONENT_PRIZE_TAKEN"
+    IF_TARGET_IS_EX_OR_EVOLUTION = "IF_TARGET_IS_EX_OR_EVOLUTION"
+    PER_BENCHED_POKEMON = "PER_BENCHED_POKEMON"
+    PER_CARD_IN_DISCARD_OR_LOST_ZONE = "PER_CARD_IN_DISCARD_OR_LOST_ZONE"
+
+
+class SpecialConditionType(str, Enum):
+    POISONED = "POISONED"
+    BURNED = "BURNED"
+    CONFUSED = "CONFUSED"
+    PARALYZED = "PARALYZED"
+    ASLEEP = "ASLEEP"
 
 
 # ============================================================================
@@ -156,6 +240,10 @@ class CardFilter(BaseModel):
         default=None,
         description="PV maximum autorisés pour le Pokémon ciblé (ex: 70 pour Poffin Pote-Pote) ou null.",
     )
+    minHp: Optional[int] = Field(
+        default=None,
+        description="PV minimum requis pour le Pokémon ciblé ou null.",
+    )
     energyType: Optional[str] = Field(
         default=None,
         description="Type d'énergie ou de Pokémon requis (ex: 'Feu', 'Fire', 'Obscurité') ou null.",
@@ -163,6 +251,34 @@ class CardFilter(BaseModel):
     specificCardName: Optional[str] = Field(
         default=None,
         description="Nom exact du Pokémon ou de la carte ciblée (ex: 'Salamèche', 'Dracaufeu ex') ou null.",
+    )
+    isRuleBox: Optional[bool] = Field(
+        default=None,
+        description="True si cible un Pokémon à encadré Règle (ex, V...), False si l'exclut (ex: Cuencia), ou null.",
+    )
+    isEvolution: Optional[bool] = Field(
+        default=None,
+        description="True si cible un Pokémon Évolutif (STAGE_1 ou STAGE_2), False sinon, ou null.",
+    )
+    isTera: Optional[bool] = Field(
+        default=None,
+        description="True si cible un Pokémon Téracristal, ou null.",
+    )
+    isAncient: Optional[bool] = Field(
+        default=None,
+        description="True si cible une carte Temps passé (Ancient), ou null.",
+    )
+    isFuture: Optional[bool] = Field(
+        default=None,
+        description="True si cible une carte Temps futur (Future), ou null.",
+    )
+    hasAbility: Optional[bool] = Field(
+        default=None,
+        description="True si cible un Pokémon doté d'un Talent, False si sans Talent, ou null.",
+    )
+    maxRetreatCost: Optional[int] = Field(
+        default=None,
+        description="Coût de retraite maximum autorisé ou null.",
     )
 
 
@@ -258,6 +374,19 @@ class AtomicEffect(BaseModel):
         ge=0,
         description="Bonus de dégâts par carte Récompense déjà prise par l'adversaire (ex: 30 pour Dracaufeu ex) ou null.",
     )
+    damageScalingType: Optional[DamageScalingType] = Field(
+        default=None,
+        description="Type de calcul dynamique des dégâts (ex: PER_ENERGY_DISCARDED, PER_BENCHED_POKEMON, PER_COIN_FLIP_HEADS) ou null.",
+    )
+    damageScalingValue: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Valeur unitaire du bonus ou multiplicateur de dégâts dynamiques (ex: 70 pour 70×, 30 pour +30) ou null.",
+    )
+    specialCondition: Optional[SpecialConditionType] = Field(
+        default=None,
+        description="État Spécial infligé (POISONED, BURNED, CONFUSED, PARALYZED, ASLEEP) ou null.",
+    )
 
     @field_validator("count", mode="before")
     @classmethod
@@ -267,7 +396,7 @@ class AtomicEffect(BaseModel):
         except (ValueError, TypeError):
             return 1
 
-    @field_validator("baseDamage", "damageScalingPerOpponentPrizeTaken", mode="before")
+    @field_validator("baseDamage", "damageScalingPerOpponentPrizeTaken", "damageScalingValue", mode="before")
     @classmethod
     def clamp_damage_vals(cls, v: Any) -> Optional[int]:
         if v is None:
@@ -306,6 +435,10 @@ class PlayableAction(BaseModel):
     canUseTurn1GoingSecond: bool = Field(
         ...,
         description="True si utilisable au Tour 1 par le second joueur (strictement False pour toute Évolution/Super Bonbon, True pour Supporter et Attaque).",
+    )
+    energyCost: List[str] = Field(
+        default_factory=list,
+        description="Liste exacte des énergies requises pour une attaque (ex: ['Électrique', 'Combat'], ['Feu', 'Feu'], ou [] sinon).",
     )
     preconditions: List[ActionPrecondition] = Field(
         default_factory=list,
@@ -534,6 +667,22 @@ class CardIdentity(BaseModel):
     legalExpanded: bool = Field(default=True, description="Légalité au format Étendu.")
     rarity: Optional[str] = Field(default=None, description="Rareté officielle de la carte.")
     imageUrl: Optional[str] = Field(default=None, description="URL de l'image haute résolution TCGdex.")
+    isAceSpec: bool = Field(
+        default=False,
+        description="True si la carte est une carte HIGH-TECH / ACE SPEC (limite de 1 par deck).",
+    )
+    isAncient: bool = Field(
+        default=False,
+        description="True si la carte possède la mécanique Temps passé (Ancient).",
+    )
+    isFuture: bool = Field(
+        default=False,
+        description="True si la carte possède la mécanique Temps futur (Future).",
+    )
+    isTechnicalMachine: bool = Field(
+        default=False,
+        description="True si la carte Outil est une Capsule Technique (Technical Machine).",
+    )
     rawRulesText: List[str] = Field(
         default_factory=list,
         description="Textes complets des effets, talents et attaques issus de TCGdex (FR + EN).",
@@ -547,6 +696,10 @@ class PokemonStats(BaseModel):
 
     hp: int = Field(..., ge=0, description="Points de vie (PV / HP) du Pokémon.")
     types: List[str] = Field(default_factory=list, description="Types élémentaires du Pokémon.")
+    dexId: List[int] = Field(
+        default_factory=list,
+        description="Numéros de Pokédex national issus de TCGdex.",
+    )
     stage: Optional[str] = Field(default=None, description="Stade d'évolution brut TCGdex.")
     evolvesFrom: Optional[str] = Field(default=None, description="Nom du Pokémon pré-évolué direct.")
     rootBasicName: Optional[str] = Field(
@@ -559,7 +712,15 @@ class PokemonStats(BaseModel):
     )
     retreatCost: int = Field(default=0, ge=0, description="Coût de retraite du Pokémon.")
     weaknesses: List[str] = Field(default_factory=list, description="Types de faiblesse du Pokémon.")
+    weaknessMultiplier: str = Field(
+        default="×2",
+        description="Multiplicateur ou modificateur de faiblesse (ex: '×2').",
+    )
     resistances: List[str] = Field(default_factory=list, description="Types de résistance du Pokémon.")
+    resistanceModifier: int = Field(
+        default=-30,
+        description="Modificateur de résistance (ex: -30).",
+    )
     prizeCardsGiven: int = Field(
         default=1,
         ge=1,
@@ -569,6 +730,22 @@ class PokemonStats(BaseModel):
     isRuleBox: bool = Field(
         default=False,
         description="True si le Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Radieux).",
+    )
+    isTera: bool = Field(
+        default=False,
+        description="True si le Pokémon est Téracristal (immunisé aux dégâts d'attaques sur le Banc).",
+    )
+    isAncient: bool = Field(
+        default=False,
+        description="True si le Pokémon est Temps passé (Ancient).",
+    )
+    isFuture: bool = Field(
+        default=False,
+        description="True si le Pokémon est Temps futur (Future).",
+    )
+    hasAbility: bool = Field(
+        default=False,
+        description="True si le Pokémon possède au moins un Talent (Ability).",
     )
 
 

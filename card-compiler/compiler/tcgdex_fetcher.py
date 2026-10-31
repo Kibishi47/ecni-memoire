@@ -533,11 +533,86 @@ class TCGdexFetcher:
         set_name = str(set_obj.get("name")).strip() if set_obj.get("name") else None
         local_id = str(raw_fr.get("localId") or requested_card_id.split("-")[-1]).strip()
 
-        legal_obj = raw_fr.get("legal") if isinstance(raw_fr.get("legal"), dict) else {}
-        legal_standard = bool(legal_obj.get("standard", False))
-        legal_expanded = bool(legal_obj.get("expanded", False))
+        reg_mark = raw_fr.get("regulationMark") or (raw_en or {}).get("regulationMark")
+        reg_mark_norm = str(reg_mark).strip().upper() if reg_mark else None
 
+        legal_obj = raw_fr.get("legal") if isinstance(raw_fr.get("legal"), dict) else {}
+        # Inclusion des marques de régulation G, H, I au format Standard (bloc sv01 à sv08.5) + Énergies de Base
+        legal_standard = bool(
+            legal_obj.get("standard", False)
+            or (reg_mark_norm in {"G", "H", "I"})
+            or (sub_category == CardSubCategory.BASIC_ENERGY)
+        )
+        legal_expanded = bool(legal_obj.get("expanded", False) or legal_standard)
+
+        rarity_val = raw_fr.get("rarity") or (raw_en or {}).get("rarity")
+        rarity_lower = str(rarity_val or "").lower()
         raw_rules_text = extract_raw_rules_text(raw_fr, raw_en)
+        rules_joined_lower = " ".join(raw_rules_text).lower()
+        name_and_rules_lower = f"{name_fr} {name_en or ''} {rules_joined_lower}".lower()
+
+        # Extraction des dexId pour les Pokémon (détection déterministe des Pokémon Paradoxe Temps passé / Temps futur)
+        raw_dex_ids = raw_fr.get("dexId") or (raw_en or {}).get("dexId") or []
+        dex_ids: List[int] = []
+        if isinstance(raw_dex_ids, list):
+            for d in raw_dex_ids:
+                try:
+                    dex_ids.append(int(d))
+                except (TypeError, ValueError):
+                    pass
+
+        ancient_paradox_dex = {984, 985, 986, 987, 988, 989, 1005, 1009, 1020, 1021}
+        future_paradox_dex = {990, 991, 992, 993, 994, 995, 1006, 1010, 1022, 1023}
+
+        is_rule_box, prize_cards = (
+            detect_rule_box_and_prizes(name_fr, name_en, raw_fr)
+            if category == CardCategory.POKEMON
+            else (False, 1)
+        )
+
+        is_ace_spec = (
+            "high-tech" in rarity_lower
+            or "ace spec" in rarity_lower
+            or "high-tech" in rules_joined_lower
+            or "ace spec" in rules_joined_lower
+        )
+
+        if category == CardCategory.POKEMON:
+            is_ancient = (
+                any(d in ancient_paradox_dex for d in dex_ids)
+                or (1007 in dex_ids and set_id.lower() != "sv01" and not is_rule_box)
+                or "temps passé" in name_fr.lower()
+                or "ancient" in (name_en or "").lower()
+            )
+            is_future = (
+                any(d in future_paradox_dex for d in dex_ids)
+                or (1008 in dex_ids and set_id.lower() != "sv01" and not is_rule_box)
+                or "temps futur" in name_fr.lower()
+                or "future" in (name_en or "").lower()
+            )
+        else:
+            is_ancient = (
+                "temps passé" in name_and_rules_lower
+                or "professeure olim" in name_fr.lower()
+                or "professor sada" in (name_en or "").lower()
+                or "tambour éveil" in name_fr.lower()
+                or "awakening drum" in (name_en or "").lower()
+            )
+            is_future = (
+                "temps futur" in name_and_rules_lower
+                or "professeur turum" in name_fr.lower()
+                or "professor turo" in (name_en or "").lower()
+                or "techno-radar" in name_fr.lower()
+                or "techno radar" in (name_en or "").lower()
+                or "capsule de redémarrage" in name_fr.lower()
+                or "reboot pod" in (name_en or "").lower()
+            )
+
+        is_technical_machine = sub_category == CardSubCategory.TOOL and (
+            "capsule technique" in name_fr.lower()
+            or "technical machine" in (name_en or "").lower()
+            or bool(raw_fr.get("attacks") or (raw_en or {}).get("attacks"))
+        )
 
         identity = CardIdentity(
             cardId=requested_card_id,
@@ -548,11 +623,15 @@ class TCGdexFetcher:
             localId=local_id,
             category=category,
             subCategory=sub_category,
-            regulationMark=raw_fr.get("regulationMark") or (raw_en or {}).get("regulationMark"),
+            regulationMark=reg_mark,
             legalStandard=legal_standard,
             legalExpanded=legal_expanded,
-            rarity=raw_fr.get("rarity") or (raw_en or {}).get("rarity"),
+            rarity=rarity_val,
             imageUrl=raw_fr.get("image") or (raw_en or {}).get("image"),
+            isAceSpec=is_ace_spec,
+            isAncient=is_ancient,
+            isFuture=is_future,
+            isTechnicalMachine=is_technical_machine,
             rawRulesText=raw_rules_text,
         )
 
@@ -581,30 +660,49 @@ class TCGdexFetcher:
             except (TypeError, ValueError):
                 retreat_cost = 0
 
-            weaknesses = [
-                str(w.get("type"))
-                for w in (raw_fr.get("weaknesses") or [])
-                if isinstance(w, dict) and w.get("type")
-            ]
-            resistances = [
-                str(r.get("type"))
-                for r in (raw_fr.get("resistances") or [])
-                if isinstance(r, dict) and r.get("type")
-            ]
-            is_rule_box, prize_cards = detect_rule_box_and_prizes(name_fr, name_en, raw_fr)
+            raw_weaknesses = [w for w in (raw_fr.get("weaknesses") or []) if isinstance(w, dict)]
+            weaknesses = [str(w.get("type")) for w in raw_weaknesses if w.get("type")]
+            weakness_mult = "×2"
+            if raw_weaknesses and raw_weaknesses[0].get("value"):
+                weakness_mult = str(raw_weaknesses[0].get("value")).strip()
+
+            raw_resistances = [r for r in (raw_fr.get("resistances") or []) if isinstance(r, dict)]
+            resistances = [str(r.get("type")) for r in raw_resistances if r.get("type")]
+            resistance_mod = -30
+            if raw_resistances and raw_resistances[0].get("value"):
+                try:
+                    resistance_mod = int(str(raw_resistances[0].get("value")).strip())
+                except (TypeError, ValueError):
+                    resistance_mod = -30
+
+            is_tera = (
+                "téracristal" in rules_joined_lower
+                or "pokémon téracristal" in rules_joined_lower
+                or "tera pokémon" in rules_joined_lower
+                or "tant que ce pokémon est sur votre banc, évitez tous les dégâts" in rules_joined_lower
+                or "as long as this pokémon is on your bench, prevent all damage" in rules_joined_lower
+            )
+            has_ability = bool(raw_fr.get("abilities") or (raw_en or {}).get("abilities"))
 
             pokemon_stats = PokemonStats(
                 hp=hp,
                 types=types_list,
+                dexId=dex_ids,
                 stage=stage_str,
                 evolvesFrom=evolves_from,
                 rootBasicName=root_basic,
                 evolutionChain=evo_chain,
                 retreatCost=retreat_cost,
                 weaknesses=weaknesses,
+                weaknessMultiplier=weakness_mult,
                 resistances=resistances,
+                resistanceModifier=resistance_mod,
                 prizeCardsGiven=prize_cards,
                 isRuleBox=is_rule_box,
+                isTera=is_tera,
+                isAncient=is_ancient,
+                isFuture=is_future,
+                hasAbility=has_ability,
             )
 
         return identity, pokemon_stats
@@ -752,6 +850,16 @@ class TCGdexFetcher:
             if not cid:
                 continue
 
+            set_prefix = cid.split("-")[0].lower() if "-" in cid else cid.lower()
+            if set_prefix in known_released_prefixes:
+                sv_candidates.append(cid)
+                continue
+
+            reg_m = str(entry.get("regulationMark") or "").strip().upper()
+            if reg_m in {"G", "H", "I"}:
+                sv_candidates.append(cid)
+                continue
+
             # Si l'index inclut déjà l'objet legal, on l'utilise directement
             legal = entry.get("legal")
             if isinstance(legal, dict) and "standard" in legal:
@@ -759,10 +867,7 @@ class TCGdexFetcher:
                     sv_candidates.append(cid)
                 continue
 
-            set_prefix = cid.split("-")[0].lower() if "-" in cid else cid.lower()
-            if set_prefix in known_released_prefixes:
-                sv_candidates.append(cid)
-            elif cid.lower().startswith("sv"):
+            if cid.lower().startswith("sv"):
                 unreleased_sv_candidates.append(cid)
             else:
                 other_candidates.append(cid)
