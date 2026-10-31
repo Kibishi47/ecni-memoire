@@ -4,6 +4,7 @@ Commandes disponibles :
 - `python -m compiler.cli run` (alias `compile`) : Exécute le pipeline complet (TCGdex -> Llama GBNF -> Disque)
   avec support de `--mode test|standard`, `--test`, `--standard`, `--ids`, `--fast`, `--force`.
 - `python -m compiler.cli count` : Compte le nombre de cartes déjà compilées dans `data/compiled_cards/` (options `--details` et `--quiet`).
+- `python -m compiler.cli sync` (alias `sync-database`, `sync-db`, `check-database`) : Vérifie que toutes les cartes compilées sont présentes dans `data/cards_database.json` et ajoute automatiquement les cartes manquantes.
 - `python -m compiler.cli inspect <card_id>` : Affiche avec coloration syntaxique JSON et panneaux Rich
   le modèle complet généré dans `data/compiled_cards/<card_id>.json`.
 - `python -m compiler.cli stats` (alias `validate`) : Vérifie l'intégrité Pydantic V2 de tous les fichiers JSON
@@ -88,20 +89,181 @@ def get_data_dir() -> Path:
     return data_dir
 
 
+def sync_cards_database(
+    data_dir: Path,
+    db_path: Optional[Path] = None,
+    dry_run: bool = False,
+    force_update: bool = False,
+) -> Dict[str, Any]:
+    """Vérifie que tous les fichiers valides de `data/compiled_cards/*.json` sont inclus dans le fichier JSON global (`cards_database.json`).
+
+    Si une carte est manquante, elle est automatiquement ajoutée au fichier JSON en préservant son format (liste ou dictionnaire).
+
+    Retourne un dictionnaire résumant l'opération :
+    - db_path : Chemin vers le fichier JSON consolidé
+    - total_disk_cards : Nombre total de cartes compilées trouvées sur le disque
+    - initial_db_cards : Nombre initial de cartes dans le fichier JSON
+    - added_card_ids : Liste des IDs de cartes ajoutées
+    - updated_card_ids : Liste des IDs de cartes mises à jour (si force_update)
+    - missing_on_disk_ids : Liste des IDs présents dans le JSON mais absents du disque
+    - corrupted_files : Liste des fichiers illisibles/invalides
+    - db_format : 'list' ou 'dict_cards_dict' ou 'dict_cards_list' ou 'dict_raw'
+    - disk_cards : Dictionnaire card_id -> card_dict
+    """
+    target_db = db_path or (data_dir / "cards_database.json")
+    compiled_dir = data_dir / "compiled_cards"
+    compiled_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Charger les cartes compilées sur le disque
+    disk_cards: Dict[str, Dict[str, Any]] = {}
+    corrupted_files: List[tuple[str, str]] = []
+
+    for fpath in sorted(compiled_dir.glob("*.json")):
+        try:
+            content = fpath.read_text(encoding="utf-8")
+            card_json = json.loads(content)
+            card_id = (
+                card_json.get("cardId")
+                or (card_json.get("identity") or {}).get("cardId")
+                or fpath.stem
+            )
+            disk_cards[card_id] = card_json
+        except Exception as e:
+            corrupted_files.append((fpath.name, str(e)))
+
+    # 2. Charger le fichier JSON global existant ou initialiser
+    db_data: Any = None
+    db_format = "list"
+    existing_ids: set[str] = set()
+    id_to_list_index: Dict[str, int] = {}
+
+    if target_db.exists() and target_db.stat().st_size > 0:
+        try:
+            db_data = json.loads(target_db.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise ValueError(f"Impossible de parser le fichier JSON global {target_db} : {e}")
+
+        if isinstance(db_data, list):
+            db_format = "list"
+            for idx, item in enumerate(db_data):
+                if isinstance(item, dict):
+                    cid = item.get("cardId") or (item.get("identity") or {}).get("cardId")
+                    if cid:
+                        existing_ids.add(cid)
+                        id_to_list_index[cid] = idx
+        elif isinstance(db_data, dict):
+            if "cards" in db_data:
+                if isinstance(db_data["cards"], dict):
+                    db_format = "dict_cards_dict"
+                    existing_ids = set(db_data["cards"].keys())
+                elif isinstance(db_data["cards"], list):
+                    db_format = "dict_cards_list"
+                    for idx, item in enumerate(db_data["cards"]):
+                        if isinstance(item, dict):
+                            cid = item.get("cardId") or (item.get("identity") or {}).get("cardId")
+                            if cid:
+                                existing_ids.add(cid)
+                                id_to_list_index[cid] = idx
+                else:
+                    db_format = "dict_raw"
+                    existing_ids = set(db_data.keys())
+            else:
+                db_format = "dict_raw"
+                existing_ids = set(db_data.keys())
+    else:
+        db_data = []
+        db_format = "list"
+
+    # 3. Déterminer les cartes manquantes et celles à mettre à jour
+    added_ids: List[str] = []
+    updated_ids: List[str] = []
+
+    for card_id in sorted(disk_cards.keys()):
+        if card_id not in existing_ids:
+            added_ids.append(card_id)
+        elif force_update:
+            updated_ids.append(card_id)
+
+    missing_on_disk_ids = sorted(list(existing_ids - set(disk_cards.keys())))
+
+    # 4. Appliquer les ajouts et modifications (si non dry_run)
+    if not dry_run and (added_ids or updated_ids or not target_db.exists()):
+        if db_format == "list":
+            for cid in added_ids:
+                db_data.append(disk_cards[cid])
+            if force_update:
+                for cid in updated_ids:
+                    idx = id_to_list_index.get(cid)
+                    if idx is not None:
+                        db_data[idx] = disk_cards[cid]
+            db_data.sort(key=lambda c: c.get("cardId") or (c.get("identity") or {}).get("cardId") or "")
+
+        elif db_format == "dict_cards_dict":
+            for cid in added_ids:
+                db_data["cards"][cid] = disk_cards[cid]
+            if force_update:
+                for cid in updated_ids:
+                    db_data["cards"][cid] = disk_cards[cid]
+            db_data["cards"] = dict(sorted(db_data["cards"].items()))
+            db_data["totalCards"] = len(db_data["cards"])
+            db_data["updatedAtIso"] = datetime.now(timezone.utc).isoformat()
+
+        elif db_format == "dict_cards_list":
+            for cid in added_ids:
+                db_data["cards"].append(disk_cards[cid])
+            if force_update:
+                for cid in updated_ids:
+                    idx = id_to_list_index.get(cid)
+                    if idx is not None:
+                        db_data["cards"][idx] = disk_cards[cid]
+            db_data["cards"].sort(key=lambda c: c.get("cardId") or "")
+            db_data["totalCards"] = len(db_data["cards"])
+            db_data["updatedAtIso"] = datetime.now(timezone.utc).isoformat()
+
+        elif db_format == "dict_raw":
+            for cid in added_ids:
+                db_data[cid] = disk_cards[cid]
+            if force_update:
+                for cid in updated_ids:
+                    db_data[cid] = disk_cards[cid]
+            db_data = dict(sorted(db_data.items()))
+
+        target_db.parent.mkdir(parents=True, exist_ok=True)
+        target_db.write_text(
+            json.dumps(db_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return {
+        "db_path": target_db,
+        "total_disk_cards": len(disk_cards),
+        "initial_db_cards": len(existing_ids),
+        "added_card_ids": added_ids,
+        "updated_card_ids": updated_ids,
+        "missing_on_disk_ids": missing_on_disk_ids,
+        "corrupted_files": corrupted_files,
+        "db_format": db_format,
+        "disk_cards": disk_cards,
+    }
+
+
 def rebuild_consolidated_database(
     data_dir: Path,
     active_ids: Optional[List[str]] = None,
 ) -> Path:
     """Regroupe les fichiers `data/compiled_cards/*.json` valides dans `data/cards_database.json`."""
-    compiled_dir = data_dir / "compiled_cards"
     db_path = data_dir / "cards_database.json"
+    if active_ids is None:
+        sync_cards_database(data_dir=data_dir, db_path=db_path)
+        return db_path
 
-    allowed_ids = set(active_ids) if active_ids is not None else None
+    compiled_dir = data_dir / "compiled_cards"
+    allowed_ids = set(active_ids)
     cards_by_id: Dict[str, Any] = {}
     for json_file in sorted(compiled_dir.glob("*.json")):
         try:
             model = EngineCardModel.model_validate_json(json_file.read_text(encoding="utf-8"))
-            if allowed_ids is not None and model.cardId not in allowed_ids:
+            if model.cardId not in allowed_ids:
                 continue
             cards_by_id[model.cardId] = model.model_dump(mode="json")
         except Exception:
@@ -357,9 +519,8 @@ def _execute_run_pipeline(
             "[green]✓[/green] Inférence LLM non requise : toutes les cartes sont valides ou court-circuitées statiquement."
         )
 
-    # Consolidation dans data/cards_database.json (filtrée sur les cartes du mode test si mode == test)
-    active_ids_for_db = [b.card_id for b in bundles] if effective_mode == "test" and not custom_ids else None
-    db_path = rebuild_consolidated_database(data_dir, active_ids=active_ids_for_db)
+    # Consolidation dans data/cards_database.json (conserve et synchronise toutes les cartes compilées)
+    db_path = rebuild_consolidated_database(data_dir, active_ids=None)
     console.print(
         f"[green]✓[/green] Base consolidée mise à jour : [bold]{db_path}[/bold]."
     )
@@ -793,7 +954,13 @@ def count_command(
             pass
 
     repartition_str = ", ".join(f"[bold cyan]{cnt}[/bold cyan] {cat}" for cat, cnt in categories_counter.items())
-    db_line = f"\n• [bold]Base consolidée ([cyan]cards_database.json[/cyan])[/bold] : {db_count} carte(s)" if db_path.exists() else ""
+    db_status = ""
+    if db_path.exists():
+        if db_count < total_count:
+            db_status = f" [bold yellow]({total_count - db_count} manquante(s) — exécutez 'sync')[/bold yellow]"
+        else:
+            db_status = " [bold green](à jour ✓)[/bold green]"
+    db_line = f"\n• [bold]Base consolidée ([cyan]cards_database.json[/cyan])[/bold] : {db_count} carte(s){db_status}" if db_path.exists() else ""
 
     console.print(
         Panel.fit(
@@ -833,6 +1000,164 @@ def stats_command() -> None:
 def validate_alias() -> None:
     """Alias de la commande `stats`."""
     _execute_stats_validation()
+
+
+@app.command("sync")
+def sync_command(
+    db_path: Optional[Path] = typer.Option(
+        None,
+        "--db-path",
+        "-p",
+        help="Chemin vers le fichier JSON consolidé (défaut : data/cards_database.json).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Simule la vérification sans modifier le fichier JSON.",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        "-d",
+        help="Affiche le tableau détaillé de toutes les cartes manquantes ajoutées.",
+    ),
+    force_update: bool = typer.Option(
+        False,
+        "--update",
+        "-u",
+        help="Met également à jour les cartes déjà présentes dans la base avec leur version disque la plus récente.",
+    ),
+) -> None:
+    """Vérifie que toutes les cartes compilées dans `data/compiled_cards/` sont présentes dans le fichier JSON global (`data/cards_database.json`) et ajoute automatiquement celles manquantes."""
+    data_dir = get_data_dir()
+    target_db = db_path or (data_dir / "cards_database.json")
+
+    try:
+        res = sync_cards_database(
+            data_dir=data_dir,
+            db_path=target_db,
+            dry_run=dry_run,
+            force_update=force_update,
+        )
+    except Exception as e:
+        console.print(f"[bold red]✗ Erreur lors de la synchronisation de la base :[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    total_disk = res["total_disk_cards"]
+    initial_db = res["initial_db_cards"]
+    added_ids = res["added_card_ids"]
+    updated_ids = res["updated_card_ids"]
+    corrupted_files = res["corrupted_files"]
+    missing_on_disk = res["missing_on_disk_ids"]
+    db_format = res["db_format"]
+    disk_cards = res["disk_cards"]
+
+    format_labels = {
+        "list": "Tableau JSON standard (liste)",
+        "dict_cards_dict": "Objet consolidé (dictionnaire 'cards')",
+        "dict_cards_list": "Objet consolidé (liste 'cards')",
+        "dict_raw": "Dictionnaire brut indexé par ID",
+    }
+    format_label = format_labels.get(db_format, db_format)
+
+    status_color = "yellow" if added_ids else "green"
+    sim_suffix = " (simulation non enregistrée)" if dry_run and added_ids else ""
+
+    console.print(
+        Panel.fit(
+            f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_disk}[/bold green]\n"
+            f"• [bold]Fichier global cible[/bold] : [cyan]{target_db}[/cyan]\n"
+            f"• [bold]Cartes déjà présentes dans la base[/bold] : [bold cyan]{initial_db}[/bold cyan]\n"
+            f"• [bold]Cartes manquantes détectées[/bold] : [bold {status_color}]{len(added_ids)}[/bold {status_color}]{sim_suffix}\n"
+            + (f"• [bold]Cartes mises à jour[/bold] : [bold blue]{len(updated_ids)}[/bold blue]\n" if force_update else "")
+            + f"• [bold]Format du fichier JSON[/bold] : {format_label}",
+            title="[bold green]Vérification & Synchronisation de la Base de Cartes[/bold green]",
+            border_style="green" if not added_ids and not corrupted_files else "yellow",
+        )
+    )
+
+    if corrupted_files:
+        console.print(
+            f"[bold yellow]⚠️ {len(corrupted_files)} fichier(s) JSON invalide(s) ignoré(s) dans data/compiled_cards/ :[/bold yellow] "
+            f"{', '.join(f[0] for f in corrupted_files[:5])}"
+            + ("..." if len(corrupted_files) > 5 else "")
+        )
+
+    if added_ids:
+        if dry_run:
+            console.print(
+                f"[bold yellow]Mode simulation (--dry-run) : {len(added_ids)} carte(s) seraient ajoutées à [cyan]{target_db}[/cyan].[/bold yellow]"
+            )
+        else:
+            console.print(
+                f"[bold green]✓ {len(added_ids)} carte(s) manquante(s) ont été automatiquement ajoutées à [bold cyan]{target_db}[/bold cyan] ![/bold green]"
+            )
+
+        if details or len(added_ids) <= 30:
+            table = Table(
+                title=f"Cartes Manquantes {'Identifiées' if dry_run else 'Ajoutées'} ({len(added_ids)})",
+                header_style="bold cyan",
+                show_lines=False,
+            )
+            table.add_column("ID", style="bold yellow")
+            table.add_column("Nom", style="white")
+            table.add_column("Catégorie", style="cyan")
+            table.add_column("Statut", style="green" if not dry_run else "yellow")
+
+            for cid in added_ids:
+                cdata = disk_cards.get(cid, {})
+                ident = cdata.get("identity") or {}
+                cname = ident.get("nameFr") or ident.get("nameEn") or cid
+                cat = cdata.get("category", "")
+                subcat = cdata.get("subCategory", "")
+                cat_display = f"{cat} / {subcat}" if subcat else cat
+                status = "Ajoutée ✓" if not dry_run else "À ajouter (dry-run)"
+                table.add_row(cid, cname, cat_display, status)
+
+            console.print(table)
+    elif not force_update or not updated_ids:
+        console.print(
+            f"[bold green]✓ Parfait ! Toutes les cartes compilées ({total_disk}) sont déjà présentes dans [cyan]{target_db}[/cyan]. Aucune carte à ajouter.[/bold green]"
+        )
+
+    if missing_on_disk:
+        console.print(
+            f"[dim]ℹ Note : {len(missing_on_disk)} carte(s) présente(s) dans {target_db.name} n'ont pas de fichier individuel correspondant dans compiled_cards/.[/dim]"
+        )
+
+
+@app.command("sync-database", hidden=True)
+def sync_database_alias(
+    db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    force_update: bool = typer.Option(False, "--update", "-u"),
+) -> None:
+    """Alias de la commande `sync`."""
+    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+
+
+@app.command("check-database", hidden=True)
+def check_database_alias(
+    db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    force_update: bool = typer.Option(False, "--update", "-u"),
+) -> None:
+    """Alias de la commande `sync`."""
+    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+
+
+@app.command("sync-db", hidden=True)
+def sync_db_alias(
+    db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    force_update: bool = typer.Option(False, "--update", "-u"),
+) -> None:
+    """Alias de la commande `sync`."""
+    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
 
 
 if __name__ == "__main__":

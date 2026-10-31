@@ -91,7 +91,28 @@ python -m compiler.cli inspect sv04-125
 python -m compiler.cli inspect sv03-125
 ```
 
-### 3. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
+### 4. Compter les cartes compilées
+
+```bash
+python -m compiler.cli count
+# Options : --details (-d) pour la liste complète, --quiet (-q) pour le nombre seul
+```
+
+### 5. Synchroniser le fichier global consolidé (`cards_database.json`)
+
+Vérifie que toutes les cartes compilées dans `data/compiled_cards/` sont présentes dans le fichier JSON global (`data/cards_database.json`). Si des cartes sont manquantes, elles y sont automatiquement ajoutées :
+
+```bash
+python -m compiler.cli sync
+```
+
+Options disponibles sur `sync` (alias `sync-database`, `sync-db`, `check-database`) :
+- `--details` (`-d`) : Affiche le tableau détaillé de toutes les cartes ajoutées.
+- `--dry-run` (`-n`) : Simule la vérification sans écrire sur le disque.
+- `--db-path` (`-p`) : Chemin alternatif vers un fichier JSON consolidé.
+- `--update` (`-u`) : Met également à jour les cartes déjà existantes si leur version disque a changé.
+
+### 6. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
 
 ```bash
 python -m compiler.cli stats
