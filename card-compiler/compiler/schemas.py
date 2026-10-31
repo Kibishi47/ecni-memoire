@@ -1342,7 +1342,7 @@ class CompilationMetadata(BaseModel):
 
     modelRepoId: str = Field(..., description="Dépôt Hugging Face du modèle GGUF utilisé.")
     modelFilename: str = Field(..., description="Nom du fichier GGUF utilisé.")
-    compilationTimeSeconds: float = Field(..., ge=0.0, description="Temps d'inférence en secondes.")
+    compilationTimeSeconds: float = Field(..., ge=0.0, description="Temps total de compilation en secondes.")
     compiledAtIso: str = Field(..., description="Date/heure ISO 8601 de génération.")
     completionTokens: Optional[int] = Field(
         default=None,
@@ -1352,7 +1352,17 @@ class CompilationMetadata(BaseModel):
     tokensPerSecond: Optional[float] = Field(
         default=None,
         ge=0.0,
-        description="Débit moyen de génération en tokens par seconde (t/s).",
+        description="Débit moyen de génération en tokens par seconde (t/s) calculé sur le temps effectif de génération des tokens.",
+    )
+    generationTimeSeconds: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Temps effectif de génération de tokens en secondes (hors délai TTFT avant premier token).",
+    )
+    timeToFirstTokenSeconds: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Délai avant le premier token (Time To First Token) en secondes.",
     )
 
 

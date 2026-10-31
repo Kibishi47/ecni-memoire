@@ -728,6 +728,8 @@ class LMStudioCardCompiler:
                     accumulated_reasoning: List[str] = []
                     token_count = 0
                     last_cb_time = 0.0
+                    first_token_time: Optional[float] = None
+                    last_token_time: Optional[float] = None
                     usage_info: Dict[str, Any] = {}
                     finish_reason: Optional[str] = None
 
@@ -767,23 +769,52 @@ class LMStudioCardCompiler:
 
                             if has_tok:
                                 token_count += 1
+                                now = time.perf_counter()
+                                if first_token_time is None:
+                                    first_token_time = now
+                                last_token_time = now
+
                                 if on_token:
-                                    now = time.perf_counter()
-                                    if now - last_cb_time >= 0.05:
-                                        live_elapsed = max(0.001, now - t0)
-                                        live_tps = round(token_count / live_elapsed, 1)
+                                    if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
+                                        if token_count > 1 and first_token_time is not None:
+                                            # Calcul du débit mesuré strictement à partir du début de génération des tokens
+                                            gen_elapsed = max(0.0001, now - first_token_time)
+                                            live_tps = round((token_count - 1) / gen_elapsed, 1)
+                                        else:
+                                            live_tps = 0.0
                                         on_token(token_count, live_tps)
                                         last_cb_time = now
 
                     if on_token and token_count > 0:
-                        final_elapsed = max(0.001, time.perf_counter() - t0)
-                        final_tps = round(token_count / final_elapsed, 1)
+                        now = time.perf_counter()
+                        if token_count > 1 and first_token_time is not None:
+                            final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
+                            final_tps = round((token_count - 1) / final_gen_elapsed, 1)
+                        elif token_count == 1 and first_token_time is not None:
+                            final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
+                            final_tps = round(1.0 / final_gen_elapsed, 1)
+                        else:
+                            final_tps = 0.0
                         on_token(token_count, final_tps)
 
                     content = "".join(accumulated_content).strip()
                     reasoning = "".join(accumulated_reasoning).strip()
                     if not content and reasoning:
                         content = reasoning
+
+                    gen_duration: Optional[float] = None
+                    tps: Optional[float] = None
+                    ttft: Optional[float] = None
+                    if first_token_time is not None:
+                        ttft = round(max(0.0, first_token_time - t0), 3)
+                        end_t = last_token_time or time.perf_counter()
+                        raw_delta = max(0.0001, end_t - first_token_time)
+                        if token_count > 1:
+                            gen_duration = raw_delta * (token_count / (token_count - 1))
+                            tps = round((token_count - 1) / raw_delta, 1)
+                        elif token_count == 1:
+                            gen_duration = raw_delta
+                            tps = round(1.0 / raw_delta, 1)
 
                     data = {
                         "choices": [
@@ -796,6 +827,9 @@ class LMStudioCardCompiler:
                             }
                         ],
                         "usage": usage_info or {"completion_tokens": token_count},
+                        "generation_duration": gen_duration,
+                        "time_to_first_token": ttft,
+                        "tokens_per_second": tps,
                     }
                     return data, resp, None
             except (AttributeError, TypeError):
@@ -1159,9 +1193,18 @@ class LMStudioCardCompiler:
         # Calcul des métriques de débit (tokens par seconde)
         usage = data.get("usage") if isinstance(data, dict) else {}
         completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+        generation_duration = data.get("generation_duration") if isinstance(data, dict) else None
+        ttft = data.get("time_to_first_token") if isinstance(data, dict) else None
+
         tokens_per_second: Optional[float] = None
-        if isinstance(completion_tokens, (int, float)) and completion_tokens > 0 and elapsed > 0:
-            tokens_per_second = round(float(completion_tokens) / float(elapsed), 1)
+        if isinstance(data, dict) and data.get("tokens_per_second") is not None:
+            tokens_per_second = data.get("tokens_per_second")
+        elif isinstance(completion_tokens, (int, float)) and completion_tokens > 0:
+            if generation_duration and generation_duration > 0:
+                tok_to_div = (completion_tokens - 1) if completion_tokens > 1 else completion_tokens
+                tokens_per_second = round(float(tok_to_div) / float(generation_duration), 1)
+            elif elapsed > 0:
+                tokens_per_second = round(float(completion_tokens) / float(elapsed), 1)
 
         metadata = CompilationMetadata(
             modelRepoId=self.repo_id,
@@ -1170,6 +1213,8 @@ class LMStudioCardCompiler:
             compiledAtIso=datetime.now(timezone.utc).isoformat(),
             completionTokens=int(completion_tokens) if isinstance(completion_tokens, (int, float)) else None,
             tokensPerSecond=tokens_per_second,
+            generationTimeSeconds=round(generation_duration, 3) if generation_duration is not None else None,
+            timeToFirstTokenSeconds=round(ttft, 3) if ttft is not None else None,
         )
 
         engine_card = EngineCardModel(

@@ -1640,6 +1640,104 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIsInstance(engine_card, EngineCardModel)
         self.assertEqual(engine_card.cardId, "sv06.5-001")
 
+    @patch("httpx.Client")
+    def test_tokens_per_second_measured_from_first_token_generation(self, mock_client_cls):
+        """Vérifie que le débit (tokens/sec) est mesuré à partir du début effectif de génération (hors TTFT/prompt eval)."""
+        compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test mesure tps.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        json_str = json.dumps(fake_card_json)
+        sse_lines = [
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[:30]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[30:60]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[60:]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}], 'usage': {'completion_tokens': 3}})}",
+            "data: [DONE]",
+        ]
+
+        mock_stream_resp = MagicMock()
+        mock_stream_resp.is_success = True
+        mock_stream_resp.status_code = 200
+        mock_stream_resp.iter_lines.return_value = sse_lines
+
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__enter__.return_value = mock_stream_resp
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.stream.return_value = mock_stream_cm
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        # Simulation de timestamps :
+        # t0 = 100.0 (envoi de la requête)
+        # Début de génération au 1er token à t = 105.0 (TTFT = 5.0s de prompt eval / latence réseau)
+        # 2e token à t = 106.0
+        # 3e token à t = 107.0 (fin de génération à 107.0, durée de génération = 2.0s pour 2 intervalles = 1.0 t/s)
+        # Fin de requête à t = 107.1 (temps total = 7.1s)
+        time_sequence = [
+            100.0,  # t0 dans compile_card
+            105.0,  # 1er token (first_token_time)
+            106.0,  # 2e token
+            107.0,  # 3e token (last_token_time)
+            107.0,  # final callback
+            107.1,  # fin de compile_card (elapsed)
+        ]
+        time_idx = 0
+
+        def fake_perf_counter():
+            nonlocal time_idx
+            if time_idx < len(time_sequence):
+                val = time_sequence[time_idx]
+                time_idx += 1
+                return val
+            return 107.1
+
+        live_updates = []
+        with patch("time.perf_counter", side_effect=fake_perf_counter):
+            model = compiler.compile_card(bundle, on_token=lambda tok, tps: live_updates.append((tok, tps)))
+
+        meta = model.compilationMetadata
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta.completionTokens, 3)
+        # Vérification clé : le débit est mesuré sur la durée de génération (2.0s) et non sur le temps total (7.1s)
+        # (3 - 1) / (107.0 - 105.0) = 2 / 2.0 = 1.0 t/s
+        self.assertEqual(meta.tokensPerSecond, 1.0)
+        self.assertEqual(meta.timeToFirstTokenSeconds, 5.0)
+        self.assertAlmostEqual(meta.compilationTimeSeconds, 7.1, places=1)
+
 
 if __name__ == "__main__":
     unittest.main()
