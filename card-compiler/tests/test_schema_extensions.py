@@ -484,6 +484,173 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertTrue(tok6_update)
         self.assertEqual(tok6_update[0][1], 0.9)
 
+    def test_local_llm_compiler_thinking_disabled_parity(self):
+        from unittest.mock import MagicMock
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        compiler = LocalLLMCardCompiler(disable_thinking=True)
+        self.assertTrue(compiler.disable_thinking)
+        self.assertEqual(compiler.thinking, "null")
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test local thinking disabled.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 15},
+        }
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertEqual(model.cardId, "sv06.5-001")
+
+        call_args, call_kwargs = mock_llm.create_chat_completion.call_args
+        self.assertEqual(call_kwargs.get("max_tokens"), 2048)
+        self.assertEqual(call_kwargs.get("chat_template_kwargs"), {"enable_thinking": False})
+        self.assertEqual(call_kwargs.get("chat_template_args"), {"enable_thinking": False})
+        self.assertEqual(call_kwargs.get("enable_thinking"), False)
+        self.assertEqual(call_kwargs.get("reasoning_effort"), "none")
+
+        messages = call_kwargs.get("messages", [])
+        sys_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
+        user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
+        self.assertIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ.", sys_msg)
+        self.assertIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ.", user_msg)
+
+    def test_local_llm_compiler_thinking_level_parity(self):
+        from unittest.mock import MagicMock
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        compiler = LocalLLMCardCompiler(thinking="medium")
+        self.assertFalse(compiler.disable_thinking)
+        self.assertEqual(compiler.thinking, "medium")
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test local thinking medium.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 15},
+        }
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertEqual(model.cardId, "sv06.5-001")
+
+        call_args, call_kwargs = mock_llm.create_chat_completion.call_args
+        self.assertEqual(call_kwargs.get("max_tokens"), 4096)
+        self.assertEqual(call_kwargs.get("chat_template_kwargs"), {"enable_thinking": True})
+        self.assertEqual(call_kwargs.get("chat_template_args"), {"enable_thinking": True})
+        self.assertEqual(call_kwargs.get("enable_thinking"), True)
+        self.assertEqual(call_kwargs.get("reasoning_effort"), "medium")
+
+    def test_local_llm_compiler_strips_think_tags(self):
+        from unittest.mock import MagicMock
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        compiler = LocalLLMCardCompiler()
+        fake_card_json = {
+            "reasoningAnalysis": "Test stripping think tags in local compiler.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        raw_response = f"<think>\nThis is internal reasoning that should be discarded.\n</think>\n```json\n{json.dumps(fake_card_json, indent=2)}\n```"
+
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": raw_response}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 40},
+        }
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertEqual(model.cardId, "sv06.5-001")
+        self.assertEqual(model.strategicEvaluator.primaryRole.value, "MAIN_ATTACKER")
+
 
 if __name__ == "__main__":
     unittest.main()
