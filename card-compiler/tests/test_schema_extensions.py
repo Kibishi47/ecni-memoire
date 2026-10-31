@@ -651,6 +651,37 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertEqual(model.cardId, "sv06.5-001")
         self.assertEqual(model.strategicEvaluator.primaryRole.value, "MAIN_ATTACKER")
 
+    def test_local_llm_compiler_oom_friendly_error(self):
+        from unittest.mock import MagicMock
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        compiler = LocalLLMCardCompiler()
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.side_effect = RuntimeError("llama_decode returned -3")
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            compiler.compile_card(bundle)
+
+        self.assertIn("Mémoire GPU/Metal saturée sur Apple Silicon", str(ctx.exception))
+        self.assertIn("LLM_PROVIDER=lm_studio", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
