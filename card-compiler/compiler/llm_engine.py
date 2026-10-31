@@ -468,11 +468,11 @@ IMPORTANT : Reste synthétique et concis dans `reasoningAnalysis` (environ 100 �
 }
 ```
 
-Réponds UNIQUEMENT avec l'objet JSON valide respectant strictement le schéma `LLMCompiledCardPart` en commençant par `reasoningAnalysis`. /no_think
+Réponds UNIQUEMENT avec l'objet JSON valide respectant strictement le schéma `LLMCompiledCardPart` en commençant par `reasoningAnalysis`.
 """
 
 
-def build_user_prompt(bundle: FetchedCardBundle) -> str:
+def build_user_prompt(bundle: FetchedCardBundle, disable_thinking: bool = False) -> str:
     """Construit le prompt utilisateur détaillé injectant toutes les données TCGdex (FR + EN + lignée)."""
     identity = bundle.identity
     pstats = bundle.pokemon_stats
@@ -528,6 +528,15 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
     if bundle.raw_en and bundle.raw_en.get("effect"):
         payload["effectEn"] = bundle.raw_en.get("effect")
 
+    no_think_directive = ""
+    if disable_thinking:
+        no_think_directive = (
+            "\n\nRÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
+            "Ne génère AUCUNE balise <think> ni raisonnement textuel libre avant le JSON. "
+            "Commence immédiatement ta réponse par le caractère '{' du JSON racine `LLMCompiledCardPart`.\n"
+            "<|think_off|>\n/no_think"
+        )
+
     return (
         "Compile la carte Pokémon TCG suivante en un objet JSON conforme au schéma `LLMCompiledCardPart`.\n"
         "Commence obligatoirement par remplir `reasoningAnalysis` avec ton analyse étape par étape.\n"
@@ -538,7 +547,7 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
         "ATTENTION : L'objet JSON racine doit obligatoirement être `LLMCompiledCardPart` avec `playableActions` et `strategicEvaluator`. Ne renvoie JAMAIS un `ActionEffect` (`primitive`) seul à la racine !\n\n"
         "DONNÉES TCGDEX DE LA CARTE :\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
-        "Produis uniquement l'objet JSON racine `LLMCompiledCardPart`. /no_think"
+        f"Produis uniquement l'objet JSON racine `LLMCompiledCardPart`.{no_think_directive}"
     )
 
 
@@ -615,9 +624,22 @@ class LocalLLMCardCompiler:
         n_ctx: int = 16384,
         n_gpu_layers: int = -1,
         verbose: bool = False,
+        disable_thinking: Optional[bool] = None,
     ) -> None:
         load_env_file()
         self.hf_token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+        env_disable_thinking = (
+            os.environ.get("LM_STUDIO_DISABLE_THINKING")
+            or os.environ.get("LM_STUDIO_NO_THINK")
+            or os.environ.get("NO_THINK")
+        )
+        if disable_thinking is not None:
+            self.disable_thinking = bool(disable_thinking)
+        elif env_disable_thinking:
+            self.disable_thinking = env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+        else:
+            self.disable_thinking = False
 
         if fast and tier == ModelTier.qwen3:
             self.tier = ModelTier.fast
@@ -735,6 +757,7 @@ class LocalLLMCardCompiler:
         max_retries: int = 2,
         stream: Optional[bool] = None,
         on_token: Optional[Callable[[int, float], None]] = None,
+        disable_thinking: Optional[bool] = None,
     ) -> EngineCardModel:
         """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`.
 
@@ -746,7 +769,8 @@ class LocalLLMCardCompiler:
 
         self.load_model_in_memory()
 
-        user_prompt = build_user_prompt(bundle)
+        is_thinking_disabled = self.disable_thinking if disable_thinking is None else disable_thinking
+        user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
         current_max_tokens = max_tokens
         last_error: Optional[Exception] = None
         compiled_part: Optional[LLMCompiledCardPart] = None
