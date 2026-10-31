@@ -66,15 +66,28 @@ def strip_ansi_codes(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)", "", text)
 
 
-# Modèle puissant configuré par défaut en mode normal pour la machine distante (GPU dédié)
-# Utilise la nomenclature standard LM Studio (kebab-case)
-DEFAULT_REMOTE_NORMAL_MODEL = "qwen2.5-coder-32b-instruct"
+# Modèle Qwen3.8 27B configuré par défaut en mode normal pour la machine distante (GPU dédié)
+# Utilise la dénomination officielle LM Studio : lmstudio-community/Qwen3.8-27B-GGUF
+DEFAULT_REMOTE_NORMAL_MODEL = "lmstudio-community/Qwen3.8-27B-GGUF"
 
 LM_STUDIO_TIER_MODELS: Dict[ModelTier, str] = {
-    ModelTier.qwen3: "qwen2.5-coder-32b-instruct",
-    ModelTier.max: "qwen2.5-coder-32b-instruct",
+    ModelTier.qwen3: "lmstudio-community/Qwen3.8-27B-GGUF",
+    ModelTier.max: "lmstudio-community/Qwen3.8-27B-GGUF",
     ModelTier.fast: "qwen2.5-coder-7b-instruct",
 }
+
+
+def normalize_lm_studio_model_name(name: Optional[str]) -> str:
+    """Normalise les identifiants vers le nom de dépôt officiel attendu par LM Studio."""
+    if not name:
+        return DEFAULT_REMOTE_NORMAL_MODEL
+    name_clean = strip_ansi_codes(name).strip()
+    nl = name_clean.lower().replace(" ", "").replace("_", "-")
+    # Reconnaissance de toutes les variantes de Qwen3.8 27B
+    if ("qwen3.8" in nl or "qwen38" in nl) and "27b" in nl:
+        if not name_clean.startswith("lmstudio-community/") and not name_clean.endswith("-GGUF"):
+            return "lmstudio-community/Qwen3.8-27B-GGUF"
+    return name_clean
 
 
 def extract_json_payload(text: str) -> str:
@@ -204,8 +217,24 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
     is_qwen_target = any(q in t_l for q in ["qwen", "qwen3.8", "qwen3", "qwen2.5", "qwen2"])
     qwen_cands = [c for c in candidates if "qwen" in c.lower()]
     if is_qwen_target and qwen_cands:
+        # Priorité absolue pour Qwen3.8 27B si demandé
+        if ("3.8" in t_l or "38" in t_l) and "27b" in t_l:
+            for c in qwen_cands:
+                cl = c.lower()
+                if ("3.8" in cl or "38" in cl) and "27b" in cl:
+                    return c
+            for c in qwen_cands:
+                cl = c.lower()
+                if "3.8" in cl or "38" in cl:
+                    return c
+
         # Recherche par taille demandée
-        if any(s in t_l for s in ["27b", "30b", "32b"]):
+        if "27b" in t_l:
+            for pref in ["27b", "28b", "30b", "32b", "14b", "7b"]:
+                for c in qwen_cands:
+                    if pref in c.lower():
+                        return c
+        elif any(s in t_l for s in ["30b", "32b"]):
             for pref in ["32b", "30b", "27b", "28b", "14b", "7b"]:
                 for c in qwen_cands:
                     if pref in c.lower():
@@ -294,11 +323,11 @@ class LMStudioCardCompiler:
 
         env_model = os.environ.get("LM_STUDIO_MODEL")
         if model_name:
-            self.model_name = model_name
+            self.model_name = normalize_lm_studio_model_name(model_name)
         elif env_model:
-            self.model_name = env_model
+            self.model_name = normalize_lm_studio_model_name(env_model)
         elif self.ssh_host:
-            # Sur machine distante : modèle plus puissant en mode normal (Qwen3.8-27B)
+            # Sur machine distante : Qwen3.8-27B en mode normal
             self.model_name = LM_STUDIO_TIER_MODELS.get(self.tier, DEFAULT_REMOTE_NORMAL_MODEL)
         else:
             self.model_name = LM_STUDIO_TIER_MODELS.get(self.tier, DEFAULT_REMOTE_NORMAL_MODEL)
@@ -603,25 +632,51 @@ class LMStudioCardCompiler:
         downloaded = self._get_remote_available_models()
         target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
         best_cand = find_best_model_candidate(downloaded, target_name)
-        model_to_load = best_cand or (downloaded[0] if downloaded else target_name)
 
-        if not model_to_load:
-            return
+        candidates_to_try: List[str] = []
+        if best_cand:
+            candidates_to_try.append(best_cand)
+        elif ("3.8" in target_name.lower() or "38" in target_name.lower()) and "27b" in target_name.lower():
+            # Essayer successivement les formats de dépôts officiels LM Studio pour Qwen3.8 27B
+            for cand in [
+                "lmstudio-community/Qwen3.8-27B-GGUF",
+                "qwen3.8-27b",
+                "Qwen3.8-27B-GGUF",
+                target_name,
+            ]:
+                if cand not in candidates_to_try:
+                    candidates_to_try.append(cand)
+        elif downloaded:
+            candidates_to_try.append(downloaded[0])
+        else:
+            canonical = normalize_lm_studio_model_name(target_name)
+            if canonical not in candidates_to_try:
+                candidates_to_try.append(canonical)
+            if target_name not in candidates_to_try:
+                candidates_to_try.append(target_name)
 
-        load_cmd = f"{self.cli_path} load {model_to_load} --gpu max -y"
-        load_code, _, load_err = self._run_ssh_command(load_cmd)
-        if load_code != 0 and ("--gpu" in load_err.lower() or "unknown option" in load_err.lower()):
-            load_cmd = f"{self.cli_path} load {model_to_load} -y"
+        last_err = ""
+        last_code = 1
+
+        for model_to_load in candidates_to_try:
+            load_cmd = f"{self.cli_path} load {model_to_load} --gpu max -y"
             load_code, _, load_err = self._run_ssh_command(load_cmd)
+            if load_code != 0 and ("--gpu" in load_err.lower() or "unknown option" in load_err.lower()):
+                load_cmd = f"{self.cli_path} load {model_to_load} -y"
+                load_code, _, load_err = self._run_ssh_command(load_cmd)
 
-        if load_code != 0:
-            avail_msg = f" Modèles disponibles détectés sur {self.ssh_target} : {', '.join(downloaded)}." if downloaded else " Aucun modèle téléchargé détecté."
-            raise RuntimeError(
-                f"Échec du chargement du modèle '{model_to_load}' dans LM Studio sur {self.ssh_target} (code {load_code}) : {load_err.strip()}.\n"
-                f"{avail_msg}\n"
-                f"Vérifiez le nom configuré dans LM_STUDIO_MODEL ou téléchargez un modèle via `lms get qwen2.5-coder-32b-instruct`."
-            )
-        self.model_name = model_to_load
+            if load_code == 0:
+                self.model_name = model_to_load
+                return
+            last_code = load_code
+            last_err = load_err
+
+        avail_msg = f" Modèles disponibles détectés sur {self.ssh_target} : {', '.join(downloaded)}." if downloaded else " Aucun modèle téléchargé détecté."
+        raise RuntimeError(
+            f"Échec du chargement du modèle '{candidates_to_try[0]}' dans LM Studio sur {self.ssh_target} (code {last_code}) : {last_err.strip()}.\n"
+            f"{avail_msg}\n"
+            f"Pour utiliser Qwen3.8 27B, vérifiez qu'il est présent dans LM Studio sous 'lmstudio-community/Qwen3.8-27B-GGUF' (ou exécutez `lms get lmstudio-community/Qwen3.8-27B-GGUF`)."
+        )
 
     def _load_local_model_via_cli(self) -> None:
         """Charge un modèle sur la machine locale via `lms load`."""
@@ -629,10 +684,30 @@ class LMStudioCardCompiler:
             downloaded = self._get_local_available_models()
             target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
             best_cand = find_best_model_candidate(downloaded, target_name)
-            model_to_load = best_cand or (downloaded[0] if downloaded else target_name)
-            if model_to_load:
-                subprocess.run([self.cli_path, "load", model_to_load, "--gpu", "max", "-y"], check=False)
-                self.model_name = model_to_load
+
+            candidates_to_try: List[str] = []
+            if best_cand:
+                candidates_to_try.append(best_cand)
+            elif ("3.8" in target_name.lower() or "38" in target_name.lower()) and "27b" in target_name.lower():
+                for cand in [
+                    "lmstudio-community/Qwen3.8-27B-GGUF",
+                    "qwen3.8-27b",
+                    "Qwen3.8-27B-GGUF",
+                    target_name,
+                ]:
+                    if cand not in candidates_to_try:
+                        candidates_to_try.append(cand)
+            elif downloaded:
+                candidates_to_try.append(downloaded[0])
+            else:
+                canonical = normalize_lm_studio_model_name(target_name)
+                candidates_to_try.append(canonical)
+
+            for cand in candidates_to_try:
+                res = subprocess.run([self.cli_path, "load", cand, "--gpu", "max", "-y"], capture_output=True, text=True, check=False)
+                if res.returncode == 0:
+                    self.model_name = cand
+                    break
         except Exception:
             pass
 

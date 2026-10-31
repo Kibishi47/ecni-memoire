@@ -105,11 +105,11 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(engine.ssh_password, "cli_passed_password")
         engine.close()
 
-    def test_remote_model_defaults_to_qwen_32b_in_normal_mode(self):
-        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler qwen2.5-coder-32b-instruct par défaut
+    def test_remote_model_defaults_to_qwen38_27b_in_normal_mode(self):
+        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler lmstudio-community/Qwen3.8-27B-GGUF par défaut
         with patch.dict("os.environ", {}, clear=True):
             compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal")
-            self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
+            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
             self.assertEqual(compiler.tier, ModelTier.qwen3)
 
             # Test des autres tiers sur hôte distant
@@ -117,7 +117,11 @@ class TestLMStudioCompiler(unittest.TestCase):
             self.assertEqual(compiler_fast.model_name, "qwen2.5-coder-7b-instruct")
 
             compiler_max = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.max)
-            self.assertEqual(compiler_max.model_name, "qwen2.5-coder-32b-instruct")
+            self.assertEqual(compiler_max.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
+
+            # Normalisation automatique de Qwen3.8-27B vers lmstudio-community/Qwen3.8-27B-GGUF
+            compiler_qwen38 = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="Qwen3.8-27B")
+            self.assertEqual(compiler_qwen38.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
 
             # Override explicite par argument ou variable d'environnement
             compiler_custom = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="custom-model-40b")
@@ -654,17 +658,21 @@ class TestLMStudioCompiler(unittest.TestCase):
     def test_find_best_model_candidate(self):
         cands = [
             "qwen2.5-coder-7b-instruct",
-            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+            "lmstudio-community/Qwen3.8-27B-GGUF",
             "mistral-7b-instruct",
         ]
-        # Recherche d'un modèle 27B / 30B / 32B puissant
+        # Recherche d'un modèle Qwen3.8 27B
         self.assertEqual(
             find_best_model_candidate(cands, "Qwen3.8-27B"),
-            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+            "lmstudio-community/Qwen3.8-27B-GGUF",
         )
         self.assertEqual(
-            find_best_model_candidate(cands, "qwen2.5-coder-32b-instruct"),
-            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+            find_best_model_candidate(cands, "qwen3.8-27b"),
+            "lmstudio-community/Qwen3.8-27B-GGUF",
+        )
+        self.assertEqual(
+            find_best_model_candidate(cands, "lmstudio-community/Qwen3.8-27B-GGUF"),
+            "lmstudio-community/Qwen3.8-27B-GGUF",
         )
         # Recherche exacte
         self.assertEqual(
@@ -683,12 +691,26 @@ class TestLMStudioCompiler(unittest.TestCase):
             if "ls --json" in cmd or "lms ls" in cmd:
                 return (1, "", "command not supported")
             if "find ~/.cache" in cmd:
-                return (0, "/home/eth/.cache/lm-studio/models/qwen2.5-coder-32b-instruct/model.gguf\n", "")
+                return (0, "/home/eth/.cache/lm-studio/models/lmstudio-community/Qwen3.8-27B-GGUF/model.gguf\n", "")
             return (0, "OK", "")
 
         with patch.object(compiler, "_run_ssh_command", side_effect=fake_run_ssh):
             models = compiler._get_remote_available_models()
-            self.assertIn("qwen2.5-coder-32b-instruct", models)
+            self.assertIn("lmstudio-community/Qwen3.8-27B-GGUF", models)
+        compiler.close()
+
+    def test_load_remote_model_loads_canonical_qwen38_27b(self):
+        compiler = LMStudioCardCompiler(
+            ssh_host="gpu-node.internal",
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        with patch.object(compiler, "_get_remote_available_models", return_value=[]), \
+             patch.object(compiler, "_run_ssh_command", return_value=(0, "Success", "")) as mock_ssh:
+            compiler._load_remote_model_via_cli()
+            # Doit tenter le chargement avec le nom de dépôt officiel LM Studio
+            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
+            mock_ssh.assert_called_with("lms load lmstudio-community/Qwen3.8-27B-GGUF --gpu max -y")
         compiler.close()
 
     def test_load_remote_model_prefers_downloaded_over_unverified_target(self):
@@ -697,12 +719,12 @@ class TestLMStudioCompiler(unittest.TestCase):
             model_name="non-existent-arbitrary-model",
             auto_start=False,
         )
-        with patch.object(compiler, "_get_remote_available_models", return_value=["qwen2.5-coder-32b-instruct"]), \
+        with patch.object(compiler, "_get_remote_available_models", return_value=["lmstudio-community/Qwen3.8-27B-GGUF"]), \
              patch.object(compiler, "_run_ssh_command", return_value=(0, "Success", "")) as mock_ssh:
             compiler._load_remote_model_via_cli()
             # Doit charger le modèle existant téléchargé et non la chaîne arbitraire
-            self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
-            mock_ssh.assert_called_with("lms load qwen2.5-coder-32b-instruct --gpu max -y")
+            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
+            mock_ssh.assert_called_with("lms load lmstudio-community/Qwen3.8-27B-GGUF --gpu max -y")
         compiler.close()
 
     @patch("time.sleep", return_value=None)
