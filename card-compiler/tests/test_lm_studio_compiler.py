@@ -1819,6 +1819,207 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(sent_payload["response_format"]["type"], "json_schema")
         self.assertNotEqual(sent_payload["response_format"]["type"], "json_object")
 
+    def test_cli_parallel_compilation_success(self):
+        import typer
+        from compiler.cli import _execute_run_pipeline, RunMode, FetcherProvider, LLMProvider
+        mock_engine = MagicMock()
+        mock_engine.load_model_in_memory.return_value = None
+        mock_engine.repo_id = "test-repo"
+        mock_engine.filename = "test-file"
+
+        def make_mock_card(cid, name):
+            m = MagicMock()
+            m.cardId = cid
+            m.identity.nameFr = name
+            m.identity.nameEn = name
+            m.subCategory = None
+            m.playableActions = []
+            m.strategicEvaluator.primaryRole.value = "MAIN_ATTACKER"
+            m.strategicEvaluator.inGameDeadCardConditions = []
+            m.compilationMetadata.tokensPerSecond = 25.0
+            m.compilationMetadata.completionTokens = 10
+            m.compilationMetadata.compilationTimeSeconds = 0.5
+            m.compilationMetadata.generationTimeSeconds = 0.4
+            m.compilationMetadata.modelRepoId = "test"
+            m.model_dump.return_value = {"cardId": cid, "name": name}
+            return m
+
+        def fake_compile(bundle, on_token=None):
+            if on_token:
+                on_token(10, 25.0)
+            return make_mock_card(bundle.card_id, bundle.identity.nameFr)
+
+        mock_engine.compile_card.side_effect = fake_compile
+
+        bundles = []
+        for i in range(1, 4):
+            b = MagicMock()
+            b.card_id = f"test-p-{i:03d}"
+            b.identity.nameFr = f"Carte {i}"
+            b.identity.nameEn = f"Card {i}"
+            bundles.append(b)
+
+        with patch("compiler.cli.create_compiler_engine", return_value=mock_engine), \
+             patch("compiler.cli.TCGdexFetcher") as mock_fetcher_cls, \
+             patch("compiler.cli.is_basic_energy", return_value=False), \
+             patch("compiler.cli.rebuild_consolidated_database", return_value=Path("data/cards_database.json")), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.write_text", return_value=None):
+            mock_fetcher = MagicMock()
+            async def _fake_fetch(*args, **kwargs):
+                return bundles
+            mock_fetcher.fetch_batch = _fake_fetch
+            mock_fetcher_cls.return_value = mock_fetcher
+
+            _execute_run_pipeline(
+                mode=RunMode.test,
+                test_flag=True,
+                standard_flag=False,
+                ids="test-p-001,test-p-002,test-p-003",
+                provider=FetcherProvider.sdk,
+                llm_provider=LLMProvider.lm_studio,
+                tier=ModelTier.qwen3,
+                fast=False,
+                force=True,
+                limit=None,
+                parallel=2,
+            )
+
+            self.assertEqual(mock_engine.compile_card.call_count, 3)
+            mock_engine.close.assert_called_once()
+
+    def test_cli_parallel_compilation_stops_on_error(self):
+        import typer
+        from compiler.cli import _execute_run_pipeline, RunMode, FetcherProvider, LLMProvider
+        mock_engine = MagicMock()
+        mock_engine.load_model_in_memory.return_value = None
+        mock_engine.repo_id = "test-repo"
+        mock_engine.filename = "test-file"
+
+        def make_mock_card(cid, name):
+            m = MagicMock()
+            m.cardId = cid
+            m.identity.nameFr = name
+            m.identity.nameEn = name
+            m.subCategory = None
+            m.playableActions = []
+            m.strategicEvaluator.primaryRole.value = "MAIN_ATTACKER"
+            m.strategicEvaluator.inGameDeadCardConditions = []
+            m.compilationMetadata.tokensPerSecond = 25.0
+            m.compilationMetadata.completionTokens = 10
+            m.compilationMetadata.compilationTimeSeconds = 0.5
+            m.compilationMetadata.generationTimeSeconds = 0.4
+            m.compilationMetadata.modelRepoId = "test"
+            m.model_dump.return_value = {"cardId": cid, "name": name}
+            return m
+
+        def fail_on_card2(bundle, on_token=None):
+            if bundle.card_id == "test-fail-002":
+                raise RuntimeError("Parallel worker error")
+            return make_mock_card(bundle.card_id, bundle.identity.nameFr)
+
+        mock_engine.compile_card.side_effect = fail_on_card2
+
+        bundles = []
+        for i in range(1, 4):
+            b = MagicMock()
+            b.card_id = f"test-fail-{i:03d}"
+            b.identity.nameFr = f"Fail Carte {i}"
+            b.identity.nameEn = f"Fail Card {i}"
+            bundles.append(b)
+
+        with patch("compiler.cli.create_compiler_engine", return_value=mock_engine), \
+             patch("compiler.cli.TCGdexFetcher") as mock_fetcher_cls, \
+             patch("compiler.cli.is_basic_energy", return_value=False), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.write_text", return_value=None):
+            mock_fetcher = MagicMock()
+            async def _fake_fetch(*args, **kwargs):
+                return bundles
+            mock_fetcher.fetch_batch = _fake_fetch
+            mock_fetcher_cls.return_value = mock_fetcher
+
+            with self.assertRaises(typer.Exit) as ctx:
+                _execute_run_pipeline(
+                    mode=RunMode.test,
+                    test_flag=True,
+                    standard_flag=False,
+                    ids="test-fail-001,test-fail-002,test-fail-003",
+                    provider=FetcherProvider.sdk,
+                    llm_provider=LLMProvider.lm_studio,
+                    tier=ModelTier.qwen3,
+                    fast=False,
+                    force=True,
+                    limit=None,
+                    parallel=2,
+                )
+            self.assertEqual(ctx.exception.exit_code, 1)
+            mock_engine.close.assert_called_once()
+
+    def test_cli_parallel_warning_with_local_provider(self):
+        from compiler.cli import _execute_run_pipeline, RunMode, FetcherProvider, LLMProvider
+        mock_engine = MagicMock()
+        mock_engine.load_model_in_memory.return_value = None
+        mock_engine.repo_id = "local-repo"
+        mock_engine.filename = "local-file"
+
+        def make_mock_card(cid, name):
+            m = MagicMock()
+            m.cardId = cid
+            m.identity.nameFr = name
+            m.identity.nameEn = name
+            m.subCategory = None
+            m.playableActions = []
+            m.strategicEvaluator.primaryRole.value = "ATTACKER"
+            m.strategicEvaluator.inGameDeadCardConditions = []
+            m.compilationMetadata.tokensPerSecond = 20.0
+            m.compilationMetadata.completionTokens = 8
+            m.compilationMetadata.compilationTimeSeconds = 0.4
+            m.compilationMetadata.generationTimeSeconds = 0.3
+            m.compilationMetadata.modelRepoId = "local"
+            m.model_dump.return_value = {"cardId": cid, "name": name}
+            return m
+
+        bundles = []
+        b = MagicMock()
+        b.card_id = "test-loc-001"
+        b.identity.nameFr = "Local 1"
+        b.identity.nameEn = "Local 1"
+        bundles.append(b)
+
+        with patch("compiler.cli.create_compiler_engine", return_value=mock_engine), \
+             patch("compiler.cli.TCGdexFetcher") as mock_fetcher_cls, \
+             patch("compiler.cli.is_basic_energy", return_value=False), \
+             patch("compiler.cli.rebuild_consolidated_database", return_value=Path("data/cards_database.json")), \
+             patch("compiler.cli.console.print") as mock_print, \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.write_text", return_value=None):
+            mock_fetcher = MagicMock()
+            async def _fake_fetch(*args, **kwargs):
+                return bundles
+            mock_fetcher.fetch_batch = _fake_fetch
+            mock_fetcher_cls.return_value = mock_fetcher
+
+            mock_engine.compile_card.return_value = make_mock_card("test-loc-001", "Local 1")
+
+            _execute_run_pipeline(
+                mode=RunMode.test,
+                test_flag=True,
+                standard_flag=False,
+                ids="test-loc-001",
+                provider=FetcherProvider.sdk,
+                llm_provider=LLMProvider.local,
+                tier=ModelTier.qwen3,
+                fast=False,
+                force=True,
+                limit=None,
+                parallel=3,
+            )
+
+            printed_messages = [str(call_args[0][0]) for call_args in mock_print.call_args_list if call_args[0]]
+            has_warning = any("La parallélisation (--parallel > 1) n'est pas supportée avec le moteur 'local'" in m for m in printed_messages)
+            self.assertTrue(has_warning)
+
 
 if __name__ == "__main__":
     unittest.main()

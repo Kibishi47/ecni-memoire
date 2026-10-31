@@ -15,12 +15,15 @@ Commandes disponibles :
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
+import queue
+import threading
 from collections import Counter
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import httpx
 import typer
@@ -37,6 +40,7 @@ from rich.progress import (
 )
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from compiler.llm_engine import (
     DEFAULT_MODEL_FILENAME,
@@ -52,9 +56,19 @@ from compiler.schemas import CardSubCategory, EngineCardModel
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import (
     TEST_CARD_IDS,
+    FetchedCardBundle,
     FetcherProvider,
     TCGdexFetcher,
 )
+
+
+class ConditionalBarColumn(BarColumn):
+    """BarColumn conditionnelle qui n'affiche une barre de progression que si le total est défini."""
+
+    def render(self, task: Any) -> Any:
+        if task.total is None:
+            return Text("")
+        return super().render(task)
 
 app = typer.Typer(
     name="pokemon-tcg-compiler",
@@ -453,6 +467,7 @@ def _execute_run_pipeline(
     ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
+    parallel: int = 1,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -462,6 +477,23 @@ def _execute_run_pipeline(
         effective_mode = RunMode.test.value
 
     effective_tier = ModelTier.fast if (fast and tier == ModelTier.qwen3) else tier
+
+    # Validation et préparation du parallélisme
+    requested_parallel = max(1, parallel)
+    effective_parallel = requested_parallel
+    if requested_parallel > 1 and llm_provider == LLMProvider.local:
+        console.print(
+            "[yellow]⚠️ La parallélisation (--parallel > 1) n'est pas supportée avec le moteur 'local' "
+            "(Apple Metal in-memory KV-cache partagé). L'exécution se poursuit en mode séquentiel (parallel=1). "
+            "Utilisez '--llm-provider lm_studio' pour la parallélisation multi-slots.[/yellow]"
+        )
+        effective_parallel = 1
+
+    parallel_display = (
+        f"{requested_parallel} slots en parallèle"
+        if requested_parallel > 1
+        else "1 (séquentiel)"
+    )
 
     custom_ids: Optional[List[str]] = None
     if ids:
@@ -504,7 +536,8 @@ def _execute_run_pipeline(
                 f"• [bold]Tunnel SSH[/bold] : Actif (port local {engine_preview.local_port} -> distant {engine_preview.remote_port})\n"
                 f"• [bold]URL API Locale[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
                 f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
-                f"• [bold]Mode Thinking[/bold] : {thinking_display}"
+                f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
+                f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
             )
         else:
             conn_type = f"Distant ({engine_preview.remote_host})" if engine_preview.remote_host and engine_preview.remote_host not in {"127.0.0.1", "localhost"} else "Local"
@@ -512,7 +545,8 @@ def _execute_run_pipeline(
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio ({conn_type} REST direct)[/bold magenta]\n"
                 f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
                 f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
-                f"• [bold]Mode Thinking[/bold] : {thinking_display}"
+                f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
+                f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
             )
     else:
         engine_preview = LocalLLMCardCompiler(
@@ -640,83 +674,196 @@ def _execute_run_pipeline(
                 f"[green]✓[/green] Moteur LLM [bold]{compiler_engine.repo_id}[/bold] ([cyan]{compiler_engine.filename}[/cyan]) prêt."
             )
 
+            actual_parallel = max(1, min(effective_parallel, len(bundles_to_compile)))
             failed_cards: List[Tuple[str, str, str]] = []
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
+                ConditionalBarColumn(),
                 TaskProgressColumn(),
                 TimeElapsedColumn(),
                 console=console,
             ) as progress:
-                task_id = progress.add_task(
-                    "[cyan]Compilation GBNF des cartes...",
-                    total=len(bundles_to_compile),
-                )
-                for bundle in bundles_to_compile:
-                    progress.update(
-                        task_id,
-                        description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
+                if actual_parallel <= 1:
+                    task_id = progress.add_task(
+                        "[cyan]Compilation GBNF des cartes...",
+                        total=len(bundles_to_compile),
                     )
+                    for bundle in bundles_to_compile:
+                        progress.update(
+                            task_id,
+                            description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
+                        )
 
-                    def make_token_callback(b=bundle):
-                        def on_live_token(tok_count: int, live_tps: float) -> None:
-                            tps_display = (
-                                f"[bold green]{live_tps:.1f} t/s[/bold green] "
-                                if live_tps > 0
-                                else "[dim yellow]calcul...[/dim yellow] "
+                        def make_token_callback(b=bundle):
+                            def on_live_token(tok_count: int, live_tps: float) -> None:
+                                tps_display = (
+                                    f"[bold green]{live_tps:.1f} t/s[/bold green] "
+                                    if live_tps > 0
+                                    else "[dim yellow]calcul...[/dim yellow] "
+                                )
+                                progress.update(
+                                    task_id,
+                                    description=(
+                                        f"[cyan]Compilation de [bold]{b.card_id}[/bold] ({b.identity.nameFr})... "
+                                        f"{tps_display}[dim]({tok_count} tok)[/dim]"
+                                    ),
+                                )
+                            return on_live_token
+
+                        try:
+                            engine_card = compiler_engine.compile_card(
+                                bundle,
+                                on_token=make_token_callback(bundle),
                             )
+                            out_path = compiled_dir / f"{bundle.card_id}.json"
+                            out_path.write_text(
+                                json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                                encoding="utf-8",
+                            )
+                            compiled_results.append(engine_card)
+
+                            # Affichage du débit et de la durée dès la fin de compilation de chaque carte
+                            meta = engine_card.compilationMetadata
+                            tps_text = (
+                                f" • [cyan]{meta.tokensPerSecond:.1f} t/s[/cyan]"
+                                if meta and meta.tokensPerSecond is not None
+                                else ""
+                            )
+                            tok_count = (
+                                f" ({meta.completionTokens} tokens)"
+                                if meta and meta.completionTokens is not None
+                                else ""
+                            )
+                            elapsed_text = f"{meta.compilationTimeSeconds:.2f}s" if meta else ""
+                            gen_text = (
+                                f" [dim](gén: {meta.generationTimeSeconds:.2f}s)[/dim]"
+                                if meta and meta.generationTimeSeconds is not None
+                                else ""
+                            )
+                            progress.console.print(
+                                f"  [green]✓[/green] [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{gen_text}{tok_count}{tps_text}"
+                            )
+                        except Exception as card_err:
+                            console.print(
+                                f"\n[bold red]✗ Erreur critique lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
+                            )
+                            failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
+                            # Arrêt immédiat dès la première erreur selon la directive utilisateur
+                            raise typer.Exit(code=1)
+                        finally:
+                            progress.advance(task_id)
+                else:
+                    # Mode multi-slots parallèle : affichage simultané et temps réel des X cartes
+                    overall_task = progress.add_task(
+                        f"[bold cyan]Compilation de {len(bundles_to_compile)} cartes ({actual_parallel} slots en parallèle)...[/bold cyan]",
+                        total=len(bundles_to_compile),
+                    )
+                    slot_tasks = [
+                        progress.add_task(f"  [dim]Slot {s + 1} : En attente...[/dim]", total=None)
+                        for s in range(actual_parallel)
+                    ]
+
+                    slot_queue: queue.Queue[int] = queue.Queue()
+                    for s in range(actual_parallel):
+                        slot_queue.put(s)
+
+                    compiled_lock = threading.Lock()
+                    failed_lock = threading.Lock()
+                    abort_event = threading.Event()
+
+                    def compile_single_bundle(b: FetchedCardBundle) -> None:
+                        if abort_event.is_set():
+                            progress.advance(overall_task, 1)
+                            return
+
+                        slot_id = slot_queue.get()
+                        try:
+                            if abort_event.is_set():
+                                return
+
+                            progress.reset(
+                                slot_tasks[slot_id],
+                                description=f"  [cyan]Slot {slot_id + 1} : [bold]{b.card_id}[/bold] ({b.identity.nameFr})... [dim yellow]attente tokens...[/dim yellow][/cyan]",
+                                total=None,
+                                visible=True,
+                            )
+
+                            def on_slot_token(tok_count: int, live_tps: float) -> None:
+                                tps_display = (
+                                    f"[bold green]{live_tps:.1f} t/s[/bold green]"
+                                    if live_tps > 0
+                                    else "[dim yellow]calcul...[/dim yellow]"
+                                )
+                                progress.update(
+                                    slot_tasks[slot_id],
+                                    description=(
+                                        f"  [cyan]Slot {slot_id + 1} : [bold]{b.card_id}[/bold] ({b.identity.nameFr}) "
+                                        f"[dim]•[/dim] {tps_display} [dim]({tok_count} tok)[/dim][/cyan]"
+                                    ),
+                                )
+
+                            engine_card = compiler_engine.compile_card(
+                                b,
+                                on_token=on_slot_token,
+                            )
+                            out_path = compiled_dir / f"{b.card_id}.json"
+                            out_path.write_text(
+                                json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                                encoding="utf-8",
+                            )
+
+                            with compiled_lock:
+                                compiled_results.append(engine_card)
+
+                            meta = engine_card.compilationMetadata
+                            tps_text = (
+                                f" • [cyan]{meta.tokensPerSecond:.1f} t/s[/cyan]"
+                                if meta and meta.tokensPerSecond is not None
+                                else ""
+                            )
+                            tok_count = (
+                                f" ({meta.completionTokens} tokens)"
+                                if meta and meta.completionTokens is not None
+                                else ""
+                            )
+                            elapsed_text = f"{meta.compilationTimeSeconds:.2f}s" if meta else ""
+                            gen_text = (
+                                f" [dim](gén: {meta.generationTimeSeconds:.2f}s)[/dim]"
+                                if meta and meta.generationTimeSeconds is not None
+                                else ""
+                            )
+                            progress.console.print(
+                                f"  [green]✓[/green] [bold]{b.card_id}[/bold] ({b.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{gen_text}{tok_count}{tps_text} [dim](Slot {slot_id + 1})[/dim]"
+                            )
+                        except Exception as card_err:
+                            abort_event.set()
+                            with failed_lock:
+                                failed_cards.append((b.card_id, b.identity.nameFr, str(card_err)))
+                            progress.console.print(
+                                f"\n[bold red]✗ Erreur critique lors de la compilation de {b.card_id} ({b.identity.nameFr}) sur Slot {slot_id + 1}:[/bold red] {card_err}"
+                            )
+                        finally:
                             progress.update(
-                                task_id,
-                                description=(
-                                    f"[cyan]Compilation de [bold]{b.card_id}[/bold] ({b.identity.nameFr})... "
-                                    f"{tps_display}[dim]({tok_count} tok)[/dim]"
-                                ),
+                                slot_tasks[slot_id],
+                                description=f"  [dim]Slot {slot_id + 1} : En attente...[/dim]",
                             )
-                        return on_live_token
+                            progress.advance(overall_task, 1)
+                            slot_queue.put(slot_id)
 
-                    try:
-                        engine_card = compiler_engine.compile_card(
-                            bundle,
-                            on_token=make_token_callback(bundle),
-                        )
-                        out_path = compiled_dir / f"{bundle.card_id}.json"
-                        out_path.write_text(
-                            json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
-                        compiled_results.append(engine_card)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=actual_parallel) as executor:
+                        futures = [executor.submit(compile_single_bundle, bundle) for bundle in bundles_to_compile]
+                        for fut in concurrent.futures.as_completed(futures):
+                            try:
+                                fut.result()
+                            except Exception:
+                                pass
 
-                        # Affichage du débit et de la durée dès la fin de compilation de chaque carte
-                        meta = engine_card.compilationMetadata
-                        tps_text = (
-                            f" • [cyan]{meta.tokensPerSecond:.1f} t/s[/cyan]"
-                            if meta and meta.tokensPerSecond is not None
-                            else ""
-                        )
-                        tok_count = (
-                            f" ({meta.completionTokens} tokens)"
-                            if meta and meta.completionTokens is not None
-                            else ""
-                        )
-                        elapsed_text = f"{meta.compilationTimeSeconds:.2f}s" if meta else ""
-                        gen_text = (
-                            f" [dim](gén: {meta.generationTimeSeconds:.2f}s)[/dim]"
-                            if meta and meta.generationTimeSeconds is not None
-                            else ""
-                        )
-                        progress.console.print(
-                            f"  [green]✓[/green] [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{gen_text}{tok_count}{tps_text}"
-                        )
-                    except Exception as card_err:
-                        console.print(
-                            f"\n[bold red]✗ Erreur critique lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
-                        )
-                        failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
-                        # Arrêt immédiat dès la première erreur selon la directive utilisateur
+                    for s_task in slot_tasks:
+                        progress.update(s_task, visible=False)
+
+                    if failed_cards:
                         raise typer.Exit(code=1)
-                    finally:
-                        progress.advance(task_id)
 
             if failed_cards:
                 console.print(
@@ -920,6 +1067,14 @@ def run_command(
         envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
         help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
+    parallel: int = typer.Option(
+        1,
+        "--parallel",
+        "-j",
+        "--concurrency",
+        envvar=["LM_STUDIO_PARALLEL", "PARALLEL", "CONCURRENCY", "COMPILER_CONCURRENCY"],
+        help="Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
@@ -944,6 +1099,7 @@ def run_command(
         ssh_password=ssh_password,
         disable_thinking=no_think,
         thinking=effective_thinking,
+        parallel=parallel,
     )
 
 
@@ -1002,6 +1158,14 @@ def compile_alias(
         envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
         help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
+    parallel: int = typer.Option(
+        1,
+        "--parallel",
+        "-j",
+        "--concurrency",
+        envvar=["LM_STUDIO_PARALLEL", "PARALLEL", "CONCURRENCY", "COMPILER_CONCURRENCY"],
+        help="Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement).",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
@@ -1026,6 +1190,7 @@ def compile_alias(
         ssh_password=ssh_password,
         disable_thinking=no_think,
         thinking=effective_thinking,
+        parallel=parallel,
     )
 
 
