@@ -90,8 +90,22 @@ def normalize_lm_studio_model_name(name: Optional[str]) -> str:
     return name_clean
 
 
+def is_valid_json_object(text: str) -> bool:
+    """Vérifie si la chaîne est un objet JSON syntaxiquement valide et complet (non tronqué)."""
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped.startswith("{") or not stripped.endswith("}"):
+        return False
+    try:
+        parsed = json.loads(stripped)
+        return isinstance(parsed, dict) and len(parsed) > 0
+    except Exception:
+        return False
+
+
 def extract_json_payload(text: str) -> str:
-    """Extrait et nettoie le JSON généré par le LLM (retrait balises <think>, markdown fences, et isolation de l'objet JSON racine)."""
+    """Extrait et nettoie le JSON généré par le LLM en isolant l'objet `LLMCompiledCardPart` racine."""
     if not text:
         return ""
     text = text.strip()
@@ -107,17 +121,54 @@ def extract_json_payload(text: str) -> str:
         else:
             cleaned = ""
 
-    # 3. Extraction du bloc markdown ```json ... ``` ou ``` ... ```
-    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
-    candidate = md_match.group(1).strip() if md_match else cleaned
+    # 3. Extraction de tous les blocs markdown ```json ... ``` ou ``` ... ```
+    md_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    candidates: List[str] = [b.strip() for b in md_blocks if b.strip()]
+    if not candidates:
+        candidates = [cleaned]
+    else:
+        candidates.append(cleaned)
 
-    # 4. Recherche de l'objet JSON racine délimité par premier '{' et dernier '}'
-    first_brace = candidate.find("{")
-    last_brace = candidate.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        return candidate[first_brace : last_brace + 1].strip()
+    # 4. Recherche prioritaire de l'objet racine complet LLMCompiledCardPart
+    # (doit contenir 'playableActions' ou 'strategicEvaluator' et ne pas être un effet isolé)
+    card_candidate = ""
+    fallback_candidate = ""
 
-    return candidate
+    for cand in candidates:
+        first_brace = cand.find("{")
+        if first_brace == -1:
+            continue
+        last_brace = cand.rfind("}")
+        while last_brace > first_brace:
+            sub = cand[first_brace : last_brace + 1].strip()
+            try:
+                val = json.loads(sub)
+                if isinstance(val, dict):
+                    # Cas idéal : l'objet racine complet LLMCompiledCardPart
+                    if any(k in val for k in ("playableActions", "strategicEvaluator", "reasoningAnalysis")):
+                        if "primitive" not in val and "actionId" not in val:
+                            return sub
+                        elif not card_candidate:
+                            card_candidate = sub
+                    elif not fallback_candidate:
+                        fallback_candidate = sub
+            except Exception:
+                pass
+            last_brace = cand.rfind("}", first_brace, last_brace)
+
+    if card_candidate:
+        return card_candidate
+    if fallback_candidate:
+        return fallback_candidate
+
+    # Découpe brute de secours
+    for cand in candidates:
+        first_brace = cand.find("{")
+        last_brace = cand.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            return cand[first_brace : last_brace + 1].strip()
+
+    return ""
 
 
 def parse_lms_ls_output(stdout: str) -> List[str]:
@@ -816,13 +867,13 @@ class LMStudioCardCompiler:
                                         choices[0]["message"]["content"] = cand_json
 
                         cleaned_candidate = extract_json_payload(content)
-                        if cleaned_candidate.startswith("{") and cleaned_candidate.endswith("}"):
+                        if is_valid_json_object(cleaned_candidate):
                             data = data_candidate
                             if fmt != "json_schema":
                                 self._use_json_schema_format = False
                             break
                         else:
-                            # Le format actuel a produit une réponse vide ou sans JSON (conflit GBNF/thinking)
+                            # Le format actuel a produit une réponse vide, tronquée ou invalide (conflit GBNF/thinking)
                             if fmt == "json_schema":
                                 self._use_json_schema_format = False
                             continue
@@ -932,9 +983,61 @@ class LMStudioCardCompiler:
                     break
                 except Exception as val_err:
                     last_error = val_err
+                    self._use_json_schema_format = False  # Désactiver json_schema si validation échoue
                     try:
                         raw_dict = json.loads(cleaned_json)
                         if isinstance(raw_dict, dict):
+                            # Cas A : Le LLM a renvoyé uniquement un ActionEffect à la racine (primitive, etc.)
+                            if "primitive" in raw_dict and "playableActions" not in raw_dict:
+                                attack_label = "Attaque 1"
+                                if bundle.raw_fr.get("attacks"):
+                                    attack_label = bundle.raw_fr["attacks"][0].get("name") or "Attaque 1"
+                                raw_dict = {
+                                    "reasoningAnalysis": f"Encapsulation automatique de l'effet d'attaque '{raw_dict.get('primitive')}' pour {bundle.card_id}.",
+                                    "category": bundle.identity.category.value,
+                                    "subCategory": bundle.identity.subCategory.value,
+                                    "playableActions": [
+                                        {
+                                            "actionId": "attack_1",
+                                            "label": attack_label,
+                                            "sourceType": "ATTACK",
+                                            "timing": "END_OF_TURN_ATTACK",
+                                            "canUseTurn1GoingFirst": False,
+                                            "canUseTurn1GoingSecond": True,
+                                            "preconditions": [],
+                                            "costs": [],
+                                            "effects": [raw_dict],
+                                        }
+                                    ],
+                                    "strategicEvaluator": {
+                                        "primaryRole": "MAIN_ATTACKER",
+                                        "intrinsicBaseScore": 50,
+                                        "discardPriorityWhenDead": 70,
+                                        "holdForNextTurnBonus": 10,
+                                        "decklistSynergyRequirements": [],
+                                        "inGameDeadCardConditions": [],
+                                        "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                                    },
+                                }
+
+                            # Cas B : Le LLM a renvoyé directement une PlayableAction à la racine (actionId, etc.)
+                            elif "actionId" in raw_dict and "playableActions" not in raw_dict:
+                                raw_dict = {
+                                    "reasoningAnalysis": f"Encapsulation automatique de l'action '{raw_dict.get('actionId')}' pour {bundle.card_id}.",
+                                    "category": bundle.identity.category.value,
+                                    "subCategory": bundle.identity.subCategory.value,
+                                    "playableActions": [raw_dict],
+                                    "strategicEvaluator": {
+                                        "primaryRole": "MAIN_ATTACKER",
+                                        "intrinsicBaseScore": 50,
+                                        "discardPriorityWhenDead": 70,
+                                        "holdForNextTurnBonus": 10,
+                                        "decklistSynergyRequirements": [],
+                                        "inGameDeadCardConditions": [],
+                                        "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                                    },
+                                }
+
                             strat = raw_dict.get("strategicEvaluator")
                             if isinstance(strat, dict):
                                 weights = strat.get("turnPhaseWeights")

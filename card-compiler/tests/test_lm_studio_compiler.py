@@ -589,6 +589,80 @@ class TestLMStudioCompiler(unittest.TestCase):
             extract_json_payload('Voici la carte générée :\n{"a": 1}\nBonne compilation !'),
             '{"a": 1}',
         )
+        # 9. Blocs multiples : ignore l'effet isolé et extrait la carte complète
+        multi_block = (
+            'Effet isolé :\n```json\n{"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": 10}\n```\n'
+            'Carte complète :\n```json\n{"reasoningAnalysis": "test", "playableActions": []}\n```'
+        )
+        self.assertEqual(
+            extract_json_payload(multi_block),
+            '{"reasoningAnalysis": "test", "playableActions": []}',
+        )
+
+    @patch("httpx.Client")
+    def test_compile_card_recovers_when_llm_outputs_isolated_action_effect(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_host="127.0.0.1",
+            remote_port=1234,
+            use_tunnel=False,
+            model_name="qwen3.8-27b",
+        )
+        compiler._ready = True
+
+        isolated_effect_json = {
+            "primitive": "DEAL_DAMAGE_ACTIVE",
+            "sourceZone": "ACTIVE",
+            "targetZone": "ACTIVE",
+            "count": 1,
+            "upTo": False,
+            "targetFilter": None,
+            "baseDamage": 10,
+            "damageScalingPerOpponentPrizeTaken": None,
+        }
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(isolated_effect_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 50},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {
+                "id": "sv06.5-001",
+                "name": "Statitik",
+                "category": "Pokémon",
+                "stage": "Base",
+                "hp": 40,
+                "types": ["Plante"],
+                "attacks": [{"name": "Esquive Éclaboussante", "damage": 10, "cost": ["Plante"]}],
+            },
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001", "attacks": [{"name": "Esquive Éclaboussante"}]},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertIsInstance(model, EngineCardModel)
+        self.assertEqual(model.cardId, "sv06.5-001")
+        self.assertEqual(len(model.playableActions), 1)
+        self.assertEqual(model.playableActions[0].effects[0].primitive.value, "DEAL_DAMAGE_ACTIVE")
 
     @patch("httpx.Client")
     def test_load_model_in_memory_auto_detects_server_model(self, mock_client_cls):
