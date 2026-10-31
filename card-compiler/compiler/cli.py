@@ -661,11 +661,16 @@ def _execute_run_pipeline(
 
                     def make_token_callback(b=bundle):
                         def on_live_token(tok_count: int, live_tps: float) -> None:
+                            tps_display = (
+                                f"[bold green]{live_tps:.1f} t/s[/bold green] "
+                                if live_tps > 0
+                                else "[dim yellow]calcul...[/dim yellow] "
+                            )
                             progress.update(
                                 task_id,
                                 description=(
                                     f"[cyan]Compilation de [bold]{b.card_id}[/bold] ({b.identity.nameFr})... "
-                                    f"[bold green]{live_tps:.1f} t/s[/bold green] [dim]({tok_count} tok)[/dim]"
+                                    f"{tps_display}[dim]({tok_count} tok)[/dim]"
                                 ),
                             )
                         return on_live_token
@@ -695,8 +700,13 @@ def _execute_run_pipeline(
                             else ""
                         )
                         elapsed_text = f"{meta.compilationTimeSeconds:.2f}s" if meta else ""
+                        gen_text = (
+                            f" [dim](gén: {meta.generationTimeSeconds:.2f}s)[/dim]"
+                            if meta and meta.generationTimeSeconds is not None
+                            else ""
+                        )
                         progress.console.print(
-                            f"  [green]✓[/green] [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{tok_count}{tps_text}"
+                            f"  [green]✓[/green] [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{gen_text}{tok_count}{tps_text}"
                         )
                     except Exception as card_err:
                         console.print(
