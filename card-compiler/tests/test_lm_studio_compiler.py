@@ -13,6 +13,8 @@ from compiler.lm_studio_compiler import (
     LMStudioCardCompiler,
     extract_json_payload,
     find_available_port,
+    find_best_model_candidate,
+    parse_lms_ls_output,
 )
 from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel
 
@@ -624,6 +626,122 @@ class TestLMStudioCompiler(unittest.TestCase):
             compiler.compile_card(bundle, max_retries=0)
 
         self.assertIn("Model 'test-model' is not loaded", str(ctx.exception))
+        compiler.close()
+
+    def test_parse_lms_ls_output(self):
+        table_output = """
+┌──────────────────────────────────────────────┬─────────────┬───────────┐
+│ Model                                        │ Size        │ Format    │
+├──────────────────────────────────────────────┼─────────────┼───────────┤
+│ qwen2.5-coder-7b-instruct                    │ 4.68 GB     │ GGUF      │
+│ bartowski/qwen2.5-coder-32b-instruct-gguf    │ 19.8 GB     │ GGUF      │
+└──────────────────────────────────────────────┴─────────────┴───────────┘
+"""
+        parsed = parse_lms_ls_output(table_output)
+        self.assertEqual(parsed, ["qwen2.5-coder-7b-instruct", "bartowski/qwen2.5-coder-32b-instruct-gguf"])
+
+        json_out = json.dumps([{"id": "model-1"}, {"name": "model-2"}])
+        self.assertEqual(parse_lms_ls_output(json_out), ["model-1", "model-2"])
+
+    def test_find_best_model_candidate(self):
+        cands = [
+            "qwen2.5-coder-7b-instruct",
+            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+            "mistral-7b-instruct",
+        ]
+        # Recherche d'un modèle 27B / 30B / 32B puissant
+        self.assertEqual(
+            find_best_model_candidate(cands, "Qwen3.8-27B"),
+            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+        )
+        # Recherche exacte
+        self.assertEqual(
+            find_best_model_candidate(cands, "qwen2.5-coder-7b-instruct"),
+            "qwen2.5-coder-7b-instruct",
+        )
+        # Fallback premier
+        self.assertEqual(
+            find_best_model_candidate(cands, "unknown-model"),
+            "qwen2.5-coder-7b-instruct",
+        )
+
+    @patch("time.sleep", return_value=None)
+    @patch("httpx.Client")
+    def test_load_model_in_memory_auto_loads_via_rest_when_no_active_model(self, mock_client_cls, mock_sleep):
+        # 1. /v1/models retourne vide au début
+        empty_models_resp = MagicMock()
+        empty_models_resp.is_success = True
+        empty_models_resp.status_code = 200
+        empty_models_resp.json.return_value = {"data": []}
+
+        # 2. /api/v1/models retourne la liste des modèles téléchargés
+        downloaded_resp = MagicMock()
+        downloaded_resp.is_success = True
+        downloaded_resp.status_code = 200
+        downloaded_resp.json.return_value = {
+            "data": [{"id": "qwen2.5-coder-32b-instruct"}]
+        }
+
+        # 3. /api/v1/models/load réussit
+        load_resp = MagicMock()
+        load_resp.is_success = True
+        load_resp.status_code = 200
+        load_resp.json.return_value = {"status": "loaded"}
+
+        # 4. Le polling /v1/models retourne maintenant le modèle chargé
+        loaded_models_resp = MagicMock()
+        loaded_models_resp.is_success = True
+        loaded_models_resp.status_code = 200
+        loaded_models_resp.json.return_value = {
+            "data": [{"id": "qwen2.5-coder-32b-instruct"}]
+        }
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.get.side_effect = [
+            empty_models_resp,    # GET /v1/models initial
+            downloaded_resp,      # GET /api/v1/models
+            loaded_models_resp,   # Polling GET /v1/models
+        ]
+        mock_client.post.return_value = load_resp  # POST /api/v1/models/load
+        mock_client_cls.return_value = mock_client
+
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        compiler.load_model_in_memory()
+        self.assertTrue(compiler._ready)
+        self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
+        compiler.close()
+
+    @patch("time.sleep", return_value=None)
+    @patch("httpx.Client")
+    def test_load_model_in_memory_raises_informative_error_when_no_model(self, mock_client_cls, mock_sleep):
+        empty_resp = MagicMock()
+        empty_resp.is_success = True
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"data": []}
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.get.return_value = empty_resp
+        mock_client.post.return_value = MagicMock(is_success=False, status_code=404)
+        mock_client_cls.return_value = mock_client
+
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            compiler.load_model_in_memory()
+
+        self.assertIn("Aucun modèle n'est actuellement chargé dans LM Studio", str(ctx.exception))
+        self.assertIn("lms load", str(ctx.exception))
         compiler.close()
 
 
