@@ -9,8 +9,10 @@ Ce module définit :
 
 from __future__ import annotations
 
+import difflib
+import re
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -305,6 +307,60 @@ class ActionPrecondition(BaseModel):
         description="Filtre identifiant les cartes requises dans la zone vérifiée, ou null.",
     )
 
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_precondition_type(cls, v: Any) -> PreconditionType:
+        if isinstance(v, PreconditionType):
+            return v
+        if not isinstance(v, str):
+            return PreconditionType.ZONE_HAS_MATCHING_CARD
+        raw = v.strip().upper()
+        for p in PreconditionType:
+            if p.value == raw:
+                return p
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for p in PreconditionType:
+            if p.value == clean:
+                return p
+        PRECOND_MAP: Dict[str, PreconditionType] = {
+            "BENCH_EMPTY_SLOTS": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
+            "BENCH_FULL": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
+            "BENCH_NOT_FULL": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
+            "HAND_MIN_CARDS": PreconditionType.HAND_MIN_OTHER_CARDS,
+            "DISCARD_OTHER_CARDS": PreconditionType.HAND_MIN_OTHER_CARDS,
+            "BEHIND_ON_PRIZES": PreconditionType.PLAYER_BEHIND_ON_PRIZES,
+            "KO_LAST_TURN": PreconditionType.KO_SUFFERED_LAST_TURN,
+            "ACTIVE": PreconditionType.SELF_IS_ACTIVE,
+            "BENCH": PreconditionType.SELF_IS_ON_BENCH,
+            "TERA": PreconditionType.HAS_TERA_POKEMON_IN_PLAY,
+            "STADIUM": PreconditionType.STADIUM_IN_PLAY,
+        }
+        if clean in PRECOND_MAP:
+            return PRECOND_MAP[clean]
+        matches = difflib.get_close_matches(clean, [e.value for e in PreconditionType], n=1, cutoff=0.5)
+        if matches:
+            return PreconditionType(matches[0])
+        return PreconditionType.ZONE_HAS_MATCHING_CARD
+
+    @field_validator("zone", mode="before")
+    @classmethod
+    def sanitize_precond_zone(cls, v: Any) -> Optional[ZoneType]:
+        if v is None:
+            return None
+        if isinstance(v, ZoneType):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().upper()
+            if clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
+                return ZoneType.IN_PLAY_ALL
+            if clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
+                return ZoneType.DISCARD
+            try:
+                return ZoneType(clean)
+            except ValueError:
+                return None
+        return None
+
 
 class ActionCost(BaseModel):
     """Coût additionnel à payer pour jouer ou activer l'action."""
@@ -324,6 +380,38 @@ class ActionCost(BaseModel):
         default=None,
         description="Filtre éventuel sur les cartes autorisées pour payer ce coût, ou null.",
     )
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_cost_type(cls, v: Any) -> CostType:
+        if isinstance(v, CostType):
+            return v
+        if not isinstance(v, str):
+            return CostType.DISCARD_FROM_HAND
+        raw = v.strip().upper()
+        for c in CostType:
+            if c.value == raw:
+                return c
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for c in CostType:
+            if c.value == clean:
+                return c
+        COST_MAP: Dict[str, CostType] = {
+            "DISCARD_HAND": CostType.DISCARD_FROM_HAND,
+            "DISCARD_CARD": CostType.DISCARD_FROM_HAND,
+            "DISCARD": CostType.DISCARD_FROM_HAND,
+            "DISCARD_ENERGY": CostType.DISCARD_ENERGY_FROM_PLAY,
+            "DAMAGE_SELF": CostType.SELF_DAMAGE,
+            "PUT_DAMAGE": CostType.PUT_DAMAGE_COUNTERS_ON_SELF,
+            "END_TURN": CostType.END_TURN_IMMEDIATELY,
+            "KO_SELF": CostType.KNOCK_OUT_SELF,
+        }
+        if clean in COST_MAP:
+            return COST_MAP[clean]
+        matches = difflib.get_close_matches(clean, [e.value for e in CostType], n=1, cutoff=0.5)
+        if matches:
+            return CostType(matches[0])
+        return CostType.DISCARD_FROM_HAND
 
     @field_validator("count", mode="before")
     @classmethod
@@ -387,6 +475,216 @@ class AtomicEffect(BaseModel):
         default=None,
         description="État Spécial infligé (POISONED, BURNED, CONFUSED, PARALYZED, ASLEEP) ou null.",
     )
+
+    @field_validator("primitive", mode="before")
+    @classmethod
+    def normalize_primitive(cls, v: Any) -> EffectPrimitive:
+        if isinstance(v, EffectPrimitive):
+            return v
+        if not isinstance(v, str):
+            return EffectPrimitive.DEAL_DAMAGE_ACTIVE
+        raw = v.strip().upper()
+        for prim in EffectPrimitive:
+            if prim.value == raw:
+                return prim
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for prim in EffectPrimitive:
+            if prim.value == clean:
+                return prim
+
+        SYNONYMS: Dict[str, EffectPrimitive] = {
+            # Dégâts
+            "DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "DEAL_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "ATTACK": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "ATTACK_ACTIVE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "DAMAGE_ACTIVE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "DIRECT_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "INFLICT_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+            "DAMAGE_BENCH": EffectPrimitive.DEAL_DAMAGE_BENCH,
+            "DEAL_DAMAGE_BENCH": EffectPrimitive.DEAL_DAMAGE_BENCH,
+            "BENCH_DAMAGE": EffectPrimitive.DEAL_DAMAGE_BENCH,
+            "SNIPER": EffectPrimitive.DEAL_DAMAGE_BENCH,
+            "SNIPE": EffectPrimitive.DEAL_DAMAGE_BENCH,
+            "DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+            "PLACE_DAMAGE_COUNTER": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+            "PUT_DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+            "MOVE_DAMAGE_COUNTER": EffectPrimitive.MOVE_DAMAGE_COUNTERS,
+            # Protection / Prévention (ex: Statitik Esquive / Splashing Dodge)
+            "PREVENT_DAMAGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "PREVENT_ALL_DAMAGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "PREVENT_DAMAGE_OR_EFFECTS": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "PREVENT_EFFECTS": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "PREVENT": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "DODGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "INVULNERABLE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "IMMUNITY": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "FLIP_COIN": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "COIN_FLIP": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            "COIN": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
+            # Pioche / Recherche
+            "DRAW": EffectPrimitive.DRAW_CARDS,
+            "DRAW_CARD": EffectPrimitive.DRAW_CARDS,
+            "DRAW_CARDS": EffectPrimitive.DRAW_CARDS,
+            "DRAW_UNTIL": EffectPrimitive.DRAW_UNTIL_HAND_SIZE,
+            "SEARCH": EffectPrimitive.SEARCH_DECK_TO_HAND,
+            "SEARCH_DECK": EffectPrimitive.SEARCH_DECK_TO_HAND,
+            "SEARCH_DECK_HAND": EffectPrimitive.SEARCH_DECK_TO_HAND,
+            "TUTOR": EffectPrimitive.SEARCH_DECK_TO_HAND,
+            "SEARCH_BENCH": EffectPrimitive.SEARCH_DECK_TO_BENCH,
+            "SEARCH_DECK_BENCH": EffectPrimitive.SEARCH_DECK_TO_BENCH,
+            "CALL_FOR_FAMILY": EffectPrimitive.SEARCH_DECK_TO_BENCH,
+            # Énergie
+            "ATTACH_ENERGY": EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND,
+            "ATTACH_EXTRA_ENERGY": EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND,
+            "SEARCH_ENERGY": EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
+            "ACCELERATE_ENERGY": EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
+            "ATTACH_FROM_DISCARD": EffectPrimitive.ATTACH_ENERGY_FROM_DISCARD,
+            "MOVE_ENERGY": EffectPrimitive.MOVE_ENERGY_BETWEEN_POKEMON,
+            # Soin
+            "HEAL": EffectPrimitive.HEAL_DAMAGE,
+            "HEALING": EffectPrimitive.HEAL_DAMAGE,
+            # Mouvement / Switch / Gust
+            "SWITCH": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
+            "SWITCH_POKEMON": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
+            "RETREAT": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
+            "GUST": EffectPrimitive.GUST_OPPONENT_BENCH,
+            "BOSS": EffectPrimitive.GUST_OPPONENT_BENCH,
+            "GUST_BENCH": EffectPrimitive.GUST_OPPONENT_BENCH,
+            "SWITCH_OPPONENT": EffectPrimitive.GUST_OPPONENT_BENCH,
+            # États Spéciaux
+            "SPECIAL_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            "PARALYZE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            "POISON": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            "BURN": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            "ASLEEP": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            "CONFUSE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+            # Défausse / Meule
+            "DISCARD_ENERGY": EffectPrimitive.DISCARD_OPPONENT_ENERGY,
+            "DISCARD_OPPONENT_ENERGY": EffectPrimitive.DISCARD_OPPONENT_ENERGY,
+            "DISCARD_HAND": EffectPrimitive.DISCARD_HAND_AND_DRAW,
+            "SHUFFLE_DRAW": EffectPrimitive.SHUFFLE_HAND_AND_DRAW,
+            "SHUFFLE_HAND": EffectPrimitive.SHUFFLE_HAND_AND_DRAW,
+            "MILL": EffectPrimitive.MILL_OPPONENT_DECK,
+            "MILL_DECK": EffectPrimitive.MILL_OPPONENT_DECK,
+            "DISCARD_OPPONENT_HAND": EffectPrimitive.DISCARD_FROM_OPPONENT_HAND,
+            "DEVOLVE": EffectPrimitive.DEVOLVE_OPPONENT_POKEMON,
+            "EVOLVE": EffectPrimitive.EVOLVE_NORMAL,
+            "RECOVER": EffectPrimitive.RECOVER_DISCARD_TO_HAND,
+            "RETRIEVE": EffectPrimitive.RECOVER_DISCARD_TO_HAND,
+            "DISCARD_TOOL": EffectPrimitive.DISCARD_TOOL_OR_STADIUM,
+            "DISCARD_STADIUM": EffectPrimitive.DISCARD_TOOL_OR_STADIUM,
+        }
+        if clean in SYNONYMS:
+            return SYNONYMS[clean]
+
+        matches = difflib.get_close_matches(clean, [e.value for e in EffectPrimitive], n=1, cutoff=0.5)
+        if matches:
+            return EffectPrimitive(matches[0])
+
+        if any(w in clean for w in ["DAMAGE", "ATTACK", "HIT", "STRIKE"]):
+            return EffectPrimitive.DEAL_DAMAGE_ACTIVE
+        if any(w in clean for w in ["DRAW", "CARD"]):
+            return EffectPrimitive.DRAW_CARDS
+        if any(w in clean for w in ["SEARCH", "FIND", "FETCH"]):
+            return EffectPrimitive.SEARCH_DECK_TO_HAND
+        if any(w in clean for w in ["ENERGY"]):
+            return EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND
+        if any(w in clean for w in ["HEAL"]):
+            return EffectPrimitive.HEAL_DAMAGE
+        if any(w in clean for w in ["SWITCH"]):
+            return EffectPrimitive.SWITCH_ACTIVE_POKEMON
+        if any(w in clean for w in ["PREVENT", "PROTECT", "EVADE", "DODGE"]):
+            return EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS
+
+        return EffectPrimitive.DEAL_DAMAGE_ACTIVE
+
+    @field_validator("sourceZone", "targetZone", mode="before")
+    @classmethod
+    def sanitize_effect_zone(cls, v: Any) -> Optional[ZoneType]:
+        if v is None:
+            return None
+        if isinstance(v, ZoneType):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().upper()
+            if clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
+                return ZoneType.IN_PLAY_ALL
+            if clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
+                return ZoneType.DISCARD
+            try:
+                return ZoneType(clean)
+            except ValueError:
+                return None
+        return None
+
+    @field_validator("damageScalingType", mode="before")
+    @classmethod
+    def normalize_damage_scaling_type(cls, v: Any) -> Optional[DamageScalingType]:
+        if v is None:
+            return None
+        if isinstance(v, DamageScalingType):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().upper()
+            for ds in DamageScalingType:
+                if ds.value == clean:
+                    return ds
+            clean_norm = re.sub(r"[^A-Z0-9]+", "_", clean).strip("_")
+            for ds in DamageScalingType:
+                if ds.value == clean_norm:
+                    return ds
+            if "COIN" in clean_norm:
+                return DamageScalingType.PER_COIN_FLIP_HEADS
+            if "PRIZE" in clean_norm:
+                return DamageScalingType.PER_OPPONENT_PRIZE_TAKEN
+            if "BENCH" in clean_norm:
+                return DamageScalingType.PER_BENCHED_POKEMON
+            if "DISCARD" in clean_norm or "LOST" in clean_norm:
+                return DamageScalingType.PER_CARD_IN_DISCARD_OR_LOST_ZONE
+            if "ENERGY" in clean_norm:
+                if "TARGET" in clean_norm:
+                    return DamageScalingType.PER_ENERGY_ATTACHED_TARGET
+                if "ALL" in clean_norm:
+                    return DamageScalingType.PER_ENERGY_ATTACHED_ALL
+                if "DISCARD" in clean_norm:
+                    return DamageScalingType.PER_ENERGY_DISCARDED
+                return DamageScalingType.PER_ENERGY_ATTACHED_SELF
+            if "DAMAGE" in clean_norm:
+                if "TARGET" in clean_norm:
+                    return DamageScalingType.PER_DAMAGE_COUNTER_ON_TARGET
+                if "FRIENDLY" in clean_norm:
+                    return DamageScalingType.PER_DAMAGE_COUNTER_ON_FRIENDLY
+                return DamageScalingType.PER_DAMAGE_COUNTER_ON_SELF
+            matches = difflib.get_close_matches(clean_norm, [e.value for e in DamageScalingType], n=1, cutoff=0.5)
+            if matches:
+                return DamageScalingType(matches[0])
+        return None
+
+    @field_validator("specialCondition", mode="before")
+    @classmethod
+    def normalize_special_condition(cls, v: Any) -> Optional[SpecialConditionType]:
+        if v is None:
+            return None
+        if isinstance(v, SpecialConditionType):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().upper()
+            if "POISON" in clean:
+                return SpecialConditionType.POISONED
+            if "BURN" in clean:
+                return SpecialConditionType.BURNED
+            if "CONFUS" in clean:
+                return SpecialConditionType.CONFUSED
+            if "PARALY" in clean:
+                return SpecialConditionType.PARALYZED
+            if "SLEEP" in clean or "ASLEEP" in clean:
+                return SpecialConditionType.ASLEEP
+            try:
+                return SpecialConditionType(clean)
+            except ValueError:
+                return None
+        return None
 
     @field_validator("count", mode="before")
     @classmethod
@@ -452,6 +750,71 @@ class PlayableAction(BaseModel):
         default_factory=list,
         description="Liste ordonnée des primitives d'effets résolues par l'action.",
     )
+
+    @field_validator("sourceType", mode="before")
+    @classmethod
+    def normalize_source_type(cls, v: Any) -> ActionSourceType:
+        if isinstance(v, ActionSourceType):
+            return v
+        if not isinstance(v, str):
+            return ActionSourceType.ATTACK
+        raw = v.strip().upper()
+        for s in ActionSourceType:
+            if s.value == raw:
+                return s
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for s in ActionSourceType:
+            if s.value == clean:
+                return s
+        if "ATTACK" in clean:
+            return ActionSourceType.ATTACK
+        if "ABILITY" in clean or "TALENT" in clean:
+            return ActionSourceType.ABILITY_ACTIVATED
+        if "TRAINER" in clean or "ITEM" in clean or "SUPPORTER" in clean:
+            return ActionSourceType.TRAINER_PLAY
+        if "STADIUM" in clean:
+            return ActionSourceType.STADIUM_EFFECT
+        if "TOOL" in clean:
+            return ActionSourceType.TOOL_EFFECT
+        return ActionSourceType.ATTACK
+
+    @field_validator("timing", mode="before")
+    @classmethod
+    def normalize_timing(cls, v: Any) -> ActionTiming:
+        if isinstance(v, ActionTiming):
+            return v
+        if not isinstance(v, str):
+            return ActionTiming.END_OF_TURN_ATTACK
+        raw = v.strip().upper()
+        for t in ActionTiming:
+            if t.value == raw:
+                return t
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for t in ActionTiming:
+            if t.value == clean:
+                return t
+        if "ATTACK" in clean:
+            return ActionTiming.END_OF_TURN_ATTACK
+        if "SUPPORTER" in clean:
+            return ActionTiming.ONCE_PER_TURN_SUPPORTER
+        if "STADIUM" in clean:
+            return ActionTiming.ONCE_PER_TURN_STADIUM
+        if "EVOLVE" in clean:
+            return ActionTiming.ON_EVOLVE_TRIGGER
+        if "ABILITY" in clean or "TURN" in clean:
+            return ActionTiming.ONCE_PER_TURN_ABILITY
+        if "PASSIVE" in clean:
+            return ActionTiming.PASSIVE_CONTINUOUS
+        return ActionTiming.ONCE_PER_CARD
+
+    @field_validator("effects", mode="before")
+    @classmethod
+    def ensure_effects_list(cls, v: Any) -> List[Any]:
+        if isinstance(v, dict):
+            return [v]
+        if isinstance(v, list):
+            return v
+        return []
 
 
 class TurnPhaseWeights(BaseModel):
@@ -553,6 +916,97 @@ class DeadCardCondition(BaseModel):
         description="Filtre des cartes cibles dont l'absence dans zonesToCheck déclenche l'état de carte morte, ou null.",
     )
 
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_dead_card_reason(cls, v: Any) -> DeadCardReason:
+        if isinstance(v, DeadCardReason):
+            return v
+        if not isinstance(v, str):
+            return DeadCardReason.NO_VALID_TARGET_IN_DECK
+        raw = v.strip().upper()
+        for r in DeadCardReason:
+            if r.value == raw:
+                return r
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for r in DeadCardReason:
+            if r.value == clean:
+                return r
+
+        REASON_SYNONYMS: Dict[str, DeadCardReason] = {
+            "BENCH_FULL": DeadCardReason.BENCH_ALREADY_FULL,
+            "BENCH_IS_FULL": DeadCardReason.BENCH_ALREADY_FULL,
+            "FULL_BENCH": DeadCardReason.BENCH_ALREADY_FULL,
+            "NO_TARGET": DeadCardReason.NO_VALID_TARGET_IN_DECK,
+            "NO_TARGETS": DeadCardReason.NO_VALID_TARGET_IN_DECK,
+            "NO_TARGET_IN_DECK": DeadCardReason.NO_VALID_TARGET_IN_DECK,
+            "DECK_EMPTY": DeadCardReason.NO_VALID_TARGET_IN_DECK,
+            "NO_CARDS_IN_DECK": DeadCardReason.NO_VALID_TARGET_IN_DECK,
+            "NO_STAGE2": DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND,
+            "NO_STAGE_2": DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND,
+            "NO_BASIC": DeadCardReason.NO_BASE_POKEMON_LINE_LEFT,
+            "NO_BASE": DeadCardReason.NO_BASE_POKEMON_LINE_LEFT,
+            "NOT_BEHIND": DeadCardReason.NOT_BEHIND_ON_PRIZES,
+            "AHEAD_ON_PRIZES": DeadCardReason.NOT_BEHIND_ON_PRIZES,
+            "DISCARD_EMPTY": DeadCardReason.DISCARD_PILE_EMPTY,
+            "NO_DISCARD": DeadCardReason.DISCARD_PILE_EMPTY,
+            "NO_TERA": DeadCardReason.NO_TERA_POKEMON_IN_PLAY,
+            "HAND_FULL": DeadCardReason.HAND_ALREADY_FULL_OR_AT_LIMIT,
+            "NO_DAMAGE": DeadCardReason.NO_DAMAGE_ON_OWN_POKEMON,
+            "NO_KO": DeadCardReason.NO_KO_LAST_TURN,
+            "STADIUM_IN_PLAY": DeadCardReason.STADIUM_ALREADY_IN_PLAY_SAME_NAME,
+        }
+        if clean in REASON_SYNONYMS:
+            return REASON_SYNONYMS[clean]
+
+        matches = difflib.get_close_matches(clean, [e.value for e in DeadCardReason], n=1, cutoff=0.5)
+        if matches:
+            return DeadCardReason(matches[0])
+
+        if "BENCH" in clean:
+            return DeadCardReason.BENCH_ALREADY_FULL
+        if "STAGE" in clean:
+            return DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND
+        if "BASIC" in clean or "BASE" in clean:
+            return DeadCardReason.NO_BASE_POKEMON_LINE_LEFT
+        if "PRIZE" in clean:
+            return DeadCardReason.NOT_BEHIND_ON_PRIZES
+        if "DISCARD" in clean:
+            return DeadCardReason.DISCARD_PILE_EMPTY
+        if "TERA" in clean:
+            return DeadCardReason.NO_TERA_POKEMON_IN_PLAY
+        if "HAND" in clean:
+            return DeadCardReason.HAND_ALREADY_FULL_OR_AT_LIMIT
+        if "DAMAGE" in clean:
+            return DeadCardReason.NO_DAMAGE_ON_OWN_POKEMON
+        if "KO" in clean:
+            return DeadCardReason.NO_KO_LAST_TURN
+        if "STADIUM" in clean:
+            return DeadCardReason.STADIUM_ALREADY_IN_PLAY_SAME_NAME
+
+        return DeadCardReason.NO_VALID_TARGET_IN_DECK
+
+    @field_validator("zonesToCheck", mode="before")
+    @classmethod
+    def sanitize_zones_to_check(cls, v: Any) -> List[ZoneType]:
+        if not isinstance(v, list):
+            return [ZoneType.DECK]
+        res: List[ZoneType] = []
+        for z in v:
+            if isinstance(z, ZoneType):
+                res.append(z)
+            elif isinstance(z, str):
+                z_clean = z.strip().upper()
+                if z_clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
+                    res.append(ZoneType.IN_PLAY_ALL)
+                elif z_clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
+                    res.append(ZoneType.DISCARD)
+                else:
+                    try:
+                        res.append(ZoneType(z_clean))
+                    except ValueError:
+                        res.append(ZoneType.DECK)
+        return res or [ZoneType.DECK]
+
 
 class StrategicEvaluator(BaseModel):
     """Évaluateur stratégique heuristique pour le moteur de décision Pokémon TCG."""
@@ -593,6 +1047,82 @@ class StrategicEvaluator(BaseModel):
         le=50,
         description="Bonus (0 à 50) récompensant la conservation de la carte en main pour le tour suivant (T+1).",
     )
+
+    @field_validator("inGameDeadCardConditions", mode="before")
+    @classmethod
+    def sanitize_dead_card_conditions(cls, v: Any) -> List[Any]:
+        if not isinstance(v, list):
+            return []
+        filtered: List[Any] = []
+        for item in v:
+            if not isinstance(item, dict):
+                filtered.append(item)
+                continue
+            reason = item.get("reason")
+            if reason is None:
+                continue
+            if isinstance(reason, str):
+                r_clean = reason.strip().upper()
+                if r_clean in {
+                    "NONE", "NOT_APPLICABLE", "N/A", "NA", "NULL",
+                    "NO_CONDITION", "NO_CONDITIONS", "NEANT", "AUCUNE",
+                    "NO_DEAD_CARD", "NO_DEAD_CARD_CONDITION", ""
+                }:
+                    continue
+            zones = item.get("zonesToCheck")
+            if not zones or not isinstance(zones, list):
+                item["zonesToCheck"] = ["DECK"]
+            filtered.append(item)
+        return filtered
+
+    @field_validator("primaryRole", mode="before")
+    @classmethod
+    def normalize_primary_role(cls, v: Any) -> StrategicRole:
+        if isinstance(v, StrategicRole):
+            return v
+        if not isinstance(v, str):
+            return StrategicRole.MAIN_ATTACKER
+        raw = v.strip().upper()
+        for r in StrategicRole:
+            if r.value == raw:
+                return r
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        for r in StrategicRole:
+            if r.value == clean:
+                return r
+        ROLE_MAP: Dict[str, StrategicRole] = {
+            "ATTACKER": StrategicRole.MAIN_ATTACKER,
+            "MAIN": StrategicRole.MAIN_ATTACKER,
+            "PRIMARY_ATTACKER": StrategicRole.MAIN_ATTACKER,
+            "SECONDARY": StrategicRole.SECONDARY_ATTACKER,
+            "SNIPER": StrategicRole.SNIPER_BENCH_ATTACKER,
+            "DRAW": StrategicRole.DRAW_ENGINE_POKEMON,
+            "DRAW_ENGINE": StrategicRole.DRAW_ENGINE_POKEMON,
+            "TUTOR": StrategicRole.TUTOR_ENGINE_POKEMON,
+            "TUTOR_ENGINE": StrategicRole.TUTOR_ENGINE_POKEMON,
+            "CONSISTENCY_BOOSTER": StrategicRole.CONSISTENCY_TUTOR,
+            "CONSISTENCY": StrategicRole.CONSISTENCY_TUTOR,
+            "ENERGY_ACCEL": StrategicRole.ENERGY_ACCELERATOR,
+            "ACCELERATOR": StrategicRole.ENERGY_ACCELERATOR,
+            "BENCH": StrategicRole.BENCH_DEPLOYER,
+            "DEPLOYER": StrategicRole.BENCH_DEPLOYER,
+            "GUST": StrategicRole.GUST_BOSS_EFFECT,
+            "BOSS": StrategicRole.GUST_BOSS_EFFECT,
+            "SWITCH": StrategicRole.MOBILITY_SWITCH,
+            "MOBILITY": StrategicRole.MOBILITY_SWITCH,
+            "TANK": StrategicRole.DEFENSIVE_TANK_WALL,
+            "WALL": StrategicRole.DEFENSIVE_TANK_WALL,
+            "HEALER": StrategicRole.HEALER_SUPPORT,
+            "SUPPORT": StrategicRole.HEALER_SUPPORT,
+            "TECH": StrategicRole.TECH_UTILITY,
+            "UTILITY": StrategicRole.TECH_UTILITY,
+        }
+        if clean in ROLE_MAP:
+            return ROLE_MAP[clean]
+        matches = difflib.get_close_matches(clean, [e.value for e in StrategicRole], n=1, cutoff=0.5)
+        if matches:
+            return StrategicRole(matches[0])
+        return StrategicRole.MAIN_ATTACKER
 
     @field_validator("intrinsicBaseScore", "discardPriorityWhenDead", mode="before")
     @classmethod
@@ -647,6 +1177,62 @@ class LLMCompiledCardPart(BaseModel):
         ...,
         description="Profil d'évaluation stratégique dynamique de la carte.",
     )
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, v: Any) -> CardCategory:
+        if isinstance(v, CardCategory):
+            return v
+        if not isinstance(v, str):
+            return CardCategory.POKEMON
+        raw = v.strip().upper()
+        if "POK" in raw:
+            return CardCategory.POKEMON
+        if "TRAIN" in raw or "DRESS" in raw:
+            return CardCategory.TRAINER
+        if "ENERG" in raw:
+            return CardCategory.ENERGY
+        try:
+            return CardCategory(raw)
+        except ValueError:
+            return CardCategory.POKEMON
+
+    @field_validator("subCategory", mode="before")
+    @classmethod
+    def normalize_sub_category(cls, v: Any) -> CardSubCategory:
+        if isinstance(v, CardSubCategory):
+            return v
+        if not isinstance(v, str):
+            return CardSubCategory.BASIC
+        raw = v.strip().upper()
+        SUB_MAP: Dict[str, CardSubCategory] = {
+            "BASE": CardSubCategory.BASIC,
+            "BASIC": CardSubCategory.BASIC,
+            "STAGE_1": CardSubCategory.STAGE_1,
+            "STAGE1": CardSubCategory.STAGE_1,
+            "NIVEAU_1": CardSubCategory.STAGE_1,
+            "NIVEAU1": CardSubCategory.STAGE_1,
+            "STAGE_2": CardSubCategory.STAGE_2,
+            "STAGE2": CardSubCategory.STAGE_2,
+            "NIVEAU_2": CardSubCategory.STAGE_2,
+            "NIVEAU2": CardSubCategory.STAGE_2,
+            "ITEM": CardSubCategory.ITEM,
+            "OBJET": CardSubCategory.ITEM,
+            "SUPPORTER": CardSubCategory.SUPPORTER,
+            "TOOL": CardSubCategory.TOOL,
+            "OUTIL": CardSubCategory.TOOL,
+            "STADIUM": CardSubCategory.STADIUM,
+            "STADE": CardSubCategory.STADIUM,
+            "BASIC_ENERGY": CardSubCategory.BASIC_ENERGY,
+            "SPECIAL_ENERGY": CardSubCategory.SPECIAL_ENERGY,
+        }
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        if clean in SUB_MAP:
+            return SUB_MAP[clean]
+        try:
+            return CardSubCategory(clean)
+        except ValueError:
+            return CardSubCategory.BASIC
 
 
 class CardIdentity(BaseModel):
