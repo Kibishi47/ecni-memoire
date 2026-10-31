@@ -261,6 +261,61 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertEqual(meta_with_speed.completionTokens, 125)
         self.assertEqual(meta_with_speed.tokensPerSecond, 50.0)
 
+    def test_local_llm_compiler_streaming_token_callback(self):
+        from unittest.mock import MagicMock
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test local streaming.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        json_str = json.dumps(fake_card_json)
+        chunks = [
+            {"choices": [{"delta": {"content": json_str[:25]}}]},
+            {"choices": [{"delta": {"content": json_str[25:50]}}]},
+            {"choices": [{"delta": {"content": json_str[50:]}, "finish_reason": "stop"}]},
+        ]
+
+        compiler = LocalLLMCardCompiler()
+        compiler._ready = True
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = iter(chunks)
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        updates: list[tuple[int, float]] = []
+        model = compiler.compile_card(bundle, on_token=lambda tok, tps: updates.append((tok, tps)))
+        self.assertEqual(model.cardId, "sv06.5-001")
+        self.assertGreater(len(updates), 0)
+        self.assertEqual(updates[-1][0], 3)
+        self.assertGreater(updates[-1][1], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

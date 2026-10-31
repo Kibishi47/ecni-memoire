@@ -475,6 +475,91 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIsNotNone(model.compilationMetadata.tokensPerSecond)
         self.assertGreater(model.compilationMetadata.tokensPerSecond, 0.0)
 
+    @patch("httpx.Client")
+    def test_compile_card_with_streaming_and_live_token_callback(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_host="127.0.0.1",
+            remote_port=1234,
+            use_tunnel=False,
+            model_name="qwen3.8-27b",
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test streaming.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        # Découpage du JSON en 3 chunks simulés SSE
+        json_str = json.dumps(fake_card_json)
+        chunk1 = json_str[:30]
+        chunk2 = json_str[30:80]
+        chunk3 = json_str[80:]
+
+        sse_lines = [
+            f"data: {json.dumps({'choices': [{'delta': {'content': chunk1}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': chunk2}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': chunk3}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}], 'usage': {'completion_tokens': 3}})}",
+            "data: [DONE]",
+        ]
+
+        mock_stream_resp = MagicMock()
+        mock_stream_resp.is_success = True
+        mock_stream_resp.status_code = 200
+        mock_stream_resp.iter_lines.return_value = sse_lines
+
+        # Configuration du context manager client.stream
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__enter__.return_value = mock_stream_resp
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.stream.return_value = mock_stream_cm
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        live_updates: List[Tuple[int, float]] = []
+        model = compiler.compile_card(
+            bundle,
+            on_token=lambda tok, tps: live_updates.append((tok, tps)),
+        )
+
+        self.assertIsInstance(model, EngineCardModel)
+        self.assertEqual(model.cardId, "sv06.5-001")
+        self.assertGreater(len(live_updates), 0)
+        self.assertEqual(live_updates[-1][0], 3)
+        self.assertGreater(live_updates[-1][1], 0.0)
+        self.assertEqual(model.compilationMetadata.completionTokens, 3)
+
     def test_extract_json_payload(self):
         # 1. JSON pur
         self.assertEqual(extract_json_payload('{"a": 1}'), '{"a": 1}')
