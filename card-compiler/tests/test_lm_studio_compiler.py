@@ -105,19 +105,19 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(engine.ssh_password, "cli_passed_password")
         engine.close()
 
-    def test_remote_model_defaults_to_qwen_27b_in_normal_mode(self):
-        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler Qwen3.8-27B par défaut
+    def test_remote_model_defaults_to_qwen_32b_in_normal_mode(self):
+        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler qwen2.5-coder-32b-instruct par défaut
         with patch.dict("os.environ", {}, clear=True):
             compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal")
-            self.assertEqual(compiler.model_name, "Qwen3.8-27B")
+            self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
             self.assertEqual(compiler.tier, ModelTier.qwen3)
 
             # Test des autres tiers sur hôte distant
             compiler_fast = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.fast)
-            self.assertEqual(compiler_fast.model_name, "Qwen2.5-Coder-7B-Instruct")
+            self.assertEqual(compiler_fast.model_name, "qwen2.5-coder-7b-instruct")
 
             compiler_max = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.max)
-            self.assertEqual(compiler_max.model_name, "Qwen3-30B-A3B")
+            self.assertEqual(compiler_max.model_name, "qwen2.5-coder-32b-instruct")
 
             # Override explicite par argument ou variable d'environnement
             compiler_custom = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="custom-model-40b")
@@ -643,6 +643,14 @@ class TestLMStudioCompiler(unittest.TestCase):
         json_out = json.dumps([{"id": "model-1"}, {"name": "model-2"}])
         self.assertEqual(parse_lms_ls_output(json_out), ["model-1", "model-2"])
 
+        # Test des séquences d'échappement ANSI et des puces
+        ansi_bullet_output = "\x1b[1mLLMs\x1b[0m\n  \x1b[36m•\x1b[0m \x1b[32mqwen2.5-coder-32b-instruct\x1b[0m (32.5B, 4-bit)\n"
+        self.assertEqual(parse_lms_ls_output(ansi_bullet_output), ["qwen2.5-coder-32b-instruct"])
+
+        # Test des lignes de résumé
+        summary_output = "You have 1 model available:\n- lmstudio-community/Qwen2.5-Coder-32B-Instruct-GGUF"
+        self.assertEqual(parse_lms_ls_output(summary_output), ["lmstudio-community/Qwen2.5-Coder-32B-Instruct-GGUF"])
+
     def test_find_best_model_candidate(self):
         cands = [
             "qwen2.5-coder-7b-instruct",
@@ -654,6 +662,10 @@ class TestLMStudioCompiler(unittest.TestCase):
             find_best_model_candidate(cands, "Qwen3.8-27B"),
             "bartowski/qwen2.5-coder-32b-instruct-gguf",
         )
+        self.assertEqual(
+            find_best_model_candidate(cands, "qwen2.5-coder-32b-instruct"),
+            "bartowski/qwen2.5-coder-32b-instruct-gguf",
+        )
         # Recherche exacte
         self.assertEqual(
             find_best_model_candidate(cands, "qwen2.5-coder-7b-instruct"),
@@ -663,6 +675,35 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIsNone(find_best_model_candidate(cands, "unknown-model"))
         # Si aucun target n'est fourni, retourne le premier candidat
         self.assertEqual(find_best_model_candidate(cands, None), "qwen2.5-coder-7b-instruct")
+
+    def test_remote_available_models_discovery_with_find_fallback(self):
+        compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal", auto_start=False)
+        # Simule lms ls échouant, mais find ~/.cache/lm-studio/models retournant des fichiers .gguf
+        def fake_run_ssh(cmd: str):
+            if "ls --json" in cmd or "lms ls" in cmd:
+                return (1, "", "command not supported")
+            if "find ~/.cache" in cmd:
+                return (0, "/home/eth/.cache/lm-studio/models/qwen2.5-coder-32b-instruct/model.gguf\n", "")
+            return (0, "OK", "")
+
+        with patch.object(compiler, "_run_ssh_command", side_effect=fake_run_ssh):
+            models = compiler._get_remote_available_models()
+            self.assertIn("qwen2.5-coder-32b-instruct", models)
+        compiler.close()
+
+    def test_load_remote_model_prefers_downloaded_over_unverified_target(self):
+        compiler = LMStudioCardCompiler(
+            ssh_host="gpu-node.internal",
+            model_name="non-existent-arbitrary-model",
+            auto_start=False,
+        )
+        with patch.object(compiler, "_get_remote_available_models", return_value=["qwen2.5-coder-32b-instruct"]), \
+             patch.object(compiler, "_run_ssh_command", return_value=(0, "Success", "")) as mock_ssh:
+            compiler._load_remote_model_via_cli()
+            # Doit charger le modèle existant téléchargé et non la chaîne arbitraire
+            self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
+            mock_ssh.assert_called_with("lms load qwen2.5-coder-32b-instruct --gpu max -y")
+        compiler.close()
 
     @patch("time.sleep", return_value=None)
     @patch("httpx.Client")
