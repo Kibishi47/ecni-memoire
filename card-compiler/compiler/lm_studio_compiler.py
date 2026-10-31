@@ -61,13 +61,19 @@ def _find_sshpass() -> Optional[str]:
     return None
 
 
+def strip_ansi_codes(text: str) -> str:
+    """Supprime les séquences d'échappement ANSI (couleurs, curseur, styles de terminal)."""
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)", "", text)
+
+
 # Modèle puissant configuré par défaut en mode normal pour la machine distante (GPU dédié)
-DEFAULT_REMOTE_NORMAL_MODEL = "Qwen3.8-27B"
+# Utilise la nomenclature standard LM Studio (kebab-case)
+DEFAULT_REMOTE_NORMAL_MODEL = "qwen2.5-coder-32b-instruct"
 
 LM_STUDIO_TIER_MODELS: Dict[ModelTier, str] = {
-    ModelTier.qwen3: "Qwen3.8-27B",
-    ModelTier.max: "Qwen3-30B-A3B",
-    ModelTier.fast: "Qwen2.5-Coder-7B-Instruct",
+    ModelTier.qwen3: "qwen2.5-coder-32b-instruct",
+    ModelTier.max: "qwen2.5-coder-32b-instruct",
+    ModelTier.fast: "qwen2.5-coder-7b-instruct",
 }
 
 
@@ -94,36 +100,81 @@ def extract_json_payload(text: str) -> str:
 
 def parse_lms_ls_output(stdout: str) -> List[str]:
     """Extrait la liste des identifiants de modèles téléchargés depuis la sortie de `lms ls` ou `lms ps`."""
+    if not stdout:
+        return []
+
+    cleaned = strip_ansi_codes(stdout).strip()
     models: List[str] = []
+
+    # 1. Tentative de décodage JSON (ex: lms ls --json ou GET /v1/models)
     try:
-        data = json.loads(stdout)
+        data = json.loads(cleaned)
+        items: List[Any] = []
         if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and item.get("id"):
-                    models.append(str(item["id"]))
-                elif isinstance(item, dict) and item.get("name"):
-                    models.append(str(item["name"]))
-            return models
-        elif isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
-            for item in data["data"]:
-                if isinstance(item, dict) and item.get("id"):
-                    models.append(str(item["id"]))
+            items = data
+        elif isinstance(data, dict):
+            for key in ["data", "models", "items", "llms"]:
+                if key in data and isinstance(data[key], list):
+                    items = data[key]
+                    break
+        for item in items:
+            if isinstance(item, dict):
+                for k in ["modelKey", "id", "name", "path", "model"]:
+                    val = item.get(k)
+                    if val and isinstance(val, str) and val.strip() and val.strip() not in models:
+                        models.append(val.strip())
+                        break
+            elif isinstance(item, str) and item.strip() and item.strip() not in models:
+                models.append(item.strip())
+        if models:
             return models
     except Exception:
         pass
 
-    for line in stdout.splitlines():
+    # 2. Analyse ligne par ligne du format texte (tableaux ASCII, listes avec puces, etc.)
+    noise_words = {
+        "NAME", "MODEL", "ID", "IDENTIFIER", "SIZE", "FORMAT", "STATUS",
+        "PATH", "TYPE", "LLMS", "EMBEDDING", "MODELS", "YOU", "HAVE",
+        "TOTAL", "INSTALLED", "AVAILABLE", "LOADED", "RUN", "NOTE", "TIP",
+    }
+
+    for line in cleaned.splitlines():
         line_clean = line.strip()
-        if not line_clean or line_clean.startswith(("─", "═", "+", "┌", "└", "├")):
+        if not line_clean or line_clean.startswith(("─", "═", "+", "┌", "└", "├", "┬", "┴", "┼")):
             continue
+
+        # Retrait des bordures de tableaux
+        if line_clean.startswith("│") and line_clean.endswith("│"):
+            line_clean = line_clean[1:-1].strip()
+
+        # Retrait des puces, tirets et séparateurs initiaux
+        line_clean = re.sub(r"^[•\*\-\+\>\│\|\s]+", "", line_clean).strip()
         line_clean = line_clean.replace("│", " ").replace("|", " ").strip()
+        if not line_clean:
+            continue
+
+        lower_line = line_clean.lower()
+        if any(lower_line.startswith(prefix) for prefix in [
+            "you have", "total:", "models:", "llms", "embedding models",
+            "loaded models", "available models", "installed models",
+            "to load a model", "use 'lms load", "run 'lms"
+        ]):
+            continue
+
         parts = line_clean.split()
         if not parts:
             continue
-        first = parts[0]
-        if first.upper() in {"NAME", "MODEL", "ID", "IDENTIFIER", "SIZE", "FORMAT", "STATUS"}:
+
+        candidate = parts[0].strip("(),:;'\"")
+        # Retrait des annotations entre parenthèses
+        candidate = re.sub(r"\(.*?\)", "", candidate).strip()
+
+        if not candidate or candidate.upper() in noise_words:
             continue
-        models.append(first)
+
+        if candidate not in models:
+            models.append(candidate)
+
     return models
 
 
@@ -134,22 +185,50 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
     if not target:
         return candidates[0]
 
+    t_clean = strip_ansi_codes(target).strip()
+    t_l = t_clean.lower()
+
     # 1. Correspondance exacte ou insensible à la casse
     for c in candidates:
-        if c == target or c.lower() == target.lower():
+        if c == t_clean or c.lower() == t_l:
             return c
 
     # 2. Correspondance sous-chaîne normalisée
-    t_norm = re.sub(r"[^a-zA-Z0-9]", "", target.lower())
+    t_norm = re.sub(r"[^a-zA-Z0-9]", "", t_l)
     for c in candidates:
         c_norm = re.sub(r"[^a-zA-Z0-9]", "", c.lower())
         if t_norm in c_norm or c_norm in t_norm:
             return c
 
-    # 3. Correspondance par taille de modèle demandée
-    t_l = target.lower()
-    if "27b" in t_l or "30b" in t_l or "32b" in t_l:
-        for preferred in ["27b", "30b", "32b", "28b", "14b", "7b"]:
+    # 3. Famille Qwen (priorité élevée car modèle de référence du compilateur)
+    is_qwen_target = any(q in t_l for q in ["qwen", "qwen3.8", "qwen3", "qwen2.5", "qwen2"])
+    qwen_cands = [c for c in candidates if "qwen" in c.lower()]
+    if is_qwen_target and qwen_cands:
+        # Recherche par taille demandée
+        if any(s in t_l for s in ["27b", "30b", "32b"]):
+            for pref in ["32b", "30b", "27b", "28b", "14b", "7b"]:
+                for c in qwen_cands:
+                    if pref in c.lower():
+                        return c
+        elif "14b" in t_l:
+            for pref in ["14b", "12b", "16b", "7b", "32b"]:
+                for c in qwen_cands:
+                    if pref in c.lower():
+                        return c
+        elif any(s in t_l for s in ["7b", "8b"]):
+            for pref in ["7b", "8b", "9b", "14b"]:
+                for c in qwen_cands:
+                    if pref in c.lower():
+                        return c
+        # Préférer les modèles 'coder'
+        for c in qwen_cands:
+            if "coder" in c.lower():
+                return c
+        return qwen_cands[0]
+
+    # 4. Correspondance par taille de modèle demandée (familles génériques)
+    if any(s in t_l for s in ["27b", "30b", "32b"]):
+        for preferred in ["32b", "30b", "27b", "28b", "14b", "7b"]:
             for c in candidates:
                 if preferred in c.lower():
                     return c
@@ -158,14 +237,14 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
             for c in candidates:
                 if preferred in c.lower():
                     return c
-    elif "7b" in t_l or "8b" in t_l:
+    elif any(s in t_l for s in ["7b", "8b"]):
         for preferred in ["7b", "8b", "9b", "14b"]:
             for c in candidates:
                 if preferred in c.lower():
                     return c
 
-    # 4. Famille de modèle (Qwen, Llama, DeepSeek, etc.)
-    for family in ["qwen3.8", "qwen3", "qwen2.5", "qwen", "llama", "deepseek", "mistral"]:
+    # 5. Autres familles de modèles (Llama, DeepSeek, Mistral, Gemma, Phi)
+    for family in ["llama", "deepseek", "mistral", "gemma", "phi"]:
         if family in t_l:
             for c in candidates:
                 if family in c.lower():
@@ -427,26 +506,133 @@ class LMStudioCardCompiler:
                 f"Le tunnel SSH vers {self.ssh_target} n'a pas répondu sur le port local {self.local_port}."
             )
 
+    def _get_remote_available_models(self) -> List[str]:
+        """Détecte l'ensemble des modèles disponibles sur la machine distante (lms ls, json, fs gguf, REST)."""
+        models: List[str] = []
+
+        # 1. Tentative via `lms ls --json`
+        code, out, _ = self._run_ssh_command(f"{self.cli_path} ls --json")
+        if code == 0 and out.strip():
+            for m in parse_lms_ls_output(out):
+                if m and m not in models:
+                    models.append(m)
+
+        # 2. Tentative via `lms ls` standard (tableau ou liste)
+        if not models:
+            code, out, _ = self._run_ssh_command(f"{self.cli_path} ls")
+            if code == 0 and out.strip():
+                for m in parse_lms_ls_output(out):
+                    if m and m not in models:
+                        models.append(m)
+
+        # 3. Détection directe dans les répertoires de modèles LM Studio (~/.cache/lm-studio/models et ~/.lmstudio/models)
+        find_cmd = 'find ~/.cache/lm-studio/models ~/.lmstudio/models -type f -name "*.gguf" 2>/dev/null'
+        code, out, _ = self._run_ssh_command(find_cmd)
+        if code == 0 and out.strip():
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if not line or not line.endswith(".gguf"):
+                    continue
+                # Ex: /path/to/models/publisher/repo/model.gguf -> "publisher/repo"
+                m_match = re.search(r"/models/(.+?)/[^/]+\.gguf$", line)
+                if m_match:
+                    rel_key = m_match.group(1)
+                    if rel_key and rel_key not in models:
+                        models.append(rel_key)
+                stem = Path(line).stem
+                if stem and stem not in models:
+                    models.append(stem)
+
+        # 4. Interrogation REST via curl sur la machine distante si LM Studio tourne déjà
+        curl_cmd = f"curl -s http://127.0.0.1:{self.remote_port}/v1/models"
+        code, out, _ = self._run_ssh_command(curl_cmd)
+        if code == 0 and out.strip():
+            try:
+                data = json.loads(out)
+                items = data.get("data", []) if isinstance(data, dict) else []
+                for item in items:
+                    mid = item.get("id") if isinstance(item, dict) else None
+                    if mid and mid not in models:
+                        models.append(mid)
+            except Exception:
+                pass
+
+        return models
+
+    def _get_local_available_models(self) -> List[str]:
+        """Détecte l'ensemble des modèles disponibles sur la machine locale."""
+        models: List[str] = []
+        try:
+            res = subprocess.run([self.cli_path, "ls", "--json"], capture_output=True, text=True, check=False)
+            if res.returncode == 0 and res.stdout.strip():
+                for m in parse_lms_ls_output(res.stdout):
+                    if m and m not in models:
+                        models.append(m)
+        except Exception:
+            pass
+
+        if not models:
+            try:
+                res = subprocess.run([self.cli_path, "ls"], capture_output=True, text=True, check=False)
+                if res.returncode == 0 and res.stdout.strip():
+                    for m in parse_lms_ls_output(res.stdout):
+                        if m and m not in models:
+                            models.append(m)
+            except Exception:
+                pass
+
+        # Recherche de fichiers .gguf dans ~/.cache/lm-studio/models et ~/.lmstudio/models
+        for base_dir in [Path.home() / ".cache" / "lm-studio" / "models", Path.home() / ".lmstudio" / "models"]:
+            if base_dir.exists():
+                for p in base_dir.rglob("*.gguf"):
+                    try:
+                        rel = str(p.parent.relative_to(base_dir))
+                        if rel and rel != "." and rel not in models:
+                            models.append(rel)
+                    except Exception:
+                        pass
+                    if p.stem and p.stem not in models:
+                        models.append(p.stem)
+
+        return models
+
     def _load_remote_model_via_cli(self) -> None:
         """Charge un modèle sur la machine distante via `lms load`."""
         if not self.ssh_host:
             return
-        ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
-        downloaded = parse_lms_ls_output(ls_out) if ls_code == 0 else []
-        best_cand = find_best_model_candidate(downloaded, self.model_name) or self.model_name
-        if best_cand:
-            self._run_ssh_command(f"{self.cli_path} load {best_cand} --gpu max -y")
-            self.model_name = best_cand
+        downloaded = self._get_remote_available_models()
+        target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
+        best_cand = find_best_model_candidate(downloaded, target_name)
+        model_to_load = best_cand or (downloaded[0] if downloaded else target_name)
+
+        if not model_to_load:
+            return
+
+        load_cmd = f"{self.cli_path} load {model_to_load} --gpu max -y"
+        load_code, _, load_err = self._run_ssh_command(load_cmd)
+        if load_code != 0 and ("--gpu" in load_err.lower() or "unknown option" in load_err.lower()):
+            load_cmd = f"{self.cli_path} load {model_to_load} -y"
+            load_code, _, load_err = self._run_ssh_command(load_cmd)
+
+        if load_code != 0:
+            avail_msg = f" Modèles disponibles détectés sur {self.ssh_target} : {', '.join(downloaded)}." if downloaded else " Aucun modèle téléchargé détecté."
+            raise RuntimeError(
+                f"Échec du chargement du modèle '{model_to_load}' dans LM Studio sur {self.ssh_target} (code {load_code}) : {load_err.strip()}.\n"
+                f"{avail_msg}\n"
+                f"Vérifiez le nom configuré dans LM_STUDIO_MODEL ou téléchargez un modèle via `lms get qwen2.5-coder-32b-instruct`."
+            )
+        self.model_name = model_to_load
 
     def _load_local_model_via_cli(self) -> None:
         """Charge un modèle sur la machine locale via `lms load`."""
         try:
-            res = subprocess.run([self.cli_path, "ls"], capture_output=True, text=True)
-            downloaded = parse_lms_ls_output(res.stdout) if res.returncode == 0 else []
-            best_cand = find_best_model_candidate(downloaded, self.model_name) or self.model_name
-            if best_cand:
-                subprocess.run([self.cli_path, "load", best_cand, "--gpu", "max", "-y"], check=False)
-                self.model_name = best_cand
+            downloaded = self._get_local_available_models()
+            target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
+            best_cand = find_best_model_candidate(downloaded, target_name)
+            model_to_load = best_cand or (downloaded[0] if downloaded else target_name)
+            if model_to_load:
+                subprocess.run([self.cli_path, "load", model_to_load, "--gpu", "max", "-y"], check=False)
+                self.model_name = model_to_load
         except Exception:
             pass
 
@@ -501,15 +687,7 @@ class LMStudioCardCompiler:
             return
 
         # 4. Chargement du modèle requis
-        ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
-        downloaded = parse_lms_ls_output(ls_out) if ls_code == 0 else []
-        model_to_load = find_best_model_candidate(downloaded, target_name) or target_name
-
-        load_code, _, load_err = self._run_ssh_command(f"{self.cli_path} load {model_to_load} --gpu max -y")
-        if load_code != 0:
-            raise RuntimeError(
-                f"Échec du chargement du modèle '{model_to_load}' dans LM Studio sur {self.ssh_target} (code {load_code}) : {load_err.strip()}"
-            )
+        self._load_remote_model_via_cli()
 
         # 5. Attente active de confirmation en VRAM
         for _ in range(25):
@@ -520,8 +698,6 @@ class LMStudioCardCompiler:
                 if cur_running:
                     self.model_name = cur_running[0]
                     break
-        else:
-            self.model_name = model_to_load
 
     def _ensure_local_lm_studio(self) -> None:
         """Vérifie l'état de LM Studio sur la machine locale, décharge les modèles non requis et charge le modèle requis."""
@@ -549,12 +725,8 @@ class LMStudioCardCompiler:
                 self.model_name = matched_running
                 return
 
-            ls_res = subprocess.run([self.cli_path, "ls"], capture_output=True, text=True)
-            downloaded = parse_lms_ls_output(ls_res.stdout) if ls_res.returncode == 0 else []
-            model_to_load = find_best_model_candidate(downloaded, target_name) or target_name
-            subprocess.run([self.cli_path, "load", model_to_load, "--gpu", "max", "-y"], check=False)
-            time.sleep(2.0)
-            self.model_name = model_to_load
+            self._load_local_model_via_cli()
+            time.sleep(1.5)
         except Exception:
             pass
 
@@ -604,15 +776,12 @@ class LMStudioCardCompiler:
                         except Exception:
                             pass
 
-                    # 2. Si REST échoue, tentative CLI
+                    # 2. Si REST échoue, tentative CLI avec découverte intelligente
                     if not rest_loaded:
                         if self.ssh_host:
-                            self._run_ssh_command(f"{self.cli_path} load {target_name} --gpu max -y")
+                            self._load_remote_model_via_cli()
                         else:
-                            try:
-                                subprocess.run([self.cli_path, "load", target_name, "--gpu", "max", "-y"], check=False)
-                            except Exception:
-                                pass
+                            self._load_local_model_via_cli()
 
                     # 3. Attente active de confirmation
                     for _ in range(25):
@@ -629,10 +798,11 @@ class LMStudioCardCompiler:
                             pass
 
                 if not active_ids:
+                    effective_target = self.model_name or target_name
                     raise RuntimeError(
                         f"Aucun modèle n'est chargé dans LM Studio sur {self.api_base_url}.\n"
-                        f"Veuillez charger le modèle '{target_name}' en mémoire via :\n"
-                        f"  lms load {target_name} --gpu max -y\n"
+                        f"Veuillez charger le modèle '{effective_target}' en mémoire via :\n"
+                        f"  lms load {effective_target} --gpu max -y\n"
                         f"ou depuis l'interface LM Studio."
                     )
 
