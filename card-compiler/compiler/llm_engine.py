@@ -156,6 +156,65 @@ def resolve_best_gguf_for_tier(
     return fallback_repo, fallback_file
 
 
+def resolve_gguf_from_spec(
+    model_spec: str,
+    hf_token: Optional[str] = None,
+) -> Tuple[str, str, Optional[Path]]:
+    """Résout une spécification de modèle sous forme de chemin local ou repo/fichier Hugging Face.
+
+    Retourne (repo_id, filename, local_path).
+    """
+    spec = model_spec.strip()
+
+    # 1. Chemin direct vers un fichier local (.gguf) existant
+    expanded = Path(os.path.expanduser(spec))
+    if expanded.is_file():
+        return "LOCAL_FILE", expanded.name, expanded.resolve()
+
+    # 2. Format 'repo_id:filename' ou 'repo_id/filename.gguf'
+    if ":" in spec:
+        parts = spec.split(":", 1)
+        return parts[0].strip(), parts[1].strip(), None
+
+    if spec.lower().endswith(".gguf") and "/" in spec:
+        r_id, f_name = spec.rsplit("/", 1)
+        return r_id.strip(), f_name.strip(), None
+
+    # 3. Format repo HF seul (ex: 'Qwen/Qwen3-14B-GGUF' ou 'bartowski/Qwen2.5-Coder-32B-Instruct-GGUF')
+    if "/" in spec:
+        repo_id = spec.strip()
+        try:
+            files = list_repo_files(repo_id=repo_id, token=hf_token)
+            gguf_files = [
+                f for f in files
+                if f.lower().endswith(".gguf")
+                and "mmproj" not in f.lower()
+                and not re.search(r"-\d{5}-of-\d{5}\.gguf$", f.lower())
+            ]
+            for q in ["q6_k", "q5_k_m", "q4_k_m", "q4_0"]:
+                for target_q in [f"-{q}.gguf", f"_{q}.gguf", f"-{q.upper()}.gguf", f"_{q.upper()}.gguf"]:
+                    matches = [f for f in gguf_files if f.lower().endswith(target_q.lower())]
+                    if matches:
+                        return repo_id, matches[0], None
+            if gguf_files:
+                return repo_id, gguf_files[0], None
+        except Exception:
+            pass
+        return repo_id, f"{repo_id.split('/')[-1]}.gguf", None
+
+    # 4. Fichier .gguf seul (sans slash)
+    if spec.lower().endswith(".gguf"):
+        return DEFAULT_MODEL_REPO_ID, spec, None
+
+    # 5. Alias de palier historique (compatibilité)
+    low_spec = spec.lower()
+    if low_spec in TIER_CANDIDATES:
+        cand = TIER_CANDIDATES[ModelTier(low_spec)][0]
+        return cand[0], cand[2], None
+
+    return DEFAULT_MODEL_REPO_ID, DEFAULT_MODEL_FILENAME, None
+
+
 SYSTEM_PROMPT = """Tu es un compilateur expert du Jeu de Cartes à Collectionner Pokémon (Pokémon TCG - Format Standard).
 Ta mission est de traduire les données brutes TCGdex d'une carte Pokémon TCG en un modèle formel déterministe `LLMCompiledCardPart` composé d'une analyse préalable obligatoire (`reasoningAnalysis`), de primitives atomiques d'actions (`playableActions`) et d'un évaluateur stratégique dynamique (`strategicEvaluator`).
 
@@ -626,6 +685,8 @@ class LocalLLMCardCompiler:
         fast: bool = False,
         repo_id: Optional[str] = None,
         filename: Optional[str] = None,
+        model: Optional[str] = None,
+        model_name: Optional[str] = None,
         hf_token: Optional[str] = None,
         n_ctx: int = 16384,
         n_gpu_layers: int = -1,
@@ -671,25 +732,47 @@ class LocalLLMCardCompiler:
             self.thinking = None
             self.disable_thinking = False
 
-        resolved_tier = tier
-        if tier == ModelTier.qwen3 and not fast:
-            env_tier = os.environ.get("MODEL_TIER") or os.environ.get("LLM_TIER") or os.environ.get("TIER")
-            if env_tier and env_tier.strip():
-                try:
-                    resolved_tier = ModelTier(env_tier.strip().lower())
-                except Exception:
-                    pass
-
-        if fast and resolved_tier == ModelTier.qwen3:
-            self.tier = ModelTier.fast
-        else:
-            self.tier = resolved_tier
-
-        if repo_id and filename:
+        # Résolution du modèle spécifié (argument explicite ou variable d'environnement)
+        raw_model = (
+            model
+            or model_name
+            or os.environ.get("LLM_MODEL")
+            or os.environ.get("MODEL")
+            or os.environ.get("LM_STUDIO_MODEL")
+        )
+        if raw_model and str(raw_model).strip():
+            raw_model = str(raw_model).strip()
+            self.model_spec: Optional[str] = raw_model
+            r_id, f_name, local_p = resolve_gguf_from_spec(raw_model, hf_token=self.hf_token)
+            self.repo_id = r_id
+            self.filename = f_name
+            self.model_path: Optional[Path] = local_p
+            self._resolved = (local_p is not None) or (f_name is not None)
+            self.tier = tier
+        elif repo_id and filename:
+            self.model_spec = None
             self.repo_id = repo_id
             self.filename = filename
+            self.model_path = None
             self._resolved = True
+            self.tier = tier
         else:
+            self.model_spec = None
+            self.model_path = None
+            resolved_tier = tier
+            if tier == ModelTier.qwen3 and not fast:
+                env_tier = os.environ.get("MODEL_TIER") or os.environ.get("LLM_TIER") or os.environ.get("TIER")
+                if env_tier and env_tier.strip():
+                    try:
+                        resolved_tier = ModelTier(env_tier.strip().lower())
+                    except Exception:
+                        pass
+
+            if fast and resolved_tier == ModelTier.qwen3:
+                self.tier = ModelTier.fast
+            else:
+                self.tier = resolved_tier
+
             # Valeurs initiales avant résolution dynamique via list_repo_files
             default_cand = TIER_CANDIDATES[self.tier][0]
             self.repo_id = default_cand[0]
@@ -699,7 +782,6 @@ class LocalLLMCardCompiler:
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
         self.verbose = verbose
-        self.model_path: Optional[Path] = None
         self._llm: Any = None
         self._json_schema: Dict[str, Any] = LLMCompiledCardPart.model_json_schema()
 
@@ -707,6 +789,27 @@ class LocalLLMCardCompiler:
         """Sélectionne automatiquement le meilleur `.gguf` sur HF (avec fallback) et le télécharge."""
         if self.model_path is not None and self.model_path.exists():
             return self.model_path
+
+        # Si un repo_id et filename ont été explicitement résolus
+        if self._resolved and self.repo_id and self.filename:
+            try:
+                cached = try_to_load_from_cache(self.repo_id, self.filename)
+                if cached is not None and isinstance(cached, (str, Path)) and Path(cached).exists():
+                    self.model_path = Path(cached)
+                    return self.model_path
+            except Exception:
+                pass
+            try:
+                downloaded_path = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=self.filename,
+                    token=self.hf_token,
+                )
+                self.model_path = Path(downloaded_path)
+                return self.model_path
+            except Exception as exc:
+                if self.model_spec:
+                    raise RuntimeError(f"Impossible de télécharger le modèle spécifié '{self.model_spec}' ({self.repo_id}/{self.filename}): {exc}")
 
         if not self._resolved:
             self.repo_id, self.filename = resolve_best_gguf_for_tier(
