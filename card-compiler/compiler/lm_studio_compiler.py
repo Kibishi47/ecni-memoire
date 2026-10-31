@@ -21,7 +21,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -616,12 +616,124 @@ class LMStudioCardCompiler:
 
         self._ready = True
 
+    def _send_completion_request(
+        self,
+        client: httpx.Client,
+        chat_url: str,
+        payload: Dict[str, Any],
+        should_stream: bool,
+        t0: float,
+        on_token: Optional[Callable[[int, float], None]],
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[httpx.Response], Optional[Exception]]:
+        """Envoie la requête de complétion à LM Studio soit en streaming SSE (temps réel), soit en POST direct."""
+        if should_stream:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+            try:
+                with client.stream("POST", chat_url, json=payload) as resp:
+                    if not resp.is_success:
+                        resp.read()
+                        return None, resp, None
+
+                    accumulated_content: List[str] = []
+                    accumulated_reasoning: List[str] = []
+                    token_count = 0
+                    last_cb_time = 0.0
+                    usage_info: Dict[str, Any] = {}
+                    finish_reason: Optional[str] = None
+
+                    for line in resp.iter_lines():
+                        if not line:
+                            continue
+                        line_str = line.strip()
+                        if line_str.startswith("data: "):
+                            line_str = line_str[6:].strip()
+                        elif line_str.startswith("data:"):
+                            line_str = line_str[5:].strip()
+                        if line_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(line_str)
+                        except Exception:
+                            continue
+
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_info = chunk["usage"]
+
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            c0 = choices[0]
+                            if c0.get("finish_reason"):
+                                finish_reason = c0["finish_reason"]
+                            delta = c0.get("delta") or {}
+                            d_content = delta.get("content") or ""
+                            d_reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+                            has_tok = False
+                            if d_content:
+                                accumulated_content.append(d_content)
+                                has_tok = True
+                            if d_reasoning:
+                                accumulated_reasoning.append(d_reasoning)
+                                has_tok = True
+
+                            if has_tok:
+                                token_count += 1
+                                if on_token:
+                                    now = time.perf_counter()
+                                    if now - last_cb_time >= 0.05:
+                                        live_elapsed = max(0.001, now - t0)
+                                        live_tps = round(token_count / live_elapsed, 1)
+                                        on_token(token_count, live_tps)
+                                        last_cb_time = now
+
+                    if on_token and token_count > 0:
+                        final_elapsed = max(0.001, time.perf_counter() - t0)
+                        final_tps = round(token_count / final_elapsed, 1)
+                        on_token(token_count, final_tps)
+
+                    content = "".join(accumulated_content).strip()
+                    reasoning = "".join(accumulated_reasoning).strip()
+                    if not content and reasoning:
+                        content = reasoning
+
+                    data = {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": content,
+                                    "reasoning_content": reasoning,
+                                },
+                                "finish_reason": finish_reason or "stop",
+                            }
+                        ],
+                        "usage": usage_info or {"completion_tokens": token_count},
+                    }
+                    return data, resp, None
+            except (AttributeError, TypeError):
+                # Fallback sur POST standard si le mock ou client ne supporte pas stream()
+                pass
+            except httpx.RequestError as net_err:
+                return None, None, net_err
+
+        # Mode non-streamé standard
+        payload.pop("stream", None)
+        payload.pop("stream_options", None)
+        try:
+            resp = client.post(chat_url, json=payload)
+            if resp.is_success:
+                return resp.json(), resp, None
+            return None, resp, None
+        except httpx.RequestError as net_err:
+            return None, None, net_err
+
     def compile_card(
         self,
         bundle: FetchedCardBundle,
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
+        stream: Optional[bool] = None,
+        on_token: Optional[Callable[[int, float], None]] = None,
     ) -> EngineCardModel:
         """Compile une carte Pokémon TCG via LM Studio (remote SSH / local REST) avec format contraint."""
         from compiler.llm_engine import SYSTEM_PROMPT, build_user_prompt, enforce_ptcg_invariants
@@ -637,6 +749,7 @@ class LMStudioCardCompiler:
         compiled_part: Optional[LLMCompiledCardPart] = None
         elapsed: float = 0.0
 
+        should_stream = stream if stream is not None else (on_token is not None)
         chat_url = f"{self.api_base_url}/chat/completions"
         model_to_request = self.model_name or "default"
 
@@ -681,14 +794,14 @@ class LMStudioCardCompiler:
                     else:
                         payload.pop("response_format", None)
 
-                    try:
-                        resp = client.post(chat_url, json=payload)
-                    except httpx.RequestError as net_err:
+                    data_candidate, resp, net_err = self._send_completion_request(
+                        client, chat_url, payload, should_stream, t0, on_token
+                    )
+                    if net_err:
                         call_err = net_err
                         break
 
-                    if resp.is_success:
-                        data_candidate = resp.json()
+                    if data_candidate is not None:
                         choices = data_candidate.get("choices") or []
                         content = ""
                         if choices:
@@ -715,6 +828,7 @@ class LMStudioCardCompiler:
                             continue
 
                     # Analyse détaillée de l'erreur HTTP retournée par LM Studio
+                    assert resp is not None
                     err_msg = ""
                     try:
                         err_json = resp.json()
@@ -747,9 +861,11 @@ class LMStudioCardCompiler:
                                     payload["model"] = active_m[0]
                                     self.model_name = active_m[0]
                                     model_to_request = active_m[0]
-                                    retry_resp = client.post(chat_url, json=payload)
-                                    if retry_resp.is_success:
-                                        data = retry_resp.json()
+                                    retry_data, retry_resp, _ = self._send_completion_request(
+                                        client, chat_url, payload, should_stream, t0, on_token
+                                    )
+                                    if retry_data is not None:
+                                        data = retry_data
                                         break
                         except Exception:
                             pass
@@ -762,9 +878,11 @@ class LMStudioCardCompiler:
                         if payload["max_tokens"] > 1536:
                             payload["max_tokens"] = 1536
                             current_max_tokens = 1536
-                            retry_resp = client.post(chat_url, json=payload)
-                            if retry_resp.is_success:
-                                data = retry_resp.json()
+                            retry_data, retry_resp, _ = self._send_completion_request(
+                                client, chat_url, payload, should_stream, t0, on_token
+                            )
+                            if retry_data is not None:
+                                data = retry_data
                                 break
 
                     # 3. Si 400 causé par response_format : on continue sur le format de repli suivant

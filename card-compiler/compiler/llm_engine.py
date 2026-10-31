@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Désactivation de Xet et de hf_transfer pour éviter les plantages de Background Writer sous macOS
 os.environ["HF_HUB_DISABLE_XET"] = "1"
@@ -731,6 +731,8 @@ class LocalLLMCardCompiler:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
+        stream: Optional[bool] = None,
+        on_token: Optional[Callable[[int, float], None]] = None,
     ) -> EngineCardModel:
         """Compile une carte unique avec Constrained Decoding GBNF + CoT, post-processe et retourne `EngineCardModel`.
 
@@ -747,6 +749,7 @@ class LocalLLMCardCompiler:
         last_error: Optional[Exception] = None
         compiled_part: Optional[LLMCompiledCardPart] = None
         elapsed: float = 0.0
+        should_stream = stream if stream is not None else (on_token is not None)
 
         for attempt in range(max_retries + 1):
             if attempt > 0:
@@ -761,18 +764,84 @@ class LocalLLMCardCompiler:
                 except Exception:
                     pass
 
-            completion = self._llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={
-                    "type": "json_object",
-                    "schema": self._json_schema,
-                },
-                temperature=temperature,
-                max_tokens=current_max_tokens,
-            )
+            if should_stream:
+                try:
+                    stream_resp = self._llm.create_chat_completion(
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        response_format={
+                            "type": "json_object",
+                            "schema": self._json_schema,
+                        },
+                        temperature=temperature,
+                        max_tokens=current_max_tokens,
+                        stream=True,
+                    )
+                    accumulated_content = []
+                    token_count = 0
+                    last_cb_time = 0.0
+                    finish_reason = None
+                    for chunk in stream_resp:
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            c0 = choices[0]
+                            if c0.get("finish_reason"):
+                                finish_reason = c0["finish_reason"]
+                            delta = c0.get("delta") or {}
+                            d_content = delta.get("content") or ""
+                            if d_content:
+                                accumulated_content.append(d_content)
+                                token_count += 1
+                                if on_token:
+                                    now = time.perf_counter()
+                                    if now - last_cb_time >= 0.05:
+                                        live_elapsed = max(0.001, now - t0)
+                                        live_tps = round(token_count / live_elapsed, 1)
+                                        on_token(token_count, live_tps)
+                                        last_cb_time = now
+
+                    if on_token and token_count > 0:
+                        final_elapsed = max(0.001, time.perf_counter() - t0)
+                        final_tps = round(token_count / final_elapsed, 1)
+                        on_token(token_count, final_tps)
+
+                    raw_content = "".join(accumulated_content)
+                    choice = {
+                        "message": {"content": raw_content},
+                        "finish_reason": finish_reason or "stop",
+                    }
+                    completion = {
+                        "choices": [choice],
+                        "usage": {"completion_tokens": token_count},
+                    }
+                except (AttributeError, TypeError):
+                    completion = self._llm.create_chat_completion(
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        response_format={
+                            "type": "json_object",
+                            "schema": self._json_schema,
+                        },
+                        temperature=temperature,
+                        max_tokens=current_max_tokens,
+                    )
+            else:
+                completion = self._llm.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format={
+                        "type": "json_object",
+                        "schema": self._json_schema,
+                    },
+                    temperature=temperature,
+                    max_tokens=current_max_tokens,
+                )
 
             elapsed = max(0.001, round(time.perf_counter() - t0, 3))
             choice = completion["choices"][0]

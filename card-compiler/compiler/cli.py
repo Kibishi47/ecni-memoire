@@ -20,7 +20,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 import typer
@@ -615,8 +615,23 @@ def _execute_run_pipeline(
                         task_id,
                         description=f"[cyan]Compilation de [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr})...",
                     )
+
+                    def make_token_callback(b=bundle):
+                        def on_live_token(tok_count: int, live_tps: float) -> None:
+                            progress.update(
+                                task_id,
+                                description=(
+                                    f"[cyan]Compilation de [bold]{b.card_id}[/bold] ({b.identity.nameFr})... "
+                                    f"[bold green]{live_tps:.1f} t/s[/bold green] [dim]({tok_count} tok)[/dim]"
+                                ),
+                            )
+                        return on_live_token
+
                     try:
-                        engine_card = compiler_engine.compile_card(bundle)
+                        engine_card = compiler_engine.compile_card(
+                            bundle,
+                            on_token=make_token_callback(bundle),
+                        )
                         out_path = compiled_dir / f"{bundle.card_id}.json"
                         out_path.write_text(
                             json.dumps(engine_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
