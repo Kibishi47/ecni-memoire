@@ -104,6 +104,11 @@ python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking 
 # Définir un niveau d'effort de thinking ('low', 'medium', 'high' ou nombre de tokens)
 python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking low
 
+# Compilation en parallèle sur 4 slots simultanés (multi-concurrency LM Studio)
+python -m compiler.cli run --llm-provider lm_studio -j 4 --ids sv06.5-001,sv04-125,sv03-125,sv01-001
+# ou sur tout un set :
+python -m compiler.cli run --llm-provider lm_studio --parallel 4 --standard --limit 50
+
 # Compilation du format Standard complet (avec reprise sur cache)
 python -m compiler.cli run --standard --limit 50
 
@@ -118,6 +123,7 @@ python -m compiler.cli run --ids sv03-125 --force
 - `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Metal ou `lm_studio` REST).
 - `--thinking <niveau>` (`-tk`) : Niveau de réflexion/thinking pour modèles raisonnants (`null` pour désactiver, ou `low`, `medium`, `high`, nombre de tokens). Si le modèle gère uniquement un booléen (`enable_thinking`), `null` vaut `false` et toute autre valeur vaut `true`.
 - `--no-think` / `--disable-thinking` : Raccourci pour désactiver le mode réflexion/thinking (équivalent à `--thinking null`).
+- `--parallel <N>` / `-j <N>` / `--concurrency <N>` : Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement). Permet de configurer le nombre de workers simultanés (défaut : 1). Également configurable via le fichier `.env` ou variable d'environnement (`LM_STUDIO_PARALLEL=4`, `PARALLEL=4`). L'affichage Rich gère les X flux de cartes en temps réel avec une barre globale et des lignes de streaming dédiées par slot.
 - `--tier qwen3|max|fast` (`-t`) : Palier de modèle en mode local (`qwen3` 14B Q6_K, `max` 30B/32B, `fast` 7B).
 - `--fast` : Raccourci pour `--tier fast`.
 - `--provider sdk|rest` (`-p`) : Fournisseur d'accès TCGdex (`sdk` : tcgdex-sdk officiel, `rest` : API HTTP directe).
