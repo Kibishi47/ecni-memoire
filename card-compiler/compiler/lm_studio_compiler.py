@@ -90,6 +90,88 @@ def extract_json_payload(text: str) -> str:
     return candidate
 
 
+def parse_lms_ls_output(stdout: str) -> List[str]:
+    """Extrait la liste des identifiants de modèles téléchargés depuis la sortie de `lms ls` ou `lms ps`."""
+    models: List[str] = []
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and item.get("id"):
+                    models.append(str(item["id"]))
+                elif isinstance(item, dict) and item.get("name"):
+                    models.append(str(item["name"]))
+            return models
+        elif isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+            for item in data["data"]:
+                if isinstance(item, dict) and item.get("id"):
+                    models.append(str(item["id"]))
+            return models
+    except Exception:
+        pass
+
+    for line in stdout.splitlines():
+        line_clean = line.strip()
+        if not line_clean or line_clean.startswith(("─", "═", "+", "┌", "└", "├")):
+            continue
+        line_clean = line_clean.replace("│", " ").replace("|", " ").strip()
+        parts = line_clean.split()
+        if not parts:
+            continue
+        first = parts[0]
+        if first.upper() in {"NAME", "MODEL", "ID", "IDENTIFIER", "SIZE", "FORMAT", "STATUS"}:
+            continue
+        models.append(first)
+    return models
+
+
+def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> Optional[str]:
+    """Sélectionne le meilleur modèle parmi les candidats disponibles selon le palier et le modèle cible."""
+    if not candidates:
+        return None
+    if not target:
+        return candidates[0]
+
+    # 1. Correspondance exacte ou insensible à la casse
+    for c in candidates:
+        if c == target or c.lower() == target.lower():
+            return c
+
+    # 2. Correspondance sous-chaîne normalisée
+    t_norm = re.sub(r"[^a-zA-Z0-9]", "", target.lower())
+    for c in candidates:
+        c_norm = re.sub(r"[^a-zA-Z0-9]", "", c.lower())
+        if t_norm in c_norm or c_norm in t_norm:
+            return c
+
+    # 3. Correspondance par taille de modèle demandée
+    t_l = target.lower()
+    if "27b" in t_l or "30b" in t_l or "32b" in t_l:
+        for preferred in ["27b", "30b", "32b", "28b", "14b", "7b"]:
+            for c in candidates:
+                if preferred in c.lower():
+                    return c
+    elif "14b" in t_l:
+        for preferred in ["14b", "12b", "16b", "7b"]:
+            for c in candidates:
+                if preferred in c.lower():
+                    return c
+    elif "7b" in t_l or "8b" in t_l:
+        for preferred in ["7b", "8b", "9b", "14b"]:
+            for c in candidates:
+                if preferred in c.lower():
+                    return c
+
+    # 4. Famille de modèle (Qwen, Llama, DeepSeek, etc.)
+    for family in ["qwen3.8", "qwen3", "qwen2.5", "qwen", "llama", "deepseek", "mistral"]:
+        if family in t_l:
+            for c in candidates:
+                if family in c.lower():
+                    return c
+
+    return candidates[0]
+
+
 class LMStudioCardCompiler:
     """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (local ou via SSH)."""
 
@@ -317,6 +399,29 @@ class LMStudioCardCompiler:
                 f"Le tunnel SSH vers {self.ssh_target} n'a pas répondu sur le port local {self.local_port}."
             )
 
+    def _load_remote_model_via_cli(self) -> None:
+        """Charge un modèle sur la machine distante via `lms load`."""
+        if not self.ssh_host:
+            return
+        ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
+        downloaded = parse_lms_ls_output(ls_out) if ls_code == 0 else []
+        best_cand = find_best_model_candidate(downloaded, self.model_name) or self.model_name
+        if best_cand:
+            self._run_ssh_command(f"{self.cli_path} load {best_cand} --gpu max -y")
+            self.model_name = best_cand
+
+    def _load_local_model_via_cli(self) -> None:
+        """Charge un modèle sur la machine locale via `lms load`."""
+        try:
+            res = subprocess.run([self.cli_path, "ls"], capture_output=True, text=True)
+            downloaded = parse_lms_ls_output(res.stdout) if res.returncode == 0 else []
+            best_cand = find_best_model_candidate(downloaded, self.model_name) or self.model_name
+            if best_cand:
+                subprocess.run([self.cli_path, "load", best_cand, "--gpu", "max", "-y"], check=False)
+                self.model_name = best_cand
+        except Exception:
+            pass
+
     def _ensure_remote_lm_studio(self) -> None:
         """Vérifie l'état de LM Studio sur la machine distante et démarre le serveur/modèle si nécessaire."""
         if not self.ssh_host or not self.auto_start:
@@ -345,48 +450,19 @@ class LMStudioCardCompiler:
             self._run_ssh_command(start_cmd)
             time.sleep(1.5)
 
-        # 3. Chargement du modèle si spécifié et absent de `lms ps`
-        if self.model_name:
-            code, ps_out, _ = self._run_ssh_command(f"{self.cli_path} ps")
-            model_already_loaded = False
-            if code == 0 and ps_out.strip():
-                low_ps = ps_out.lower()
-                target_keys = [self.model_name.lower()]
-                if "27b" in self.model_name.lower():
-                    target_keys.extend(["27b", "qwen3.8", "qwen3.8-27b", "qwen2.5-27b"])
-                if any(k in low_ps for k in target_keys):
-                    model_already_loaded = True
+        # 3. Chargement du modèle si aucun modèle actif dans `lms ps`
+        code, ps_out, _ = self._run_ssh_command(f"{self.cli_path} ps")
+        running_models = parse_lms_ls_output(ps_out) if code == 0 else []
+        model_already_loaded = False
+        if running_models:
+            matched_running = find_best_model_candidate(running_models, self.model_name)
+            if matched_running:
+                model_already_loaded = True
+                self.model_name = matched_running
 
-            if not model_already_loaded:
-                # 1. Tentative de chargement direct avec offload GPU maximal
-                load_code, _, _ = self._run_ssh_command(f"{self.cli_path} load {self.model_name} --gpu max")
-                if load_code != 0:
-                    # 2. Si le nom exact échoue, inspection des modèles téléchargés via `lms ls`
-                    ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
-                    if ls_code == 0:
-                        candidates: List[str] = []
-                        for line in ls_out.splitlines():
-                            line_clean = line.strip()
-                            if not line_clean or line_clean.startswith("─") or "NAME" in line_clean:
-                                continue
-                            parts = line_clean.split()
-                            if parts:
-                                cand_name = parts[0]
-                                if (
-                                    "27b" in cand_name.lower()
-                                    or "qwen3.8" in cand_name.lower()
-                                    or "qwen" in cand_name.lower()
-                                ):
-                                    candidates.append(cand_name)
-                        if candidates:
-                            best_cand = candidates[0]
-                            for c in candidates:
-                                if "27b" in c.lower() or "qwen3.8" in c.lower():
-                                    best_cand = c
-                                    break
-                            self._run_ssh_command(f"{self.cli_path} load {best_cand} --gpu max")
-                            self.model_name = best_cand
-                time.sleep(2.0)
+        if not model_already_loaded:
+            self._load_remote_model_via_cli()
+            time.sleep(2.0)
 
     def _ensure_local_lm_studio(self) -> None:
         """Vérifie l'état de LM Studio sur la machine locale si aucun hôte SSH n'est configuré."""
@@ -398,8 +474,15 @@ class LMStudioCardCompiler:
             if res.returncode == 0 and "running" not in res.stdout.lower() and "port" not in res.stdout.lower():
                 subprocess.run([self.cli_path, "server", "start", "--port", str(self.remote_port)], check=False)
                 time.sleep(1.0)
-            if self.model_name:
-                subprocess.run([self.cli_path, "load", self.model_name, "--gpu", "max"], check=False)
+            ps_res = subprocess.run([self.cli_path, "ps"], capture_output=True, text=True)
+            running_models = parse_lms_ls_output(ps_res.stdout) if ps_res.returncode == 0 else []
+            if not running_models:
+                self._load_local_model_via_cli()
+                time.sleep(1.0)
+            else:
+                matched_running = find_best_model_candidate(running_models, self.model_name)
+                if matched_running:
+                    self.model_name = matched_running
         except Exception:
             # Si le binaire `lms` n'est pas dans le PATH local, on tente l'accès direct via HTTP REST
             pass
@@ -419,52 +502,84 @@ class LMStudioCardCompiler:
 
         # 2. Vérification HTTP directe de l'API REST de LM Studio
         models_url = f"{self.api_base_url}/models"
+        root_url = self.api_base_url.rsplit("/v1", 1)[0]
         try:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=15.0) as client:
                 resp = client.get(models_url)
                 resp.raise_for_status()
                 data = resp.json()
                 models_list = data.get("data", [])
-                if models_list and isinstance(models_list, list):
-                    active_ids = [m.get("id") for m in models_list if isinstance(m, dict) and m.get("id")]
-                    if active_ids:
-                        matched = None
-                        if self.model_name:
-                            # 1. Correspondance exacte ou insensible à la casse
-                            for act_id in active_ids:
-                                if act_id == self.model_name or act_id.lower() == self.model_name.lower():
-                                    matched = act_id
+                active_ids = [m.get("id") for m in models_list if isinstance(m, dict) and m.get("id")] if isinstance(models_list, list) else []
+
+                # Si aucun modèle n'est actuellement chargé en mémoire dans LM Studio
+                if not active_ids:
+                    # 1. Tentative de chargement via l'API REST native de LM Studio (v0 / v1)
+                    downloaded_models: List[str] = []
+                    for list_ep in [f"{root_url}/api/v1/models", f"{root_url}/api/v0/models"]:
+                        try:
+                            d_resp = client.get(list_ep)
+                            if d_resp.is_success:
+                                d_data = d_resp.json()
+                                if isinstance(d_data, list):
+                                    downloaded_models = [str(m.get("id") or m.get("name")) for m in d_data if isinstance(m, dict)]
+                                elif isinstance(d_data, dict) and "data" in d_data:
+                                    downloaded_models = [str(m.get("id") or m.get("name")) for m in d_data["data"] if isinstance(m, dict)]
+                                if downloaded_models:
                                     break
+                        except Exception:
+                            pass
 
-                            # 2. Correspondance par sous-chaîne ou mots-clés normalisés
-                            if not matched:
-                                target_norm = re.sub(r"[^a-zA-Z0-9]", "", self.model_name.lower())
-                                for act_id in active_ids:
-                                    act_norm = re.sub(r"[^a-zA-Z0-9]", "", act_id.lower())
-                                    if target_norm in act_norm or act_norm in target_norm:
-                                        matched = act_id
-                                        break
+                    target_to_load = find_best_model_candidate(downloaded_models, self.model_name) or self.model_name
+                    rest_loaded = False
+                    if target_to_load:
+                        for load_ep in [f"{root_url}/api/v1/models/load", f"{root_url}/api/v0/model/load"]:
+                            try:
+                                l_resp = client.post(load_ep, json={"model": target_to_load, "echo_load_config": False}, timeout=30.0)
+                                if l_resp.is_success:
+                                    rest_loaded = True
+                                    self.model_name = target_to_load
+                                    break
+                            except Exception:
+                                pass
 
-                            # 3. Correspondance par palier (27b, 30b, 14b, 7b, qwen, llama...)
-                            if not matched:
-                                target_l = self.model_name.lower()
-                                for act_id in active_ids:
-                                    act_l = act_id.lower()
-                                    if (
-                                        ("27b" in target_l and "27b" in act_l)
-                                        or ("30b" in target_l and "30b" in act_l)
-                                        or ("14b" in target_l and "14b" in act_l)
-                                        or ("7b" in target_l and "7b" in act_l)
-                                        or ("qwen" in target_l and "qwen" in act_l)
-                                    ):
-                                        matched = act_id
-                                        break
+                    # 2. Si le REST n'a pas pu charger (ex: version plus ancienne) et qu'on a le CLI
+                    if not rest_loaded:
+                        if self.ssh_host:
+                            self._load_remote_model_via_cli()
+                        else:
+                            self._load_local_model_via_cli()
 
-                        # Si aucun match n'est trouvé, on utilise impérativement le premier modèle actif dans LM Studio
-                        self.model_name = matched or active_ids[0]
+                    # 3. Attente / polling actif que le modèle soit chargé en RAM/VRAM
+                    for _ in range(15):
+                        time.sleep(1.0)
+                        try:
+                            p_resp = client.get(models_url)
+                            if p_resp.is_success:
+                                p_data = p_resp.json().get("data", [])
+                                p_ids = [m.get("id") for m in p_data if isinstance(m, dict) and m.get("id")]
+                                if p_ids:
+                                    active_ids = p_ids
+                                    break
+                        except Exception:
+                            pass
+
+                    if not active_ids:
+                        target_model = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
+                        raise RuntimeError(
+                            f"Aucun modèle n'est actuellement chargé dans LM Studio sur {self.api_base_url}.\n"
+                            f"Veuillez charger un modèle en mémoire avant de lancer la compilation, par exemple via :\n"
+                            f"  lms load {target_model} --gpu max\n"
+                            f"ou directement depuis l'interface LM Studio (onglet 'Local Server' > 'Select a model to load')."
+                        )
+
+                matched = find_best_model_candidate(active_ids, self.model_name)
+                self.model_name = matched or active_ids[0]
+
         except Exception as exc:
             self.close()
             target_desc = f"{self.ssh_target} (via tunnel {self.api_base_url})" if self.ssh_host else self.api_base_url
+            if isinstance(exc, RuntimeError):
+                raise
             raise ConnectionError(
                 f"Impossible de joindre l'API LM Studio sur {target_desc} : {exc}\n"
                 f"Assurez-vous que LM Studio est démarré avec le serveur local activé sur le port {self.remote_port}."
