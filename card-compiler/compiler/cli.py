@@ -4,6 +4,7 @@ Commandes disponibles :
 - `python -m compiler.cli run` (alias `compile`) : Exécute le pipeline complet (TCGdex -> Llama GBNF -> Disque)
   avec support de `--mode test|standard`, `--test`, `--standard`, `--ids`, `--fast`, `--force`.
 - `python -m compiler.cli count` : Compte le nombre de cartes déjà compilées dans `data/compiled_cards/` (options `--details` et `--quiet`).
+- `python -m compiler.cli remaining` (alias `todo`, `left`, `pending`, `a-compiler`) : Affiche le nombre de cartes restant à compiler (globalement, par extension via `--set`, avec progression et options `--details` et `--quiet`).
 - `python -m compiler.cli sync` (alias `sync-database`, `sync-db`, `check-database`) : Vérifie que toutes les cartes compilées sont présentes dans `data/cards_database.json` et ajoute automatiquement les cartes manquantes.
 - `python -m compiler.cli inspect <card_id>` : Affiche avec coloration syntaxique JSON et panneaux Rich
   le modèle complet généré dans `data/compiled_cards/<card_id>.json`.
@@ -21,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import typer
 from pydantic import ValidationError
 from rich.console import Console
@@ -87,6 +89,134 @@ def get_data_dir() -> Path:
     (data_dir / "raw_tcgdex").mkdir(parents=True, exist_ok=True)
     (data_dir / "compiled_cards").mkdir(parents=True, exist_ok=True)
     return data_dir
+
+
+SV_SET_NAMES: Dict[str, str] = {
+    "sv01": "Écarlate et Violet",
+    "sv02": "Évolutions à Paldéa",
+    "sv03": "Flammes Obsidiennes",
+    "sv03.5": "151",
+    "sv04": "Faille Paradoxe",
+    "sv04.5": "Destinées de Paldéa",
+    "sv05": "Forces Temporelles",
+    "sv06": "Mascarade Crépusculaire",
+    "sv06.5": "Fable Nébuleuse",
+    "sv07": "Couronne Stellaire",
+    "sv08": "Étincelles Déferlantes",
+    "sv08.5": "Évolutions Prismatiques",
+    "sve": "Énergies de Base SV",
+    "svp": "Promos Écarlate et Violet",
+}
+
+
+def get_remaining_cards_summary(
+    data_dir: Path,
+    mode: str = "standard",
+    set_filter: Optional[str] = None,
+    provider: FetcherProvider = FetcherProvider.sdk,
+) -> Dict[str, Any]:
+    """Calcule le statut et le nombre de cartes restant à compiler.
+
+    Retourne un dictionnaire contenant les statistiques globales et par extension :
+    - mode : 'standard', 'test', ou 'all'
+    - set_filter : préfixe de set filtré (si spécifié)
+    - total_target : nombre total de cartes visées
+    - total_compiled : nombre de cartes cibles déjà compilées
+    - total_remaining : nombre de cartes restant à compiler
+    - progress_pct : pourcentage d'avancement
+    - remaining_ids : liste des identifiants des cartes non compilées
+    - by_set : statistiques groupées par extension
+    - total_disk_compiled : total absolu de cartes compilées sur le disque
+    """
+    compiled_dir = data_dir / "compiled_cards"
+    compiled_dir.mkdir(parents=True, exist_ok=True)
+    compiled_ids = set(f.stem for f in compiled_dir.glob("*.json"))
+
+    fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
+
+    effective_mode = mode.lower().strip()
+    target_ids: List[str] = []
+
+    if effective_mode == "test":
+        target_ids = list(TEST_CARD_IDS)
+    elif effective_mode == "all":
+        index_path = data_dir / "raw_tcgdex" / "_cards_index.json"
+        if index_path.exists():
+            try:
+                cached_idx = json.loads(index_path.read_text(encoding="utf-8"))
+                target_ids = [
+                    str(c.get("id")).strip()
+                    for c in cached_idx
+                    if isinstance(c, dict) and c.get("id")
+                ]
+            except Exception:
+                target_ids = []
+        if not target_ids:
+            async def _fetch_all():
+                async with httpx.AsyncClient() as client:
+                    idx = await fetcher.fetch_cards_index(client, force=False)
+                    return [str(c.get("id")).strip() for c in idx if isinstance(c, dict) and c.get("id")]
+            target_ids = asyncio.run(_fetch_all())
+    else:
+        # Mode standard par défaut
+        async def _resolve_std():
+            async with httpx.AsyncClient() as client:
+                return await fetcher.resolve_standard_card_ids(client)
+        target_ids = asyncio.run(_resolve_std())
+
+    # Application du filtre par extension / set
+    if set_filter:
+        s_clean = set_filter.strip().lower()
+        target_ids = [
+            cid for cid in target_ids
+            if cid.lower().startswith(f"{s_clean}-") or cid.lower() == s_clean
+        ]
+
+    # Analyse des cartes compilées vs restantes
+    compiled_target = [cid for cid in target_ids if cid in compiled_ids]
+    remaining_ids = [cid for cid in target_ids if cid not in compiled_ids]
+
+    total_target = len(target_ids)
+    total_compiled = len(compiled_target)
+    total_remaining = len(remaining_ids)
+    progress_pct = (total_compiled / total_target * 100.0) if total_target > 0 else 100.0
+
+    # Ventilation par extension
+    by_set: Dict[str, Dict[str, Any]] = {}
+    for cid in target_ids:
+        prefix = cid.split("-")[0].lower() if "-" in cid else "autres"
+        if prefix not in by_set:
+            by_set[prefix] = {
+                "set_code": prefix,
+                "set_name": SV_SET_NAMES.get(prefix, prefix.upper()),
+                "total": 0,
+                "compiled": 0,
+                "remaining": 0,
+                "remaining_ids": [],
+            }
+        by_set[prefix]["total"] += 1
+        if cid in compiled_ids:
+            by_set[prefix]["compiled"] += 1
+        else:
+            by_set[prefix]["remaining"] += 1
+            by_set[prefix]["remaining_ids"].append(cid)
+
+    for s_info in by_set.values():
+        t = s_info["total"]
+        c = s_info["compiled"]
+        s_info["progress_pct"] = (c / t * 100.0) if t > 0 else 100.0
+
+    return {
+        "mode": effective_mode,
+        "set_filter": set_filter,
+        "total_target": total_target,
+        "total_compiled": total_compiled,
+        "total_remaining": total_remaining,
+        "progress_pct": progress_pct,
+        "remaining_ids": remaining_ids,
+        "by_set": by_set,
+        "total_disk_compiled": len(compiled_ids),
+    }
 
 
 def sync_cards_database(
@@ -962,12 +1092,23 @@ def count_command(
             db_status = " [bold green](à jour ✓)[/bold green]"
     db_line = f"\n• [bold]Base consolidée ([cyan]cards_database.json[/cyan])[/bold] : {db_count} carte(s){db_status}" if db_path.exists() else ""
 
+    rem_hint = ""
+    try:
+        rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard")
+        rem_std = rem_summary["total_remaining"]
+        tot_std = rem_summary["total_target"]
+        prog_std = rem_summary["progress_pct"]
+        rem_hint = f"\n• [bold]Restant à compiler (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% compilé — commande 'remaining')"
+    except Exception:
+        pass
+
     console.print(
         Panel.fit(
             f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
             f"• [bold]Dossier de stockage[/bold] : [cyan]{compiled_dir}[/cyan]\n"
             f"• [bold]Répartition par catégorie[/bold] : {repartition_str}"
-            f"{db_line}",
+            f"{db_line}"
+            f"{rem_hint}",
             title="[bold green]Corpus de Cartes Compilées[/bold green]",
             border_style="green",
         )
@@ -1158,6 +1299,175 @@ def sync_db_alias(
 ) -> None:
     """Alias de la commande `sync`."""
     sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+
+
+@app.command("remaining")
+def remaining_command(
+    mode: str = typer.Option(
+        "standard",
+        "--mode",
+        "-m",
+        help="Mode de filtrage des cartes cibles : 'standard' (défaut), 'test', ou 'all'.",
+    ),
+    set_name: Optional[str] = typer.Option(
+        None,
+        "--set",
+        "-s",
+        help="Filtre sur une extension spécifique (ex: 'sv01', 'sv05', 'sve').",
+    ),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        "-d",
+        help="Affiche la liste complète des identifiants (IDs) des cartes restant à compiler.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Affiche uniquement le nombre entier de cartes restant à compiler (idéal pour scripts bash).",
+    ),
+) -> None:
+    """Calcule et affiche le nombre de cartes Pokémon TCG restant à compiler (globalement ou par extension)."""
+    data_dir = get_data_dir()
+    try:
+        summary = get_remaining_cards_summary(
+            data_dir=data_dir,
+            mode=mode,
+            set_filter=set_name,
+        )
+    except Exception as e:
+        console.print(f"[bold red]✗ Erreur lors du calcul des cartes restantes :[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    total_remaining = summary["total_remaining"]
+    if quiet:
+        console.print(str(total_remaining))
+        return
+
+    total_target = summary["total_target"]
+    total_compiled = summary["total_compiled"]
+    progress_pct = summary["progress_pct"]
+    by_set = summary["by_set"]
+    remaining_ids = summary["remaining_ids"]
+
+    mode_label = (
+        f"Extension spécifique ({set_name.upper()})"
+        if set_name
+        else (f"Standard (bloc Écarlate & Violet)" if mode == "standard" else (f"Test ({len(TEST_CARD_IDS)} cartes)" if mode == "test" else "Total TCGdex global"))
+    )
+
+    rem_color = "bold green" if total_remaining == 0 else "bold yellow"
+    prog_color = "bold green" if progress_pct >= 100.0 else ("bold cyan" if progress_pct >= 50.0 else "bold yellow")
+
+    console.print(
+        Panel.fit(
+            f"• [bold]Périmètre analysé[/bold] : [cyan]{mode_label}[/cyan]\n"
+            f"• [bold]Total de cartes cibles[/bold] : [bold white]{total_target}[/bold white]\n"
+            f"• [bold]Cartes déjà compilées[/bold] : [bold green]{total_compiled}[/bold green] ([{prog_color}]{progress_pct:.1f}%[/{prog_color}])\n"
+            f"• [bold]Cartes restant à compiler[/bold] : [{rem_color}]{total_remaining}[/{rem_color}] ([dim]{100.0 - progress_pct:.1f}% restant[/dim])\n"
+            f"• [bold]Total de cartes sur le disque[/bold] : [dim]{summary['total_disk_compiled']} carte(s)[/dim]",
+            title="[bold cyan]État d'Avancement de la Compilation Pokémon TCG[/bold cyan]",
+            border_style="green" if total_remaining == 0 else "cyan",
+        )
+    )
+
+    # Affichage du tableau de progression par set si plusieurs sets sont concernés
+    if len(by_set) > 1:
+        table = Table(
+            title=f"Progression par Extension ({len(by_set)} sets)",
+            header_style="bold cyan",
+            show_lines=False,
+        )
+        table.add_column("Set", style="bold cyan")
+        table.add_column("Nom de l'Extension", style="white")
+        table.add_column("Compilées", justify="right", style="green")
+        table.add_column("Total", justify="right", style="white")
+        table.add_column("Avancement", justify="right")
+        table.add_column("Restantes", justify="right", style="bold yellow")
+
+        for s_code in sorted(by_set.keys()):
+            s_data = by_set[s_code]
+            pct = s_data["progress_pct"]
+            rem = s_data["remaining"]
+            pct_str = f"[bold green]{pct:5.1f}% ✓[/bold green]" if rem == 0 else (
+                f"[bold cyan]{pct:5.1f}%[/bold cyan]" if pct >= 50.0 else (
+                    f"[yellow]{pct:5.1f}%[/yellow]" if pct > 0 else "[red]  0.0%[/red]"
+                )
+            )
+            rem_str = "[bold green]0[/bold green]" if rem == 0 else f"[bold yellow]{rem}[/bold yellow]"
+            table.add_row(
+                s_data["set_code"],
+                s_data["set_name"],
+                str(s_data["compiled"]),
+                str(s_data["total"]),
+                pct_str,
+                rem_str,
+            )
+
+        console.print(table)
+
+    if details and remaining_ids:
+        console.print(f"\n[bold yellow]Liste des {len(remaining_ids)} cartes restant à compiler :[/bold yellow]")
+        chunks = [remaining_ids[i:i + 12] for i in range(0, min(len(remaining_ids), 120), 12)]
+        for chunk in chunks:
+            console.print("  " + ", ".join(f"[cyan]{cid}[/cyan]" for cid in chunk))
+        if len(remaining_ids) > 120:
+            console.print(f"  [dim]... et {len(remaining_ids) - 120} autre(s) carte(s)[/dim]")
+
+    if total_remaining == 0:
+        console.print(f"\n[bold green]🎉 Félicitations ! Toutes les cartes de ce périmètre ({total_target}) sont déjà compilées ![/bold green]")
+    else:
+        cmd_hint = (
+            f"python -m compiler.cli run --ids {','.join(remaining_ids[:3])}"
+            if len(remaining_ids) <= 3
+            else (f"python -m compiler.cli run --mode standard" if mode == "standard" and not set_name else f"python -m compiler.cli run --mode {mode}")
+        )
+        console.print(f"\n[dim]💡 Pour compiler les cartes restantes :[/dim] [cyan]{cmd_hint}[/cyan]")
+
+
+@app.command("todo", hidden=True)
+def todo_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+) -> None:
+    """Alias de la commande `remaining`."""
+    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+
+
+@app.command("left", hidden=True)
+def left_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+) -> None:
+    """Alias de la commande `remaining`."""
+    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+
+
+@app.command("pending", hidden=True)
+def pending_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+) -> None:
+    """Alias de la commande `remaining`."""
+    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+
+
+@app.command("a-compiler", hidden=True)
+def a_compiler_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    details: bool = typer.Option(False, "--details", "-d"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+) -> None:
+    """Alias de la commande `remaining`."""
+    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
 
 
 if __name__ == "__main__":
