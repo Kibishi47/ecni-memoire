@@ -13,8 +13,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -169,7 +171,7 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
                 if family in c.lower():
                     return c
 
-    return candidates[0]
+    return None
 
 
 class LMStudioCardCompiler:
@@ -242,6 +244,26 @@ class LMStudioCardCompiler:
 
         self.hf_token: Optional[str] = None
         atexit.register(self.close)
+        self._register_signal_handlers()
+
+    def _register_signal_handlers(self) -> None:
+        """Enregistre des handlers de signaux (SIGINT, SIGTERM) pour décharger le modèle en cas d'interruption manuelle."""
+        try:
+            prev_sigint = signal.getsignal(signal.SIGINT)
+            prev_sigterm = signal.getsignal(signal.SIGTERM)
+
+            def _handler(sig, frame):
+                self.close()
+                if sig == signal.SIGINT and callable(prev_sigint) and prev_sigint not in {signal.SIG_DFL, signal.SIG_IGN}:
+                    prev_sigint(sig, frame)
+                elif sig == signal.SIGTERM and callable(prev_sigterm) and prev_sigterm not in {signal.SIG_DFL, signal.SIG_IGN}:
+                    prev_sigterm(sig, frame)
+                sys.exit(130 if sig == signal.SIGINT else 143)
+
+            signal.signal(signal.SIGINT, _handler)
+            signal.signal(signal.SIGTERM, _handler)
+        except Exception:
+            pass
 
     @property
     def ssh_target(self) -> str:
@@ -322,7 +344,12 @@ class LMStudioCardCompiler:
     def _run_ssh_command(self, remote_command: str) -> Tuple[int, str, str]:
         """Exécute une commande distante via SSH et retourne (code_retour, stdout, stderr)."""
         cmd = self._build_ssh_base_command()
-        cmd.append(remote_command)
+        # Export PATH pour garantir que `lms` est trouvé même en session SSH non interactive
+        full_remote_cmd = (
+            'export PATH="$HOME/.cache/lm-studio/bin:$HOME/.lmstudio/bin:$HOME/.local/bin:/usr/local/bin:$PATH"; '
+            f"{remote_command}"
+        )
+        cmd.append(full_remote_cmd)
         env = self._get_ssh_env()
         proc = subprocess.run(
             cmd,
@@ -330,6 +357,7 @@ class LMStudioCardCompiler:
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,
+            timeout=60.0,
         )
         return proc.returncode, proc.stdout, proc.stderr
 
@@ -423,7 +451,7 @@ class LMStudioCardCompiler:
             pass
 
     def _ensure_remote_lm_studio(self) -> None:
-        """Vérifie l'état de LM Studio sur la machine distante et démarre le serveur/modèle si nécessaire."""
+        """Vérifie l'état de LM Studio sur la machine distante, décharge les modèles non requis et charge le modèle requis."""
         if not self.ssh_host or not self.auto_start:
             return
 
@@ -447,25 +475,56 @@ class LMStudioCardCompiler:
         if not server_running:
             # Démarrage du serveur LM Studio
             start_cmd = f"{self.cli_path} server start --port {self.remote_port}"
-            self._run_ssh_command(start_cmd)
-            time.sleep(1.5)
-
-        # 3. Chargement du modèle si aucun modèle actif dans `lms ps`
-        code, ps_out, _ = self._run_ssh_command(f"{self.cli_path} ps")
-        running_models = parse_lms_ls_output(ps_out) if code == 0 else []
-        model_already_loaded = False
-        if running_models:
-            matched_running = find_best_model_candidate(running_models, self.model_name)
-            if matched_running:
-                model_already_loaded = True
-                self.model_name = matched_running
-
-        if not model_already_loaded:
-            self._load_remote_model_via_cli()
+            code, _, start_err = self._run_ssh_command(start_cmd)
+            if code != 0:
+                raise RuntimeError(f"Échec du démarrage du serveur LM Studio distant ({start_cmd}) : {start_err}")
             time.sleep(2.0)
 
+        # 3. Déchargement des modèles non requis et chargement du modèle requis
+        target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
+
+        # Inspection de l'état actuel de LM Studio via `lms ps`
+        ps_code, ps_out, _ = self._run_ssh_command(f"{self.cli_path} ps")
+        running_models = parse_lms_ls_output(ps_out) if ps_code == 0 else []
+
+        # Vérifie si le modèle requis est déjà en mémoire
+        matched_running = find_best_model_candidate(running_models, target_name) if running_models else None
+
+        if running_models and not matched_running:
+            # Des modèles non requis sont actuellement chargés : on les décharge
+            self._run_ssh_command(f"{self.cli_path} unload --all")
+            time.sleep(1.5)
+            running_models = []
+
+        if matched_running:
+            self.model_name = matched_running
+            return
+
+        # 4. Chargement du modèle requis
+        ls_code, ls_out, _ = self._run_ssh_command(f"{self.cli_path} ls")
+        downloaded = parse_lms_ls_output(ls_out) if ls_code == 0 else []
+        model_to_load = find_best_model_candidate(downloaded, target_name) or target_name
+
+        load_code, _, load_err = self._run_ssh_command(f"{self.cli_path} load {model_to_load} --gpu max -y")
+        if load_code != 0:
+            raise RuntimeError(
+                f"Échec du chargement du modèle '{model_to_load}' dans LM Studio sur {self.ssh_target} (code {load_code}) : {load_err.strip()}"
+            )
+
+        # 5. Attente active de confirmation en VRAM
+        for _ in range(25):
+            time.sleep(1.0)
+            ps_c, ps_o, _ = self._run_ssh_command(f"{self.cli_path} ps")
+            if ps_c == 0:
+                cur_running = parse_lms_ls_output(ps_o)
+                if cur_running:
+                    self.model_name = cur_running[0]
+                    break
+        else:
+            self.model_name = model_to_load
+
     def _ensure_local_lm_studio(self) -> None:
-        """Vérifie l'état de LM Studio sur la machine locale si aucun hôte SSH n'est configuré."""
+        """Vérifie l'état de LM Studio sur la machine locale, décharge les modèles non requis et charge le modèle requis."""
         if self.ssh_host or not self.auto_start:
             return
 
@@ -473,18 +532,30 @@ class LMStudioCardCompiler:
             res = subprocess.run([self.cli_path, "status"], capture_output=True, text=True)
             if res.returncode == 0 and "running" not in res.stdout.lower() and "port" not in res.stdout.lower():
                 subprocess.run([self.cli_path, "server", "start", "--port", str(self.remote_port)], check=False)
-                time.sleep(1.0)
+                time.sleep(1.5)
+
+            target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
             ps_res = subprocess.run([self.cli_path, "ps"], capture_output=True, text=True)
             running_models = parse_lms_ls_output(ps_res.stdout) if ps_res.returncode == 0 else []
-            if not running_models:
-                self._load_local_model_via_cli()
+
+            matched_running = find_best_model_candidate(running_models, target_name) if running_models else None
+
+            if running_models and not matched_running:
+                subprocess.run([self.cli_path, "unload", "--all"], capture_output=True, text=True, check=False)
                 time.sleep(1.0)
-            else:
-                matched_running = find_best_model_candidate(running_models, self.model_name)
-                if matched_running:
-                    self.model_name = matched_running
+                running_models = []
+
+            if matched_running:
+                self.model_name = matched_running
+                return
+
+            ls_res = subprocess.run([self.cli_path, "ls"], capture_output=True, text=True)
+            downloaded = parse_lms_ls_output(ls_res.stdout) if ls_res.returncode == 0 else []
+            model_to_load = find_best_model_candidate(downloaded, target_name) or target_name
+            subprocess.run([self.cli_path, "load", model_to_load, "--gpu", "max", "-y"], check=False)
+            time.sleep(2.0)
+            self.model_name = model_to_load
         except Exception:
-            # Si le binaire `lms` n'est pas dans le PATH local, on tente l'accès direct via HTTP REST
             pass
 
     def load_model_in_memory(self) -> None:
@@ -511,46 +582,40 @@ class LMStudioCardCompiler:
                 models_list = data.get("data", [])
                 active_ids = [m.get("id") for m in models_list if isinstance(m, dict) and m.get("id")] if isinstance(models_list, list) else []
 
-                # Si aucun modèle n'est actuellement chargé en mémoire dans LM Studio
+                target_name = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
+                matched = find_best_model_candidate(active_ids, target_name) if active_ids else None
+
+                # Si des modèles non requis sont actifs, on les décharge
+                if active_ids and not matched:
+                    self.unload_model()
+                    time.sleep(1.5)
+                    active_ids = []
+
+                # Si aucun modèle n'est chargé, on déclenche le chargement
                 if not active_ids:
-                    # 1. Tentative de chargement via l'API REST native de LM Studio (v0 / v1)
-                    downloaded_models: List[str] = []
-                    for list_ep in [f"{root_url}/api/v1/models", f"{root_url}/api/v0/models"]:
+                    # 1. Tentative REST si disponible
+                    rest_loaded = False
+                    for load_ep in [f"{root_url}/api/v1/models/load", f"{root_url}/api/v0/model/load"]:
                         try:
-                            d_resp = client.get(list_ep)
-                            if d_resp.is_success:
-                                d_data = d_resp.json()
-                                if isinstance(d_data, list):
-                                    downloaded_models = [str(m.get("id") or m.get("name")) for m in d_data if isinstance(m, dict)]
-                                elif isinstance(d_data, dict) and "data" in d_data:
-                                    downloaded_models = [str(m.get("id") or m.get("name")) for m in d_data["data"] if isinstance(m, dict)]
-                                if downloaded_models:
-                                    break
+                            l_resp = client.post(load_ep, json={"model": target_name, "echo_load_config": False}, timeout=30.0)
+                            if l_resp.is_success:
+                                rest_loaded = True
+                                break
                         except Exception:
                             pass
 
-                    target_to_load = find_best_model_candidate(downloaded_models, self.model_name) or self.model_name
-                    rest_loaded = False
-                    if target_to_load:
-                        for load_ep in [f"{root_url}/api/v1/models/load", f"{root_url}/api/v0/model/load"]:
+                    # 2. Si REST échoue, tentative CLI
+                    if not rest_loaded:
+                        if self.ssh_host:
+                            self._run_ssh_command(f"{self.cli_path} load {target_name} --gpu max -y")
+                        else:
                             try:
-                                l_resp = client.post(load_ep, json={"model": target_to_load, "echo_load_config": False}, timeout=30.0)
-                                if l_resp.is_success:
-                                    rest_loaded = True
-                                    self.model_name = target_to_load
-                                    break
+                                subprocess.run([self.cli_path, "load", target_name, "--gpu", "max", "-y"], check=False)
                             except Exception:
                                 pass
 
-                    # 2. Si le REST n'a pas pu charger (ex: version plus ancienne) et qu'on a le CLI
-                    if not rest_loaded:
-                        if self.ssh_host:
-                            self._load_remote_model_via_cli()
-                        else:
-                            self._load_local_model_via_cli()
-
-                    # 3. Attente / polling actif que le modèle soit chargé en RAM/VRAM
-                    for _ in range(15):
+                    # 3. Attente active de confirmation
+                    for _ in range(25):
                         time.sleep(1.0)
                         try:
                             p_resp = client.get(models_url)
@@ -563,17 +628,15 @@ class LMStudioCardCompiler:
                         except Exception:
                             pass
 
-                    if not active_ids:
-                        target_model = self.model_name or DEFAULT_REMOTE_NORMAL_MODEL
-                        raise RuntimeError(
-                            f"Aucun modèle n'est actuellement chargé dans LM Studio sur {self.api_base_url}.\n"
-                            f"Veuillez charger un modèle en mémoire avant de lancer la compilation, par exemple via :\n"
-                            f"  lms load {target_model} --gpu max\n"
-                            f"ou directement depuis l'interface LM Studio (onglet 'Local Server' > 'Select a model to load')."
-                        )
+                if not active_ids:
+                    raise RuntimeError(
+                        f"Aucun modèle n'est chargé dans LM Studio sur {self.api_base_url}.\n"
+                        f"Veuillez charger le modèle '{target_name}' en mémoire via :\n"
+                        f"  lms load {target_name} --gpu max -y\n"
+                        f"ou depuis l'interface LM Studio."
+                    )
 
-                matched = find_best_model_candidate(active_ids, self.model_name)
-                self.model_name = matched or active_ids[0]
+                self.model_name = find_best_model_candidate(active_ids, target_name) or active_ids[0]
 
         except Exception as exc:
             self.close()
@@ -581,7 +644,7 @@ class LMStudioCardCompiler:
             if isinstance(exc, RuntimeError):
                 raise
             raise ConnectionError(
-                f"Impossible de joindre l'API LM Studio sur {target_desc} : {exc}\n"
+                f"Impossible de joindre ou d'initialiser l'API LM Studio sur {target_desc} : {exc}\n"
                 f"Assurez-vous que LM Studio est démarré avec le serveur local activé sur le port {self.remote_port}."
             ) from exc
 
@@ -799,8 +862,35 @@ class LMStudioCardCompiler:
         engine_card = sanitize_and_enrich_card(bundle, engine_card)
         return engine_card
 
+    def unload_model(self) -> None:
+        """Décharge les modèles de la mémoire LM Studio (RAM / VRAM) pour libérer les ressources du GPU."""
+        try:
+            # 1. Tentative de déchargement via l'API REST si le serveur est accessible
+            root_url = self.api_base_url.rsplit("/v1", 1)[0]
+            for ep in [f"{root_url}/api/v1/models/unload", f"{root_url}/api/v0/model/unload"]:
+                try:
+                    with httpx.Client(timeout=4.0) as client:
+                        client.post(ep, json={"model": self.model_name or ""})
+                except Exception:
+                    pass
+
+            # 2. Déchargement garanti via CLI `lms unload --all` (SSH distant ou local)
+            if self.ssh_host:
+                self._run_ssh_command(f"{self.cli_path} unload --all")
+            else:
+                try:
+                    subprocess.run([self.cli_path, "unload", "--all"], capture_output=True, text=True, check=False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def close(self) -> None:
-        """Ferme proprement le tunnel SSH et libère les processus et fichiers associés."""
+        """Ferme proprement le compilateur : décharge le modèle d'abord, puis ferme le tunnel SSH et nettoie."""
+        # 1. Déchargement impératif du modèle en premier
+        self.unload_model()
+
+        # 2. Fermeture du tunnel SSH
         if self._tunnel_proc is not None:
             try:
                 self._tunnel_proc.terminate()
@@ -812,10 +902,13 @@ class LMStudioCardCompiler:
                     pass
             finally:
                 self._tunnel_proc = None
+
+        # 3. Nettoyage du fichier askpass temporaire
         if self._askpass_file and os.path.exists(self._askpass_file):
             try:
                 os.unlink(self._askpass_file)
             except Exception:
                 pass
             self._askpass_file = None
+
         self._ready = False

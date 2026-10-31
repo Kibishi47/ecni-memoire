@@ -324,9 +324,11 @@ def _execute_run_pipeline(
                         compiled_results.append(engine_card)
                     except Exception as card_err:
                         console.print(
-                            f"\n[bold red]✗ Erreur lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
+                            f"\n[bold red]✗ Erreur critique lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
                         )
                         failed_cards.append((bundle.card_id, bundle.identity.nameFr, str(card_err)))
+                        # Arrêt immédiat dès la première erreur selon la directive utilisateur
+                        raise typer.Exit(code=1)
                     finally:
                         progress.advance(task_id)
 
