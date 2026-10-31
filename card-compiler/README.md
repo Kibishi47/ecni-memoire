@@ -112,7 +112,21 @@ Options disponibles sur `sync` (alias `sync-database`, `sync-db`, `check-databas
 - `--db-path` (`-p`) : Chemin alternatif vers un fichier JSON consolidé.
 - `--update` (`-u`) : Met également à jour les cartes déjà existantes si leur version disque a changé.
 
-### 6. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
+### 6. Connaître le nombre de cartes restant à compiler
+
+Calcule et affiche le nombre de cartes cibles restant à compiler, avec la progression globale et la ventilation détaillée par extension :
+
+```bash
+python -m compiler.cli remaining
+```
+
+Options disponibles sur `remaining` (alias `todo`, `left`, `pending`, `a-compiler`) :
+- `--set <CODE>` (`-s`) : Filtre sur une extension précise (ex: `-s sv01`, `-s sv05`, `-s sve`).
+- `--details` (`-d`) : Affiche la liste complète des identifiants (IDs) des cartes non compilées.
+- `--quiet` (`-q`) : Affiche uniquement le nombre entier restant (idéal pour scripts bash).
+- `--mode standard|test|all` (`-m`) : Sélectionne le périmètre cible (défaut : `standard`).
+
+### 7. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
 
 ```bash
 python -m compiler.cli stats
