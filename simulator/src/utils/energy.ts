@@ -168,6 +168,8 @@ export function createNativeBasicEnergyModel(
       rarity: 'Commune',
       imageUrl: `https://assets.tcgdex.net/fr/sv/sve/${locId}`,
       rawRulesText: [`[Énergie FR] Fournit 1 Énergie ${info.energyTypeFr} ({${info.code}}).`],
+      isAceSpec: false,
+      isTechnicalMachine: false,
     },
     pokemonStats: null,
     category: 'ENERGY',

@@ -413,6 +413,8 @@ function evaluateDeadCondition(
       const zones = cond.zonesToCheck.length > 0 ? cond.zonesToCheck : (['DECK'] as ZoneType[])
       return countMatchingCardsInZones(myBoard, zones, cond.targetFilter) === 0
     }
+    default:
+      return false
   }
 }
 
