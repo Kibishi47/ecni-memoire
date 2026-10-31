@@ -623,6 +623,23 @@ def _execute_run_pipeline(
                             encoding="utf-8",
                         )
                         compiled_results.append(engine_card)
+
+                        # Affichage du débit et de la durée dès la fin de compilation de chaque carte
+                        meta = engine_card.compilationMetadata
+                        tps_text = (
+                            f" • [cyan]{meta.tokensPerSecond:.1f} t/s[/cyan]"
+                            if meta and meta.tokensPerSecond is not None
+                            else ""
+                        )
+                        tok_count = (
+                            f" ({meta.completionTokens} tokens)"
+                            if meta and meta.completionTokens is not None
+                            else ""
+                        )
+                        elapsed_text = f"{meta.compilationTimeSeconds:.2f}s" if meta else ""
+                        progress.console.print(
+                            f"  [green]✓[/green] [bold]{bundle.card_id}[/bold] ({bundle.identity.nameFr}) compilé en [yellow]{elapsed_text}[/yellow]{tok_count}{tps_text}"
+                        )
                     except Exception as card_err:
                         console.print(
                             f"\n[bold red]✗ Erreur critique lors de la compilation de {bundle.card_id} ({bundle.identity.nameFr}):[/bold red] {card_err}"
@@ -659,7 +676,7 @@ def _execute_run_pipeline(
     order_map = {b.card_id: idx for idx, b in enumerate(bundles)}
     compiled_results.sort(key=lambda c: order_map.get(c.cardId, 9999))
 
-    # Table récapitulative Rich (ID, Nom, Rôle, Primitives générées, Conditions de Carte Morte, Temps en secondes)
+    # Table récapitulative Rich (ID, Nom, Rôle, Primitives générées, Conditions de Carte Morte, Temps / Débit)
     table = Table(
         title="Récapitulatif de la Compilation des Cartes Pokémon TCG",
         show_lines=True,
@@ -670,7 +687,7 @@ def _execute_run_pipeline(
     table.add_column("Rôle", style="magenta")
     table.add_column("Primitives générées", style="green")
     table.add_column("Conditions de Carte Morte", style="red")
-    table.add_column("Temps (s)", justify="right", style="cyan")
+    table.add_column("Temps / Débit", justify="right", style="cyan")
 
     for model in compiled_results:
         is_static = (
@@ -682,7 +699,7 @@ def _execute_run_pipeline(
         if is_static:
             primitives_str = "[cyan]⚡ STATIQUE (Skip LLM)[/cyan]"
             dead_str = "—"
-            elapsed_s = "0.00s"
+            perf_str = "0.00s"
         else:
             primitives: List[str] = []
             for action in model.playableActions:
@@ -693,13 +710,18 @@ def _execute_run_pipeline(
             dead_reasons = [cond.reason.value for cond in model.strategicEvaluator.inGameDeadCardConditions]
             dead_str = ", ".join(dead_reasons) if dead_reasons else "—"
 
-            elapsed_s = (
-                f"{model.compilationMetadata.compilationTimeSeconds:.2f}s"
-                if model.compilationMetadata
-                else "—"
-            )
+            meta = model.compilationMetadata
+            if meta:
+                time_str = f"{meta.compilationTimeSeconds:.2f}s"
+                if meta.tokensPerSecond is not None:
+                    perf_str = f"{time_str} ({meta.tokensPerSecond:.1f} t/s)"
+                else:
+                    perf_str = time_str
+            else:
+                perf_str = "—"
+
             if model.cardId in skipped_ids:
-                elapsed_s = f"{elapsed_s} (cache)"
+                perf_str = f"{perf_str} (cache)"
 
         display_name = model.identity.nameFr
         if model.identity.nameEn and model.identity.nameEn.lower() != model.identity.nameFr.lower():
@@ -711,10 +733,34 @@ def _execute_run_pipeline(
             model.strategicEvaluator.primaryRole.value,
             primitives_str,
             dead_str,
-            elapsed_s,
+            perf_str,
         )
 
     console.print(table)
+
+    # Statistiques de débit global
+    tps_values = [
+        m.compilationMetadata.tokensPerSecond
+        for m in compiled_results
+        if m.cardId not in skipped_ids
+        and m.cardId not in static_energy_ids
+        and m.compilationMetadata
+        and m.compilationMetadata.tokensPerSecond is not None
+    ]
+    if tps_values:
+        avg_tps = sum(tps_values) / len(tps_values)
+        total_toks = sum(
+            m.compilationMetadata.completionTokens
+            for m in compiled_results
+            if m.cardId not in skipped_ids
+            and m.compilationMetadata
+            and m.compilationMetadata.completionTokens is not None
+        )
+        tok_info = f" • [cyan]{total_toks}[/cyan] tokens générés au total" if total_toks > 0 else ""
+        console.print(
+            f"[bold cyan]⚡ Débit moyen d'inférence :[/bold cyan] [bold green]{avg_tps:.1f} tokens/seconde[/bold green]"
+            f"{tok_info} ([dim]{len(tps_values)} carte(s) compilée(s)[/dim])"
+        )
 
 
 @app.command("run")
@@ -909,6 +955,16 @@ def inspect_command(
             f"\n• [bold]Lignée d'évolution[/bold] : {chain_str} (Base racine : [green]{model.pokemonStats.rootBasicName}[/green])"
         )
 
+    meta_line = ""
+    if model.compilationMetadata:
+        meta = model.compilationMetadata
+        tps_part = f" | Débit : [bold green]{meta.tokensPerSecond:.1f} t/s[/bold green]" if meta.tokensPerSecond is not None else ""
+        tok_part = f" ({meta.completionTokens} tokens)" if meta.completionTokens is not None else ""
+        meta_line = (
+            f"\n• [bold]Métadonnées LLM[/bold] : Modèle [cyan]{meta.modelFilename}[/cyan] | "
+            f"Temps : [yellow]{meta.compilationTimeSeconds:.2f}s[/yellow]{tok_part}{tps_part}"
+        )
+
     console.print(
         Panel.fit(
             f"[bold yellow]{model.cardId}[/bold yellow] — [bold white]{model.identity.nameFr}[/bold white] "
@@ -916,7 +972,8 @@ def inspect_command(
             f"• [bold]Catégorie[/bold] : {model.category.value} / {model.subCategory.value}\n"
             f"• [bold]Rôle Stratégique[/bold] : [magenta]{model.strategicEvaluator.primaryRole.value}[/magenta] "
             f"(Score intrinsèque : {model.strategicEvaluator.intrinsicBaseScore}/100)"
-            f"{evo_line}",
+            f"{evo_line}"
+            f"{meta_line}",
             title="Inspection du Modèle de Carte",
             border_style="green",
         )
@@ -1059,15 +1116,18 @@ def count_command(
                 sub_category = data.get("subCategory", "")
                 meta = data.get("compilationMetadata") or {}
                 model_name = meta.get("modelFilename") or meta.get("modelRepoId") or ""
+                tps = meta.get("tokensPerSecond")
         except Exception:
             pass
 
         categories_counter[category] += 1
+        tps_str = f"{tps:.1f} t/s" if isinstance(tps, (int, float)) else "—"
         cards_summary.append({
             "id": card_id,
             "name": card_name,
             "category": f"{category} / {sub_category}" if sub_category else category,
             "model": model_name,
+            "tps": tps_str,
         })
 
     db_path = data_dir / "cards_database.json"
@@ -1124,9 +1184,10 @@ def count_command(
         table.add_column("Nom", style="white")
         table.add_column("Catégorie", style="cyan")
         table.add_column("Généré par", style="magenta")
+        table.add_column("Débit", style="green", justify="right")
 
         for c in cards_summary:
-            table.add_row(c["id"], c["name"], c["category"], c["model"] or "—")
+            table.add_row(c["id"], c["name"], c["category"], c["model"] or "—", c["tps"])
 
         console.print(table)
 

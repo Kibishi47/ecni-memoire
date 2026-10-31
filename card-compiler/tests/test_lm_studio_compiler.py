@@ -409,6 +409,72 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(model.cardId, "sv06.5-001")
         self.assertFalse(compiler._use_json_schema_format)
 
+    @patch("httpx.Client")
+    def test_compile_card_computes_tokens_per_second_from_usage(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_host="127.0.0.1",
+            remote_port=1234,
+            use_tunnel=False,
+            model_name="qwen3.8-27b",
+        )
+        compiler._ready = True
+
+        fake_card_payload = {
+            "reasoningAnalysis": "Statitik test TPS.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_payload)}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 500,
+                "completion_tokens": 200,
+                "total_tokens": 700,
+            },
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertIsNotNone(model.compilationMetadata)
+        self.assertEqual(model.compilationMetadata.completionTokens, 200)
+        self.assertIsNotNone(model.compilationMetadata.tokensPerSecond)
+        self.assertGreater(model.compilationMetadata.tokensPerSecond, 0.0)
+
     def test_extract_json_payload(self):
         # 1. JSON pur
         self.assertEqual(extract_json_payload('{"a": 1}'), '{"a": 1}')

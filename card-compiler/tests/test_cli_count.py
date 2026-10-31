@@ -42,7 +42,7 @@ class TestCliCountCommand(unittest.TestCase):
             "identity": {"nameFr": "Bulbizarre", "nameEn": "Bulbasaur"},
             "category": "POKEMON",
             "subCategory": "BASIC",
-            "compilationMetadata": {"modelFilename": "Qwen3.8-27B.gguf"},
+            "compilationMetadata": {"modelFilename": "Qwen3.8-27B.gguf", "tokensPerSecond": 42.5},
         }
         card2 = {
             "cardId": "sve-001",
@@ -74,6 +74,8 @@ class TestCliCountCommand(unittest.TestCase):
             self.assertEqual(res_details.exit_code, 0)
             self.assertIn("Bulbizarre", res_details.stdout)
             self.assertIn("Énergie Plante", res_details.stdout)
+            self.assertIn("Débit", res_details.stdout)
+            self.assertIn("42.5 t/s", res_details.stdout)
 
 
 if __name__ == "__main__":

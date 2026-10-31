@@ -774,7 +774,7 @@ class LocalLLMCardCompiler:
                 max_tokens=current_max_tokens,
             )
 
-            elapsed = round(time.perf_counter() - t0, 3)
+            elapsed = max(0.001, round(time.perf_counter() - t0, 3))
             choice = completion["choices"][0]
             finish_reason = choice.get("finish_reason")
             raw_content = choice["message"]["content"]
@@ -820,11 +820,20 @@ class LocalLLMCardCompiler:
 
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
+        # Calcul des métriques de débit (tokens par seconde)
+        usage = completion.get("usage") if isinstance(completion, dict) else {}
+        completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+        tokens_per_second: Optional[float] = None
+        if isinstance(completion_tokens, (int, float)) and completion_tokens > 0 and elapsed > 0:
+            tokens_per_second = round(float(completion_tokens) / float(elapsed), 1)
+
         metadata = CompilationMetadata(
             modelRepoId=self.repo_id,
             modelFilename=self.filename,
             compilationTimeSeconds=elapsed,
             compiledAtIso=datetime.now(timezone.utc).isoformat(),
+            completionTokens=int(completion_tokens) if isinstance(completion_tokens, (int, float)) else None,
+            tokensPerSecond=tokens_per_second,
         )
 
         engine_card = EngineCardModel(
