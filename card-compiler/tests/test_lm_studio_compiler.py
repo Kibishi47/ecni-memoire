@@ -327,6 +327,88 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(model.strategicEvaluator.primaryRole.value, "BENCH_DEPLOYER")
         self.assertEqual(model.compilationMetadata.modelRepoId, "LM_STUDIO")
 
+    @patch("httpx.Client")
+    def test_compile_card_falls_back_when_json_schema_returns_empty_content(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_host="127.0.0.1",
+            remote_port=1234,
+            use_tunnel=False,
+            model_name="qwen3.8-27b",
+        )
+        compiler._ready = True
+        self.assertTrue(compiler._use_json_schema_format)
+
+        # 1er appel (json_schema) : succès HTTP 200 mais contenu vide (GBNF grammar conflict)
+        mock_empty_resp = MagicMock()
+        mock_empty_resp.is_success = True
+        mock_empty_resp.status_code = 200
+        mock_empty_resp.json.return_value = {
+            "choices": [{"message": {"content": ""}, "finish_reason": "stop"}]
+        }
+
+        # 2e appel (json_object ou none) : succès HTTP 200 avec le JSON complet valide
+        fake_card_payload = {
+            "reasoningAnalysis": "Statitik est un Pokémon de base rapide.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {
+                    "turn1": 1.5,
+                    "turn2": 1.0,
+                    "turn3": 0.5,
+                    "turn4Plus": 0.2,
+                },
+            },
+        }
+        mock_valid_resp = MagicMock()
+        mock_valid_resp.is_success = True
+        mock_valid_resp.status_code = 200
+        mock_valid_resp.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(fake_card_payload)
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.side_effect = [mock_empty_resp, mock_valid_resp]
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": [{"name": "Esquive", "damage": 10, "cost": ["Plante"]}]},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        model = compiler.compile_card(bundle)
+        self.assertIsInstance(model, EngineCardModel)
+        self.assertEqual(model.cardId, "sv06.5-001")
+        self.assertFalse(compiler._use_json_schema_format)
+
     def test_extract_json_payload(self):
         # 1. JSON pur
         self.assertEqual(extract_json_payload('{"a": 1}'), '{"a": 1}')
@@ -339,7 +421,19 @@ class TestLMStudioCompiler(unittest.TestCase):
             extract_json_payload('<think>Analyse interne...</think>\n```json\n{"a": 1}\n```'),
             '{"a": 1}',
         )
-        # 5. Texte libre avant et après le JSON
+        # 5. Balises <think> NON FERMÉES (interruption ou troncature)
+        self.assertEqual(
+            extract_json_payload('<think>Analyse en cours sans fin...\n{"a": 1}'),
+            '{"a": 1}',
+        )
+        # 6. Balises <think> seules sans JSON
+        self.assertEqual(
+            extract_json_payload('<think>Analyse sans aucun objet'),
+            '',
+        )
+        # 7. Chaîne vide
+        self.assertEqual(extract_json_payload(''), '')
+        # 8. Texte libre avant et après le JSON
         self.assertEqual(
             extract_json_payload('Voici la carte générée :\n{"a": 1}\nBonne compilation !'),
             '{"a": 1}',
