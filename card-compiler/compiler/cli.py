@@ -171,24 +171,26 @@ def _execute_run_pipeline(
 
     if llm_provider == LLMProvider.lm_studio:
         engine_preview = LMStudioCardCompiler(tier=effective_tier, ssh_password=ssh_password)
-        title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (Distant SSH / Local REST)[/bold cyan]"
+        title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (API REST)[/bold cyan]"
         model_display = engine_preview.model_name or "Auto-détection (modèle actuellement actif sur le serveur)"
-        if engine_preview.ssh_host:
+        if engine_preview.use_tunnel and engine_preview.ssh_host:
             auth_info = (
                 "[green]Mot de passe (SSH_PASSWORD)[/green]"
                 if engine_preview.ssh_password
                 else (f"Clé privée ([cyan]{engine_preview.ssh_key_path}[/cyan])" if engine_preview.ssh_key_path else "Clé SSH standard / Agent")
             )
             llm_lines = (
-                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Distant via SSH)[/bold magenta]\n"
+                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Tunnel SSH)[/bold magenta]\n"
                 f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
                 f"• [bold]Authentification[/bold] : {auth_info}\n"
-                f"• [bold]Tunnel SSH[/bold] : {'Actif (port local ' + str(engine_preview.local_port) + ' -> distant ' + str(engine_preview.remote_port) + ')' if engine_preview.use_tunnel else 'Désactivé (connexion directe)'}\n"
+                f"• [bold]Tunnel SSH[/bold] : Actif (port local {engine_preview.local_port} -> distant {engine_preview.remote_port})\n"
+                f"• [bold]URL API Locale[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
                 f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
             )
         else:
+            conn_type = f"Distant ({engine_preview.remote_host})" if engine_preview.remote_host and engine_preview.remote_host not in {"127.0.0.1", "localhost"} else "Local"
             llm_lines = (
-                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Local REST)[/bold magenta]\n"
+                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio ({conn_type} REST direct)[/bold magenta]\n"
                 f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
                 f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
             )

@@ -40,7 +40,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(compiler.ssh_port, 2222)
         self.assertEqual(compiler.ssh_user, "ai-user")
         self.assertEqual(compiler.ssh_target, "ai-user@gpu-node.internal:2222")
-        self.assertEqual(compiler.repo_id, "LM_STUDIO_REMOTE")
+        self.assertEqual(compiler.repo_id, "LM_STUDIO_SSH_TUNNEL")
         self.assertIn("qwen3-14b", compiler.filename)
         self.assertIn("127.0.0.1", compiler.api_base_url)
 
@@ -50,6 +50,26 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIn("-p", ssh_cmd)
         self.assertIn("2222", ssh_cmd)
         self.assertIn("ai-user@gpu-node.internal", ssh_cmd)
+
+    def test_init_direct_ip_without_ssh(self):
+        compiler = LMStudioCardCompiler(
+            remote_host="198.51.100.1",
+            remote_port=1234,
+        )
+        self.assertFalse(compiler.use_tunnel)
+        self.assertIsNone(compiler.ssh_host)
+        self.assertEqual(compiler.api_base_url, "http://198.51.100.1:1234/v1")
+        self.assertEqual(compiler.repo_id, "LM_STUDIO_REMOTE")
+        self.assertIn("http://198.51.100.1:1234/v1", compiler.filename)
+        compiler.close()
+
+    def test_init_direct_base_url(self):
+        compiler = LMStudioCardCompiler(
+            api_base_url="http://198.51.100.1:8080",
+        )
+        self.assertFalse(compiler.use_tunnel)
+        self.assertEqual(compiler.api_base_url, "http://198.51.100.1:8080/v1")
+        compiler.close()
 
     def test_ssh_with_password_using_sshpass(self):
         with patch("compiler.lm_studio_compiler._find_sshpass", return_value="/usr/bin/sshpass"):
@@ -128,7 +148,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         )
         self.assertIsNone(compiler.ssh_host)
         self.assertEqual(compiler.ssh_target, "localhost")
-        self.assertEqual(compiler.repo_id, "LM_STUDIO_LOCAL")
+        self.assertEqual(compiler.repo_id, "LM_STUDIO")
         self.assertEqual(compiler.api_base_url, "http://127.0.0.1:1234/v1")
 
     def test_factory_create_compiler_engine(self):
@@ -305,7 +325,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(model.category, CardCategory.TRAINER)
         self.assertEqual(model.subCategory, CardSubCategory.ITEM)
         self.assertEqual(model.strategicEvaluator.primaryRole.value, "BENCH_DEPLOYER")
-        self.assertEqual(model.compilationMetadata.modelRepoId, "LM_STUDIO_LOCAL")
+        self.assertEqual(model.compilationMetadata.modelRepoId, "LM_STUDIO")
 
     def test_extract_json_payload(self):
         # 1. JSON pur

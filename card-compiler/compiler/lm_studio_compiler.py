@@ -283,16 +283,18 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
 
 
 class LMStudioCardCompiler:
-    """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (local ou via SSH)."""
+    """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (directe par IP/port ou via tunnel SSH)."""
 
     def __init__(
         self,
+        api_base_url: Optional[str] = None,
+        remote_host: Optional[str] = None,
+        remote_port: Optional[int] = None,
         ssh_host: Optional[str] = None,
         ssh_port: Optional[int] = None,
         ssh_user: Optional[str] = None,
         ssh_key_path: Optional[str] = None,
         ssh_password: Optional[str] = None,
-        remote_port: Optional[int] = None,
         local_port: Optional[int] = None,
         use_tunnel: Optional[bool] = None,
         model_name: Optional[str] = None,
@@ -300,27 +302,52 @@ class LMStudioCardCompiler:
         auto_start: Optional[bool] = None,
         timeout_seconds: float = 180.0,
         tier: ModelTier = ModelTier.qwen3,
+        **kwargs: Any,
     ) -> None:
         load_env_file()
 
         self.tier = tier
 
-        # 1. Configuration SSH
-        self.ssh_host = ssh_host or os.environ.get("SSH_HOST") or None
+        # 1. Résolution de l'URL REST LM Studio (Directe IP/port ou tunnel SSH)
+        env_base_url = os.environ.get("LM_STUDIO_BASE_URL")
+        explicit_url = api_base_url or env_base_url
+        if explicit_url:
+            cleaned_url = explicit_url.strip().rstrip("/")
+            if not cleaned_url.endswith("/v1"):
+                cleaned_url = f"{cleaned_url}/v1"
+            self.api_base_url = cleaned_url
+            self.remote_host = None
+            self.remote_port = 1234
+            self.ssh_host = None
+            self.use_tunnel = False
+        else:
+            env_host = os.environ.get("LM_STUDIO_HOST") or os.environ.get("SSH_HOST") or None
+            self.remote_host = remote_host or env_host
+            self.remote_port = int(remote_port or os.environ.get("LM_STUDIO_PORT") or 1234)
+
+            # Option tunnel SSH (uniquement si explicitement activé via LM_STUDIO_USE_TUNNEL=true)
+            env_tunnel = os.environ.get("LM_STUDIO_USE_TUNNEL", "false").lower() in {"1", "true", "yes"}
+            self.ssh_host = ssh_host or os.environ.get("SSH_HOST") or None
+            self.use_tunnel = use_tunnel if use_tunnel is not None else (env_tunnel if self.ssh_host else False)
+
+            if self.ssh_host and self.use_tunnel:
+                configured_local_port = int(local_port or os.environ.get("LM_STUDIO_LOCAL_PORT") or 12345)
+                self.local_port = find_available_port(configured_local_port)
+                self.api_base_url = f"http://127.0.0.1:{self.local_port}/v1"
+            elif self.remote_host:
+                self.api_base_url = f"http://{self.remote_host}:{self.remote_port}/v1"
+            else:
+                self.api_base_url = f"http://127.0.0.1:{self.remote_port}/v1"
+
+        # 2. Paramètres SSH optionnels
         self.ssh_port = int(ssh_port or os.environ.get("SSH_PORT") or 22)
         self.ssh_user = ssh_user or os.environ.get("SSH_USER") or None
         self.ssh_key_path = ssh_key_path or os.environ.get("SSH_KEY_PATH") or None
         self.ssh_password = ssh_password or os.environ.get("SSH_PASSWORD") or None
         self._askpass_file: Optional[str] = None
+        self.local_port = getattr(self, "local_port", 12345)
 
-        # 2. Configuration LM Studio
-        self.remote_port = int(remote_port or os.environ.get("LM_STUDIO_PORT") or 1234)
-        configured_local_port = int(local_port or os.environ.get("LM_STUDIO_LOCAL_PORT") or 12345)
-        self.local_port = find_available_port(configured_local_port)
-
-        env_tunnel = os.environ.get("LM_STUDIO_USE_TUNNEL", "true").lower() in {"1", "true", "yes"}
-        self.use_tunnel = use_tunnel if use_tunnel is not None else (env_tunnel if self.ssh_host else False)
-
+        # 3. Modèle d'inférence
         env_model = os.environ.get("LM_STUDIO_MODEL")
         if model_name and model_name.strip():
             self.model_name = model_name.strip()
@@ -330,29 +357,19 @@ class LMStudioCardCompiler:
             self.model_name = None  # Auto-détecté depuis le modèle actuellement chargé sur le serveur
 
         self.cli_path = cli_path or os.environ.get("LM_STUDIO_CLI_PATH") or "lms"
-        env_auto = os.environ.get("LM_STUDIO_AUTO_START", "true").lower() in {"1", "true", "yes"}
-        self.auto_start = auto_start if auto_start is not None else env_auto
-
+        self.auto_start = False
         self.timeout_seconds = timeout_seconds
         self._tunnel_proc: Optional[subprocess.Popen] = None
         self._json_schema: Dict[str, Any] = LLMCompiledCardPart.model_json_schema()
         self._use_json_schema_format: bool = True
         self._ready: bool = False
 
-        # Détermination de l'URL de base REST
-        if self.ssh_host and self.use_tunnel:
-            self.api_base_url = f"http://127.0.0.1:{self.local_port}/v1"
-        elif self.ssh_host:
-            self.api_base_url = f"http://{self.ssh_host}:{self.remote_port}/v1"
-        else:
-            self.api_base_url = f"http://127.0.0.1:{self.remote_port}/v1"
-
         self.hf_token: Optional[str] = None
         atexit.register(self.close)
         self._register_signal_handlers()
 
     def _register_signal_handlers(self) -> None:
-        """Enregistre des handlers de signaux (SIGINT, SIGTERM) pour décharger le modèle en cas d'interruption manuelle."""
+        """Enregistre des handlers de signaux (SIGINT, SIGTERM) pour fermer proprement le tunnel en cas d'interruption."""
         try:
             prev_sigint = signal.getsignal(signal.SIGINT)
             prev_sigterm = signal.getsignal(signal.SIGTERM)
@@ -381,13 +398,15 @@ class LMStudioCardCompiler:
 
     @property
     def repo_id(self) -> str:
-        return "LM_STUDIO_REMOTE" if self.ssh_host else "LM_STUDIO_LOCAL"
+        if self.ssh_host and self.use_tunnel:
+            return "LM_STUDIO_SSH_TUNNEL"
+        elif self.remote_host and self.remote_host not in {"127.0.0.1", "localhost"}:
+            return "LM_STUDIO_REMOTE"
+        return "LM_STUDIO"
 
     @property
     def filename(self) -> str:
-        model_label = self.model_name or "active_model"
-        if self.ssh_host:
-            return f"{model_label} (SSH {self.ssh_target})"
+        model_label = self.model_name or "active_server_model"
         return f"{model_label} ({self.api_base_url})"
 
     def _ensure_askpass_script(self) -> Optional[str]:
@@ -537,8 +556,8 @@ class LMStudioCardCompiler:
         if self._ready:
             return
 
-        # 1. Établissement du tunnel SSH sécurisé si configuré
-        if self.ssh_host and self.use_tunnel:
+        # 1. Établissement du tunnel SSH sécurisé UNIQUEMENT si explicitement configuré
+        if self.use_tunnel and self.ssh_host:
             self._start_ssh_tunnel()
 
         # 2. Vérification HTTP directe de l'API REST de LM Studio
