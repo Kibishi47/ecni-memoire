@@ -2275,6 +2275,50 @@ class TestLMStudioCompiler(unittest.TestCase):
             self.assertEqual(mock_engine.compile_card.call_count, 3)
             mock_engine.close.assert_called_once()
 
+    def test_env_and_cli_model_and_thinking_compatibility(self):
+        """Vérifie la compatibilité des variables d'environnement et options CLI pour le modèle, thinking et tunnel."""
+        from compiler.llm_engine import LocalLLMCardCompiler
+
+        # 1. create_compiler_engine avec model explicite (CLI --model)
+        engine_lms = create_compiler_engine(
+            provider=LLMProvider.lm_studio,
+            model="qwen-cli-32b",
+        )
+        self.assertEqual(engine_lms.model_name, "qwen-cli-32b")
+        engine_lms.close()
+
+        # 2. LocalLLMCardCompiler avec tier explicite
+        engine_local = create_compiler_engine(
+            provider=LLMProvider.local,
+            tier=ModelTier.max,
+        )
+        self.assertEqual(engine_local.tier, ModelTier.max)
+
+        # 3. Résolution de MODEL_TIER depuis l'environnement pour le mode local
+        with patch.dict("os.environ", {"MODEL_TIER": "fast"}):
+            local_from_env = LocalLLMCardCompiler()
+            self.assertEqual(local_from_env.tier, ModelTier.fast)
+
+        # 4. Résolution de LM_STUDIO_MODEL depuis l'environnement pour LM Studio
+        with patch.dict("os.environ", {"LM_STUDIO_MODEL": "qwen2.5-coder-from-env"}):
+            lms_from_env = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertEqual(lms_from_env.model_name, "qwen2.5-coder-from-env")
+            lms_from_env.close()
+
+        # 5. Résolution de THINKING=low depuis l'environnement
+        with patch.dict("os.environ", {"THINKING": "low", "LM_STUDIO_DISABLE_THINKING": "false"}):
+            lms_thinking = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertEqual(lms_thinking.thinking, "low")
+            self.assertFalse(lms_thinking.disable_thinking)
+            lms_thinking.close()
+
+        # 6. Résolution de DISABLE_THINKING=true depuis l'environnement
+        with patch.dict("os.environ", {"DISABLE_THINKING": "true"}):
+            lms_disabled = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertEqual(lms_disabled.thinking, "null")
+            self.assertTrue(lms_disabled.disable_thinking)
+            lms_disabled.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,7 @@ def load_env_file() -> None:
                 k, v = line.split("=", 1)
                 k = k.strip()
                 v = v.strip().strip("'\"")
-                if k and k not in os.environ:
+                if k and k not in os.environ and v != "":
                     os.environ[k] = v
         except Exception:
             pass
