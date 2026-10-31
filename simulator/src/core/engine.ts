@@ -15,9 +15,11 @@ import type {
   DeadCardCondition,
   EngineCardModel,
   PlayableAction,
+  SpecialConditionType,
   ZoneType,
 } from '../types/cardModel'
 import { matchesCardFilter, normalizeCardNameForMatch } from '../data/cardCatalog'
+import { detectBasicEnergy } from '../utils/energy'
 import { fisherYatesShuffle, Mulberry32 } from './prng'
 
 export type PlayerKey = 'PLAYER' | 'OPPONENT'
@@ -44,6 +46,8 @@ export interface InPlayPokemon {
   attachedTools: EngineCardModel[]
   turnPlayed: number
   evolvedThisTurn: boolean
+  specialConditions: SpecialConditionType[]
+  cantAttackNextTurn: boolean
 }
 
 export interface PlayerBoardState {
@@ -53,10 +57,14 @@ export interface PlayerBoardState {
   discard: EngineCardModel[]
   activePokemon: InPlayPokemon | null
   bench: InPlayPokemon[]
+  lostZone: EngineCardModel[]
+  extraTurnGranted: boolean
+  itemLockActive: boolean
   supporterPlayedThisTurn: boolean
   energyAttachedThisTurn: boolean
   retreatUsedThisTurn: boolean
   usedOncePerTurnAbilities: Set<string>
+  abilityUsageCountsThisTurn: Record<string, number>
   vstarPowerUsed: boolean
   koSufferedLastOpponentTurn: boolean
   mulliganCount: number
@@ -78,6 +86,7 @@ export interface MatchState {
   rngState: number
   nextInstanceSeq: number
   lastActionLog: string[]
+  activeStadium: { card: EngineCardModel; ownerIndex: 0 | 1; usedThisTurn: boolean } | null
 }
 
 export type GameActionType =
@@ -114,6 +123,129 @@ export interface CreateMatchOptions {
 }
 
 /**
+ * Normalise un type d'énergie (Français / Anglais / Abrégé).
+ */
+export function normalizeEnergyType(type: string): string {
+  const norm = normalizeCardNameForMatch(type)
+  if (['feu', 'fire', 'r'].includes(norm)) return 'feu'
+  if (['eau', 'water', 'w'].includes(norm)) return 'eau'
+  if (['plante', 'grass', 'g'].includes(norm)) return 'plante'
+  if (['electrique', 'electrik', 'lightning', 'l', 'electrique'].includes(norm)) return 'electrique'
+  if (['psy', 'psychic', 'p'].includes(norm)) return 'psy'
+  if (['combat', 'fighting', 'f'].includes(norm)) return 'combat'
+  if (['obscurite', 'darkness', 'dark', 'd'].includes(norm)) return 'obscurite'
+  if (['metal', 'm'].includes(norm)) return 'metal'
+  if (['fee', 'fairy', 'y'].includes(norm)) return 'fee'
+  return 'incolore'
+}
+
+/**
+ * Résout le coût énergétique complet d'une attaque ou d'un talent (multi-type et incolore).
+ */
+export function canPayEnergyCost(
+  attachedEnergies: EngineCardModel[],
+  energyCost?: string[],
+): boolean {
+  if (!energyCost || energyCost.length === 0) {
+    return true
+  }
+
+  interface EnergyUnit {
+    type: string
+  }
+  const units: EnergyUnit[] = []
+
+  for (const en of attachedEnergies) {
+    const nameNorm = normalizeCardNameForMatch(en.identity.nameFr + ' ' + (en.identity.nameEn || ''))
+    if (nameNorm.includes('double turbo')) {
+      units.push({ type: 'incolore' }, { type: 'incolore' })
+    } else if (nameNorm.includes('lumineuse') || nameNorm.includes('luminous')) {
+      units.push({ type: 'WILDCARD' })
+    } else {
+      const basic = detectBasicEnergy(en.identity.nameFr) || detectBasicEnergy(en.identity.nameEn || '')
+      if (basic) {
+        units.push({ type: normalizeEnergyType(basic.energyTypeFr) })
+      } else {
+        const raw = normalizeCardNameForMatch(en.identity.rawRulesText?.join(' ') || '')
+        const found = ['feu', 'eau', 'plante', 'electrique', 'psy', 'combat', 'obscurite', 'metal', 'fee'].find(
+          (t) => nameNorm.includes(t) || raw.includes(t),
+        )
+        units.push({ type: found ? normalizeEnergyType(found) : 'incolore' })
+      }
+    }
+  }
+
+  const specificRequired: string[] = []
+  let colorlessRequired = 0
+
+  for (const req of energyCost) {
+    const norm = normalizeEnergyType(req)
+    if (norm === 'incolore') {
+      colorlessRequired++
+    } else {
+      specificRequired.push(norm)
+    }
+  }
+
+  const availableUnits = units.slice()
+
+  for (const req of specificRequired) {
+    const exactIdx = availableUnits.findIndex((u) => u.type === req)
+    if (exactIdx !== -1) {
+      availableUnits.splice(exactIdx, 1)
+      continue
+    }
+    const wildcardIdx = availableUnits.findIndex((u) => u.type === 'WILDCARD')
+    if (wildcardIdx !== -1) {
+      availableUnits.splice(wildcardIdx, 1)
+      continue
+    }
+    return false
+  }
+
+  return availableUnits.length >= colorlessRequired
+}
+
+/**
+ * Calcule la capacité maximale de Banc (5 par défaut, 8 avec Abîme Zéro + Téracristal en jeu).
+ */
+export function getMaxBenchSlots(
+  board: PlayerBoardState,
+  activeStadium: MatchState['activeStadium'],
+): number {
+  if (!activeStadium) return 5
+  const stadName = normalizeCardNameForMatch(
+    activeStadium.card.identity.nameFr + ' ' + (activeStadium.card.identity.nameEn || ''),
+  )
+  const isAreaZero =
+    stadName.includes('abime zero') ||
+    stadName.includes('area zero') ||
+    activeStadium.card.cardId === 'sv07-131'
+  if (!isAreaZero) return 5
+
+  const hasTera = Boolean(
+    board.activePokemon?.card.pokemonStats?.isTera ||
+      board.bench.some((p) => p.card.pokemonStats?.isTera),
+  )
+  return hasTera ? 8 : 5
+}
+
+/**
+ * Réduit le banc à sa capacité max si elle a diminué (défausse les Pokémon excédentaires).
+ */
+export function enforceBenchCapacity(board: PlayerBoardState, maxSlots: number): void {
+  while (board.bench.length > maxSlots) {
+    const excess = board.bench.pop()
+    if (excess) {
+      board.discard.push(excess.card)
+      for (const st of excess.previousStages) board.discard.push(st)
+      for (const en of excess.attachedEnergies) board.discard.push(en)
+      for (const tool of excess.attachedTools) board.discard.push(tool)
+    }
+  }
+}
+
+/**
  * Clone profond ultra-rapide d'un `InPlayPokemon`.
  */
 export function cloneInPlayPokemon(p: InPlayPokemon): InPlayPokemon {
@@ -126,6 +258,8 @@ export function cloneInPlayPokemon(p: InPlayPokemon): InPlayPokemon {
     attachedTools: p.attachedTools.slice(),
     turnPlayed: p.turnPlayed,
     evolvedThisTurn: p.evolvedThisTurn,
+    specialConditions: p.specialConditions ? p.specialConditions.slice() : [],
+    cantAttackNextTurn: p.cantAttackNextTurn ?? false,
   }
 }
 
@@ -140,10 +274,14 @@ export function clonePlayerBoard(b: PlayerBoardState): PlayerBoardState {
     discard: b.discard.slice(),
     activePokemon: b.activePokemon ? cloneInPlayPokemon(b.activePokemon) : null,
     bench: b.bench.map(cloneInPlayPokemon),
+    lostZone: b.lostZone ? b.lostZone.slice() : [],
+    extraTurnGranted: b.extraTurnGranted ?? false,
+    itemLockActive: b.itemLockActive ?? false,
     supporterPlayedThisTurn: b.supporterPlayedThisTurn,
     energyAttachedThisTurn: b.energyAttachedThisTurn,
     retreatUsedThisTurn: b.retreatUsedThisTurn,
     usedOncePerTurnAbilities: new Set(b.usedOncePerTurnAbilities),
+    abilityUsageCountsThisTurn: b.abilityUsageCountsThisTurn ? { ...b.abilityUsageCountsThisTurn } : {},
     vstarPowerUsed: b.vstarPowerUsed,
     koSufferedLastOpponentTurn: b.koSufferedLastOpponentTurn,
     mulliganCount: b.mulliganCount,
@@ -171,6 +309,13 @@ export function fastCloneState(state: MatchState, includeActionLog = false): Mat
     rngState: state.rngState,
     nextInstanceSeq: state.nextInstanceSeq,
     lastActionLog: includeActionLog ? state.lastActionLog.slice() : [],
+    activeStadium: state.activeStadium
+      ? {
+          card: state.activeStadium.card,
+          ownerIndex: state.activeStadium.ownerIndex,
+          usedThisTurn: state.activeStadium.usedThisTurn,
+        }
+      : null,
   }
 }
 
@@ -254,23 +399,22 @@ export function canPokemonEvolveInto(
 export function hasRequiredEnergyForPrecondition(
   poke: InPlayPokemon,
   pre: ActionPrecondition,
+  action?: PlayableAction,
 ): boolean {
+  if (action?.energyCost && action.energyCost.length > 0) {
+    return canPayEnergyCost(poke.attachedEnergies, action.energyCost)
+  }
   const requiredTotal = pre.minCount || 1
   if (poke.attachedEnergies.length < requiredTotal) {
     return false
   }
   const reqType = pre.targetFilter?.energyType
   if (!reqType) return true
-  const normReq = normalizeCardNameForMatch(reqType)
-  if (normReq === 'incolore' || normReq === 'colorless') {
+  const normReq = normalizeEnergyType(reqType)
+  if (normReq === 'incolore') {
     return poke.attachedEnergies.length >= requiredTotal
   }
-
-  // Au moins 1 énergie doit correspondre au type spécifique requis (ou Énergie Lumineuse)
-  const hasTypedMatch = poke.attachedEnergies.some((en) =>
-    matchesCardFilter(en, { category: 'ENERGY', energyType: reqType }),
-  )
-  return hasTypedMatch && poke.attachedEnergies.length >= requiredTotal
+  return canPayEnergyCost(poke.attachedEnergies, Array(requiredTotal).fill(reqType))
 }
 
 /**
@@ -527,6 +671,8 @@ export function createInitialMatchState(
       attachedTools: [],
       turnPlayed: 0,
       evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
     }
 
     // Pose les autres Pokémon de Base de la main initiale sur le Banc (en gardant Luminéon V en main pour son talent)
@@ -547,6 +693,8 @@ export function createInitialMatchState(
           attachedTools: [],
           turnPlayed: 0,
           evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
         })
       }
     }
@@ -588,10 +736,14 @@ export function createInitialMatchState(
       discard: [],
       activePokemon,
       bench,
+      lostZone: [],
+      extraTurnGranted: false,
+      itemLockActive: false,
       supporterPlayedThisTurn: false,
       energyAttachedThisTurn: false,
       retreatUsedThisTurn: false,
       usedOncePerTurnAbilities: new Set<string>(),
+      abilityUsageCountsThisTurn: {},
       vstarPowerUsed: false,
       koSufferedLastOpponentTurn: false,
       mulliganCount,
@@ -631,6 +783,7 @@ export function createInitialMatchState(
     rngState: rng.getState(),
     nextInstanceSeq: instanceSeq,
     lastActionLog: [],
+    activeStadium: null,
   }
 }
 
@@ -736,6 +889,11 @@ export function checkActionPreconditions(
     return false
   }
 
+  // Verrou Item Lock
+  if (action.sourceType === 'TRAINER_PLAY' && sourceCard.subCategory === 'ITEM' && activeBoard.itemLockActive) {
+    return false
+  }
+
   // Verrous de timing globaux
   if (action.timing === 'ONCE_PER_TURN_SUPPORTER' && activeBoard.supporterPlayedThisTurn) {
     return false
@@ -765,9 +923,11 @@ export function checkActionPreconditions(
 
   for (const pre of action.preconditions) {
     switch (pre.type) {
-      case 'BENCH_HAS_EMPTY_SLOTS':
-        if (activeBoard.bench.length > 5 - Math.max(1, pre.minCount)) return false
+      case 'BENCH_HAS_EMPTY_SLOTS': {
+        const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
+        if (activeBoard.bench.length > maxSlots - Math.max(1, pre.minCount)) return false
         break
+      }
 
       case 'HAND_MIN_OTHER_CARDS': {
         const otherHandCount =
@@ -811,10 +971,66 @@ export function checkActionPreconditions(
         break
 
       case 'SELF_HAS_ENERGY_COST':
-        if (!sourcePokemon || !hasRequiredEnergyForPrecondition(sourcePokemon, pre)) {
+        if (!sourcePokemon || !hasRequiredEnergyForPrecondition(sourcePokemon, pre, action)) {
           return false
         }
         break
+
+      case 'HAS_TERA_POKEMON_IN_PLAY': {
+        const hasTera = [
+          ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
+          ...activeBoard.bench,
+        ].some((p) => Boolean(p.card.pokemonStats?.isTera))
+        if (!hasTera) return false
+        break
+      }
+
+      case 'STADIUM_IN_PLAY': {
+        if (!state.activeStadium) return false
+        if (pre.targetFilter && !matchesCardFilter(state.activeStadium.card, pre.targetFilter)) {
+          return false
+        }
+        break
+      }
+
+      case 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION': {
+        const oppActive = passiveBoard.activePokemon
+        if (!oppActive || !oppActive.specialConditions || oppActive.specialConditions.length === 0) {
+          return false
+        }
+        break
+      }
+
+      case 'OPPONENT_PRIZES_EXACT_COUNT': {
+        if (passiveBoard.prizes.length !== pre.minCount) return false
+        break
+      }
+
+      case 'SELF_IS_ON_BENCH': {
+        if (!sourcePokemon || !activeBoard.bench.some((b) => b.instanceId === sourcePokemon.instanceId)) {
+          return false
+        }
+        break
+      }
+
+      case 'NO_ENERGY_IN_PLAY': {
+        if (sourcePokemon) {
+          if (sourcePokemon.attachedEnergies.length > 0) return false
+        } else {
+          const totalEnergies =
+            (activeBoard.activePokemon?.attachedEnergies.length || 0) +
+            activeBoard.bench.reduce((sum, b) => sum + b.attachedEnergies.length, 0)
+          if (totalEnergies > 0) return false
+        }
+        break
+      }
+
+      case 'SECOND_PLAYER_TURN_1': {
+        if (state.turnNumber !== 2 || state.activePlayerIndex === state.firstPlayerIndex) {
+          return false
+        }
+        break
+      }
 
       case 'ZONE_HAS_MATCHING_CARD': {
         const zone = pre.zone || 'DECK'
@@ -861,7 +1077,8 @@ export function getLegalActions(state: MatchState): GameAction[] {
   // ==========================================================================
   // 1. POSER UN POKÉMON DE BASE SUR LE BANC (`PUT_BASIC_ON_BENCH`)
   // ==========================================================================
-  if (activeBoard.bench.length < 5) {
+  const maxBenchSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
+  if (activeBoard.bench.length < maxBenchSlots) {
     const seenBasicIds = new Set<string>()
     activeBoard.hand.forEach((card, handIdx) => {
       if (card.category === 'POKEMON' && card.subCategory === 'BASIC') {
@@ -968,8 +1185,32 @@ export function getLegalActions(state: MatchState): GameAction[] {
     if (seenTrainerIds.has(card.cardId)) return
     seenTrainerIds.add(card.cardId)
 
-    // Cas des Outils d'équipement (Ceinture Vitalité, Amulette Bravoure) sans effet immédiat
-    if (card.subCategory === 'TOOL' && card.playableActions.every((a) => a.effects.length === 0)) {
+    // Blocage par Item Lock
+    if (card.subCategory === 'ITEM' && activeBoard.itemLockActive) return
+
+    // Cas des cartes Stade : impossible de poser un stade du même nom
+    if (card.subCategory === 'STADIUM') {
+      if (
+        state.activeStadium &&
+        normalizeCardNameForMatch(state.activeStadium.card.identity.nameFr) ===
+          normalizeCardNameForMatch(card.identity.nameFr)
+      ) {
+        return
+      }
+      actions.push({
+        type: 'PLAY_TRAINER',
+        cardId: card.cardId,
+        handIndex: handIdx,
+        label: `Jouer le Stade ${card.identity.nameFr}`,
+      })
+      return
+    }
+
+    // Cas des Outils d'équipement sans effet immédiat (TM ou Outil stat)
+    if (
+      card.subCategory === 'TOOL' &&
+      card.playableActions.every((a) => a.effects.length === 0 || a.sourceType === 'ATTACK')
+    ) {
       if (activeBoard.activePokemon && activeBoard.activePokemon.attachedTools.length === 0) {
         actions.push({
           type: 'PLAY_TRAINER',
@@ -979,6 +1220,17 @@ export function getLegalActions(state: MatchState): GameAction[] {
           label: `Attacher ${card.identity.nameFr} à ${activeBoard.activePokemon.card.identity.nameFr} (Actif)`,
         })
       }
+      activeBoard.bench.forEach((bPoke, bIdx) => {
+        if (bPoke.attachedTools.length === 0) {
+          actions.push({
+            type: 'PLAY_TRAINER',
+            cardId: card.cardId,
+            handIndex: handIdx,
+            targetSlot: bIdx,
+            label: `Attacher ${card.identity.nameFr} à ${bPoke.card.identity.nameFr} (Banc #${bIdx + 1})`,
+          })
+        }
+      })
       return
     }
 
@@ -1116,6 +1368,19 @@ export function getLegalActions(state: MatchState): GameAction[] {
   for (const { poke, slot } of allInPlayWithSlot) {
     for (const pAction of poke.card.playableActions) {
       if (pAction.sourceType !== 'ABILITY_ACTIVATED') continue
+      // Exclure les talents passifs / réactifs / checkup
+      if (
+        pAction.timing === 'PASSIVE_CONTINUOUS' ||
+        pAction.timing === 'ON_DAMAGED_OR_KO_TRIGGER' ||
+        pAction.timing === 'BETWEEN_TURNS_CHECKUP'
+      ) {
+        continue
+      }
+      // Verrou AS_OFTEN_AS_YOU_LIKE (max 6 utilisations par tour)
+      if (pAction.timing === 'AS_OFTEN_AS_YOU_LIKE') {
+        const usageCount = activeBoard.abilityUsageCountsThisTurn?.[pAction.actionId] || 0
+        if (usageCount >= 6) continue
+      }
       if (!checkActionPreconditions(state, activeBoard, passiveBoard, poke.card, pAction, poke)) {
         continue
       }
@@ -1149,13 +1414,44 @@ export function getLegalActions(state: MatchState): GameAction[] {
     }
   }
 
+  // 5b. Effet activable de Stade en jeu (`ONCE_PER_TURN_STADIUM`)
+  if (state.activeStadium && !state.activeStadium.usedThisTurn) {
+    for (const stadAction of state.activeStadium.card.playableActions) {
+      if (
+        stadAction.timing === 'ONCE_PER_TURN_STADIUM' ||
+        stadAction.sourceType === 'STADIUM_EFFECT'
+      ) {
+        if (
+          checkActionPreconditions(
+            state,
+            activeBoard,
+            passiveBoard,
+            state.activeStadium.card,
+            stadAction,
+          )
+        ) {
+          actions.push({
+            type: 'USE_ABILITY',
+            cardId: state.activeStadium.card.cardId,
+            actionId: stadAction.actionId,
+            label: `Stade ${state.activeStadium.card.identity.nameFr} : ${stadAction.label}`,
+          })
+        }
+      }
+    }
+  }
+
   // ==========================================================================
   // 6. RETRAITE DU POKÉMON ACTIF (`RETREAT_ACTIVE`)
   // ==========================================================================
+  const activeConditions = activeBoard.activePokemon?.specialConditions || []
+  const isImmobilized =
+    activeConditions.includes('ASLEEP') || activeConditions.includes('PARALYZED')
   if (
     !activeBoard.retreatUsedThisTurn &&
     activeBoard.activePokemon &&
-    activeBoard.bench.length > 0
+    activeBoard.bench.length > 0 &&
+    !isImmobilized
   ) {
     const retreatCost = activeBoard.activePokemon.card.pokemonStats?.retreatCost ?? 1
     if (activeBoard.activePokemon.attachedEnergies.length >= retreatCost) {
@@ -1176,7 +1472,12 @@ export function getLegalActions(state: MatchState): GameAction[] {
   // ==========================================================================
   // 7. DÉCLARER UNE ATTAQUE (`DECLARE_ATTACK`) — CLÔTURE DE TOUR
   // ==========================================================================
-  if (activeBoard.activePokemon) {
+  if (
+    activeBoard.activePokemon &&
+    !activeBoard.activePokemon.cantAttackNextTurn &&
+    !isImmobilized
+  ) {
+    // 7a. Attaques propres au Pokémon Actif
     for (const pAction of activeBoard.activePokemon.card.playableActions) {
       if (pAction.sourceType !== 'ATTACK') continue
       if (
@@ -1207,6 +1508,39 @@ export function getLegalActions(state: MatchState): GameAction[] {
         endsTurnImmediately: true,
         label: `Attaque ${pAction.label} (${activeBoard.activePokemon.card.identity.nameFr}) : ${dmgLabel}`,
       })
+    }
+
+    // 7b. Attaques conférées par les Machines Techniques attachées
+    for (const tool of activeBoard.activePokemon.attachedTools) {
+      if (
+        tool.identity.isTechnicalMachine ||
+        tool.playableActions.some((a) => a.sourceType === 'ATTACK')
+      ) {
+        for (const tmAction of tool.playableActions) {
+          if (tmAction.sourceType !== 'ATTACK') continue
+          if (
+            !checkActionPreconditions(
+              state,
+              activeBoard,
+              passiveBoard,
+              tool,
+              tmAction,
+              activeBoard.activePokemon,
+            )
+          ) {
+            continue
+          }
+          const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, tmAction)
+          actions.push({
+            type: 'DECLARE_ATTACK',
+            cardId: tool.cardId,
+            actionId: tmAction.actionId,
+            estimatedDamage: dmgInfo.activeDamage + dmgInfo.benchDamage,
+            endsTurnImmediately: true,
+            label: `Attaque TM ${tmAction.label} (${tool.identity.nameFr}) : ${dmgInfo.activeDamage > 0 ? `${dmgInfo.activeDamage} dégâts` : 'Effet tactique'}`,
+          })
+        }
+      }
     }
   }
 
@@ -1375,9 +1709,10 @@ export function applyAction(
         activeBoard.hand[action.handIndex]?.cardId === action.cardId
           ? action.handIndex
           : activeBoard.hand.findIndex((c) => c.cardId === action.cardId)
-      if (idx !== -1 && activeBoard.bench.length < 5) {
+      const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
+      if (idx !== -1 && activeBoard.bench.length < maxSlots) {
         const card = activeBoard.hand.splice(idx, 1)[0]!
-        activeBoard.bench.push({
+        const newBenchPoke: InPlayPokemon = {
           instanceId: `p_${state.nextInstanceSeq++}`,
           card,
           previousStages: [],
@@ -1386,8 +1721,31 @@ export function applyAction(
           attachedTools: [],
           turnPlayed: state.turnNumber,
           evolvedThisTurn: false,
-        })
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        }
+        activeBoard.bench.push(newBenchPoke)
         state.lastActionLog.push(action.label)
+
+        // Déclencher les talents à la pose de la main (ABILITY_ON_PLAY_FROM_HAND)
+        for (const pAction of card.playableActions) {
+          if (
+            pAction.sourceType === 'ABILITY_ON_PLAY_FROM_HAND' ||
+            pAction.timing === 'ON_PLAY_FROM_HAND_TRIGGER'
+          ) {
+            for (const eff of pAction.effects) {
+              resolveAtomicEffect(
+                state,
+                activeBoard,
+                passiveBoard,
+                eff,
+                action,
+                rng,
+                markDeckSearched,
+              )
+            }
+          }
+        }
       }
       break
     }
@@ -1479,10 +1837,27 @@ export function applyAction(
 
       const trainerCard = activeBoard.hand.splice(idx, 1)[0]!
 
-      // Cas d'un Outil attaché directement à un Pokémon (Ceinture Vitalité, Amulette Bravoure)
+      // Cas d'un Stade
+      if (trainerCard.subCategory === 'STADIUM') {
+        if (state.activeStadium) {
+          const prevOwner = state.activeStadium.ownerIndex === 0 ? state.player : state.opponent
+          prevOwner.discard.push(state.activeStadium.card)
+        }
+        state.activeStadium = {
+          card: trainerCard,
+          ownerIndex: state.activePlayerIndex,
+          usedThisTurn: false,
+        }
+        enforceBenchCapacity(activeBoard, getMaxBenchSlots(activeBoard, state.activeStadium))
+        enforceBenchCapacity(passiveBoard, getMaxBenchSlots(passiveBoard, state.activeStadium))
+        state.lastActionLog.push(action.label)
+        break
+      }
+
+      // Cas d'un Outil attaché directement à un Pokémon (Ceinture Vitalité, Amulette Bravoure, TM)
       if (
         trainerCard.subCategory === 'TOOL' &&
-        trainerCard.playableActions.every((a) => a.effects.length === 0)
+        trainerCard.playableActions.every((a) => a.effects.length === 0 || a.sourceType === 'ATTACK')
       ) {
         const targetPoke =
           action.targetSlot === 'ACTIVE'
@@ -1541,28 +1916,41 @@ export function applyAction(
     // 6. ACTIVER UN TALENT DE POKÉMON EN JEU
     // ------------------------------------------------------------------------
     case 'USE_ABILITY': {
-      const sourcePoke =
-        action.sourceSlot === 'ACTIVE'
-          ? activeBoard.activePokemon
-          : typeof action.sourceSlot === 'number'
-            ? activeBoard.bench[action.sourceSlot] ?? null
-            : activeBoard.activePokemon
+      let pAction: PlayableAction | undefined
+      if (state.activeStadium && state.activeStadium.card.cardId === action.cardId) {
+        pAction = state.activeStadium.card.playableActions.find((a) => a.actionId === action.actionId)
+        state.activeStadium.usedThisTurn = true
+      } else {
+        const sourcePoke =
+          action.sourceSlot === 'ACTIVE'
+            ? activeBoard.activePokemon
+            : typeof action.sourceSlot === 'number'
+              ? activeBoard.bench[action.sourceSlot] ?? null
+              : activeBoard.activePokemon
 
-      if (!sourcePoke) break
-      const pAction = sourcePoke.card.playableActions.find((a) => a.actionId === action.actionId)
+        if (!sourcePoke) break
+        pAction = sourcePoke.card.playableActions.find((a) => a.actionId === action.actionId)
+        if (!pAction) break
+
+        if (pAction.timing === 'AS_OFTEN_AS_YOU_LIKE') {
+          activeBoard.abilityUsageCountsThisTurn[pAction.actionId] =
+            (activeBoard.abilityUsageCountsThisTurn[pAction.actionId] || 0) + 1
+        }
+
+        const globalOncePerTurnIds = new Set([
+          'ability_quick_search',
+          'ability_flip_the_script',
+          'ability_squawk_and_seize',
+          'ability_instant_charge',
+          'ability_luminous_sign',
+        ])
+        const abilityKey = globalOncePerTurnIds.has(pAction.actionId)
+          ? pAction.actionId
+          : `${sourcePoke.instanceId}:${pAction.actionId}`
+        activeBoard.usedOncePerTurnAbilities.add(abilityKey)
+      }
+
       if (!pAction) break
-
-      const globalOncePerTurnIds = new Set([
-        'ability_quick_search',
-        'ability_flip_the_script',
-        'ability_squawk_and_seize',
-        'ability_instant_charge',
-        'ability_luminous_sign',
-      ])
-      const abilityKey = globalOncePerTurnIds.has(pAction.actionId)
-        ? pAction.actionId
-        : `${sourcePoke.instanceId}:${pAction.actionId}`
-      activeBoard.usedOncePerTurnAbilities.add(abilityKey)
 
       // Paiement des coûts du talent (ex: Raffinement de Kirlia, Cartes Cachées d'Amphinobi Radieux, Enlacement Psy)
       let endsTurn = false
@@ -1604,8 +1992,16 @@ export function applyAction(
     case 'DECLARE_ATTACK': {
       const attacker = activeBoard.activePokemon
       if (!attacker) break
-      const pAction = attacker.card.playableActions.find((a) => a.actionId === action.actionId)
+      const pAction =
+        attacker.card.playableActions.find((a) => a.actionId === action.actionId) ||
+        attacker.attachedTools
+          .flatMap((t) => t.playableActions)
+          .find((a) => a.actionId === action.actionId)
       if (!pAction) break
+
+      if (pAction.costs.some((c) => c.type === 'CANT_ATTACK_NEXT_TURN')) {
+        attacker.cantAttackNextTurn = true
+      }
 
       // Reset du drapeau KO subi au tour précédent puisque le joueur termine son tour
       activeBoard.koSufferedLastOpponentTurn = false
@@ -1734,8 +2130,9 @@ function resolveAtomicEffect(
     case 'SEARCH_DECK_TO_BENCH': {
       markDeckSearched()
       const maxCount = eff.count || 1
+      const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
       for (let i = 0; i < maxCount; i++) {
-        if (activeBoard.bench.length >= 5) break
+        if (activeBoard.bench.length >= maxSlots) break
         const chosenIdx = selectBestBasicInDeckForBench(activeBoard, eff.targetFilter)
         if (chosenIdx === -1) break
         const card = activeBoard.deck.splice(chosenIdx, 1)[0]!
@@ -1748,6 +2145,8 @@ function resolveAtomicEffect(
           attachedTools: [],
           turnPlayed: state.turnNumber,
           evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
         })
       }
       fisherYatesShuffle(activeBoard.deck, rng)
@@ -2216,6 +2615,30 @@ export function handleKnockOut(
  */
 export function endTurnAndAdvance(state: MatchState): void {
   if (state.winner !== null) return
+
+  // Défausse des Machines Techniques attachées et réinitialisation des verrous de tour
+  const endingBoard = getActiveBoard(state)
+  const allEndingPokes = [
+    ...(endingBoard.activePokemon ? [endingBoard.activePokemon] : []),
+    ...endingBoard.bench,
+  ]
+  for (const poke of allEndingPokes) {
+    poke.cantAttackNextTurn = false
+    for (let i = poke.attachedTools.length - 1; i >= 0; i--) {
+      const tool = poke.attachedTools[i]!
+      if (tool.identity.isTechnicalMachine) {
+        poke.attachedTools.splice(i, 1)
+        endingBoard.discard.push(tool)
+      }
+    }
+  }
+
+  // Réinitialiser le talent de stade
+  if (state.activeStadium) {
+    state.activeStadium.usedThisTurn = false
+  }
+
+  endingBoard.abilityUsageCountsThisTurn = {}
 
   if (state.turnNumber >= state.maxTurns) {
     state.winReason = 'MAX_TURNS_REACHED'
