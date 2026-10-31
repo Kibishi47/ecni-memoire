@@ -386,6 +386,104 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertEqual(meta.timeToFirstTokenSeconds, 3.0)
         self.assertAlmostEqual(meta.compilationTimeSeconds, 5.1, places=1)
 
+    def test_local_llm_live_tokens_per_second_refreshes_every_second_instantaneous(self):
+        from unittest.mock import MagicMock, patch
+        from compiler.llm_engine import LocalLLMCardCompiler
+        from compiler.tcgdex_fetcher import FetchedCardBundle
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test local streaming tps 1-sec refresh.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        json_str = json.dumps(fake_card_json)
+        chunks = [
+            {"choices": [{"delta": {"content": json_str[:15]}}]},
+            {"choices": [{"delta": {"content": json_str[15:30]}}]},
+            {"choices": [{"delta": {"content": json_str[30:45]}}]},
+            {"choices": [{"delta": {"content": json_str[45:60]}}]},
+            {"choices": [{"delta": {"content": json_str[60:75]}}]},
+            {"choices": [{"delta": {"content": json_str[75:]}, "finish_reason": "stop"}]},
+        ]
+
+        compiler = LocalLLMCardCompiler()
+        compiler._ready = True
+        mock_llm = MagicMock()
+        mock_llm.create_chat_completion.return_value = iter(chunks)
+        compiler._llm = mock_llm
+
+        identity, pstats = self.fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        # Chronologie simulée :
+        # t0 = 100.0
+        # tok 1: t = 101.0 (window_start=101.0, tok=1)
+        # tok 2: t = 101.4 (0.4s < 1.0s -> live_tps = 0.0)
+        # tok 3: t = 102.1 (1.1s >= 1.0s -> delta=2 tok, 2/1.1 = 1.8 t/s)
+        # tok 4: t = 102.5 (0.4s < 1.0s -> live_tps = 1.8 t/s)
+        # tok 5: t = 103.2 (1.1s >= 1.0s -> delta=2 tok, 2/1.1 = 1.8 t/s)
+        # tok 6: t = 104.3 (1.1s >= 1.0s -> delta=1 tok, 1/1.1 = 0.9 t/s)
+        # final callback: t = 104.3
+        # fin: t = 104.4
+        time_sequence = [
+            100.0,
+            101.0,
+            101.4,
+            102.1,
+            102.5,
+            103.2,
+            104.3,
+            104.3,
+            104.4,
+        ]
+        time_idx = 0
+
+        def fake_perf_counter():
+            nonlocal time_idx
+            if time_idx < len(time_sequence):
+                val = time_sequence[time_idx]
+                time_idx += 1
+                return val
+            return 104.4
+
+        live_updates = []
+        with patch("time.perf_counter", side_effect=fake_perf_counter):
+            model = compiler.compile_card(bundle, on_token=lambda tok, tps: live_updates.append((tok, tps)))
+
+        tok2_update = [up for up in live_updates if up[0] == 2]
+        self.assertTrue(tok2_update)
+        self.assertEqual(tok2_update[0][1], 0.0)
+
+        tok3_update = [up for up in live_updates if up[0] == 3]
+        self.assertTrue(tok3_update)
+        self.assertEqual(tok3_update[0][1], 1.8)
+
+        tok6_update = [up for up in live_updates if up[0] == 6]
+        self.assertTrue(tok6_update)
+        self.assertEqual(tok6_update[0][1], 0.9)
+
 
 if __name__ == "__main__":
     unittest.main()
