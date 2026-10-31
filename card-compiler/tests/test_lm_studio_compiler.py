@@ -105,25 +105,18 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(engine.ssh_password, "cli_passed_password")
         engine.close()
 
-    def test_remote_model_defaults_to_qwen38_27b_in_normal_mode(self):
-        # En mode normal (--mode standard, tier qwen3), la machine distante doit cibler lmstudio-community/Qwen3.8-27B-GGUF par défaut
+    def test_remote_model_defaults_to_none_for_auto_detection(self):
+        # Sans variable LM_STUDIO_MODEL, le compilateur démarre en auto-détection (model_name=None)
         with patch.dict("os.environ", {}, clear=True):
             compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal")
-            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
-            self.assertEqual(compiler.tier, ModelTier.qwen3)
+            self.assertIsNone(compiler.model_name)
 
-            # Test des autres tiers sur hôte distant
-            compiler_fast = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.fast)
-            self.assertEqual(compiler_fast.model_name, "qwen2.5-coder-7b-instruct")
+            # Si LM_STUDIO_MODEL est renseigné dans l'environnement
+            with patch.dict("os.environ", {"LM_STUDIO_MODEL": "lmstudio-community/Qwen3.8-27B-GGUF"}):
+                compiler_env = LMStudioCardCompiler(ssh_host="gpu-node.internal")
+                self.assertEqual(compiler_env.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
 
-            compiler_max = LMStudioCardCompiler(ssh_host="gpu-node.internal", tier=ModelTier.max)
-            self.assertEqual(compiler_max.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
-
-            # Normalisation automatique de Qwen3.8-27B vers lmstudio-community/Qwen3.8-27B-GGUF
-            compiler_qwen38 = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="Qwen3.8-27B")
-            self.assertEqual(compiler_qwen38.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
-
-            # Override explicite par argument ou variable d'environnement
+            # Override explicite par argument
             compiler_custom = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="custom-model-40b")
             self.assertEqual(compiler_custom.model_name, "custom-model-40b")
 
@@ -333,8 +326,8 @@ class TestLMStudioCompiler(unittest.TestCase):
         )
 
     @patch("httpx.Client")
-    def test_load_model_in_memory_model_fallback(self, mock_client_cls):
-        # Si le modèle cible ("Qwen3.8-27B") n'est pas chargé, mais qu'un autre modèle actif existe
+    def test_load_model_in_memory_auto_detects_server_model(self, mock_client_cls):
+        # En mode auto-détection (model_name=None), adopte le modèle actuellement chargé sur le serveur
         mock_resp = MagicMock()
         mock_resp.is_success = True
         mock_resp.status_code = 200
@@ -349,11 +342,10 @@ class TestLMStudioCompiler(unittest.TestCase):
         compiler = LMStudioCardCompiler(
             ssh_host=None,
             remote_port=1234,
-            model_name="Qwen3.8-27B",
+            model_name=None,
             auto_start=False,
         )
         compiler.load_model_in_memory()
-        # Doit impérativement adopter le modèle actuellement chargé dans LM Studio
         self.assertEqual(compiler.model_name, "meta-llama-3-8b-instruct")
         compiler.close()
 
@@ -684,104 +676,8 @@ class TestLMStudioCompiler(unittest.TestCase):
         # Si aucun target n'est fourni, retourne le premier candidat
         self.assertEqual(find_best_model_candidate(cands, None), "qwen2.5-coder-7b-instruct")
 
-    def test_remote_available_models_discovery_with_find_fallback(self):
-        compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal", auto_start=False)
-        # Simule lms ls échouant, mais find ~/.cache/lm-studio/models retournant des fichiers .gguf
-        def fake_run_ssh(cmd: str):
-            if "ls --json" in cmd or "lms ls" in cmd:
-                return (1, "", "command not supported")
-            if "find ~/.cache" in cmd:
-                return (0, "/home/eth/.cache/lm-studio/models/lmstudio-community/Qwen3.8-27B-GGUF/model.gguf\n", "")
-            return (0, "OK", "")
-
-        with patch.object(compiler, "_run_ssh_command", side_effect=fake_run_ssh):
-            models = compiler._get_remote_available_models()
-            self.assertIn("lmstudio-community/Qwen3.8-27B-GGUF", models)
-        compiler.close()
-
-    def test_load_remote_model_loads_canonical_qwen38_27b(self):
-        compiler = LMStudioCardCompiler(
-            ssh_host="gpu-node.internal",
-            model_name="Qwen3.8-27B",
-            auto_start=False,
-        )
-        with patch.object(compiler, "_get_remote_available_models", return_value=[]), \
-             patch.object(compiler, "_run_ssh_command", return_value=(0, "Success", "")) as mock_ssh:
-            compiler._load_remote_model_via_cli()
-            # Doit tenter le chargement avec le nom de dépôt officiel LM Studio
-            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
-            mock_ssh.assert_called_with("lms load lmstudio-community/Qwen3.8-27B-GGUF --gpu max -y")
-        compiler.close()
-
-    def test_load_remote_model_prefers_downloaded_over_unverified_target(self):
-        compiler = LMStudioCardCompiler(
-            ssh_host="gpu-node.internal",
-            model_name="non-existent-arbitrary-model",
-            auto_start=False,
-        )
-        with patch.object(compiler, "_get_remote_available_models", return_value=["lmstudio-community/Qwen3.8-27B-GGUF"]), \
-             patch.object(compiler, "_run_ssh_command", return_value=(0, "Success", "")) as mock_ssh:
-            compiler._load_remote_model_via_cli()
-            # Doit charger le modèle existant téléchargé et non la chaîne arbitraire
-            self.assertEqual(compiler.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
-            mock_ssh.assert_called_with("lms load lmstudio-community/Qwen3.8-27B-GGUF --gpu max -y")
-        compiler.close()
-
-    @patch("time.sleep", return_value=None)
     @patch("httpx.Client")
-    def test_load_model_in_memory_auto_loads_via_rest_when_no_active_model(self, mock_client_cls, mock_sleep):
-        # 1. /v1/models retourne vide au début
-        empty_models_resp = MagicMock()
-        empty_models_resp.is_success = True
-        empty_models_resp.status_code = 200
-        empty_models_resp.json.return_value = {"data": []}
-
-        # 2. /api/v1/models retourne la liste des modèles téléchargés
-        downloaded_resp = MagicMock()
-        downloaded_resp.is_success = True
-        downloaded_resp.status_code = 200
-        downloaded_resp.json.return_value = {
-            "data": [{"id": "qwen2.5-coder-32b-instruct"}]
-        }
-
-        # 3. /api/v1/models/load réussit
-        load_resp = MagicMock()
-        load_resp.is_success = True
-        load_resp.status_code = 200
-        load_resp.json.return_value = {"status": "loaded"}
-
-        # 4. Le polling /v1/models retourne maintenant le modèle chargé
-        loaded_models_resp = MagicMock()
-        loaded_models_resp.is_success = True
-        loaded_models_resp.status_code = 200
-        loaded_models_resp.json.return_value = {
-            "data": [{"id": "qwen2.5-coder-32b-instruct"}]
-        }
-
-        mock_client = MagicMock()
-        mock_client.__enter__.return_value = mock_client
-        mock_client.get.side_effect = [
-            empty_models_resp,    # GET /v1/models initial
-            downloaded_resp,      # GET /api/v1/models
-            loaded_models_resp,   # Polling GET /v1/models
-        ]
-        mock_client.post.return_value = load_resp  # POST /api/v1/models/load
-        mock_client_cls.return_value = mock_client
-
-        compiler = LMStudioCardCompiler(
-            ssh_host=None,
-            remote_port=1234,
-            model_name="Qwen3.8-27B",
-            auto_start=False,
-        )
-        compiler.load_model_in_memory()
-        self.assertTrue(compiler._ready)
-        self.assertEqual(compiler.model_name, "qwen2.5-coder-32b-instruct")
-        compiler.close()
-
-    @patch("time.sleep", return_value=None)
-    @patch("httpx.Client")
-    def test_load_model_in_memory_raises_informative_error_when_no_model(self, mock_client_cls, mock_sleep):
+    def test_load_model_in_memory_raises_informative_error_when_no_model(self, mock_client_cls):
         empty_resp = MagicMock()
         empty_resp.is_success = True
         empty_resp.status_code = 200
@@ -790,84 +686,57 @@ class TestLMStudioCompiler(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.__enter__.return_value = mock_client
         mock_client.get.return_value = empty_resp
-        mock_client.post.return_value = MagicMock(is_success=False, status_code=404)
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
             ssh_host=None,
             remote_port=1234,
-            model_name="Qwen3.8-27B",
+            model_name=None,
             auto_start=False,
         )
         with self.assertRaises(RuntimeError) as ctx:
             compiler.load_model_in_memory()
 
-        self.assertIn("Aucun modèle n'est chargé dans LM Studio", str(ctx.exception))
-        self.assertIn("lms load", str(ctx.exception))
+        self.assertIn("Aucun modèle n'est actuellement chargé sur le serveur LM Studio", str(ctx.exception))
         compiler.close()
 
-    @patch("subprocess.run")
-    def test_unload_model_calls_unload_all(self, mock_subproc):
-        compiler = LMStudioCardCompiler(
-            ssh_host=None,
-            remote_port=1234,
-            model_name="test-model",
-            auto_start=False,
-        )
-        compiler.unload_model()
-        mock_subproc.assert_called_with(
-            [compiler.cli_path, "unload", "--all"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def test_close_unloads_model_first(self):
-        compiler = LMStudioCardCompiler(
-            ssh_host=None,
-            remote_port=1234,
-            model_name="test-model",
-            auto_start=False,
-        )
-        with patch.object(compiler, "unload_model") as mock_unload:
-            compiler.close()
-            mock_unload.assert_called_once()
-            self.assertFalse(compiler._ready)
-
-    @patch("time.sleep", return_value=None)
     @patch("httpx.Client")
-    def test_startup_deloads_unneeded_models_and_loads_needed(self, mock_client_cls, mock_sleep):
-        # 1. Au départ, un modèle non requis 'other-unneeded-model' est actif
-        unneeded_resp = MagicMock()
-        unneeded_resp.is_success = True
-        unneeded_resp.status_code = 200
-        unneeded_resp.json.return_value = {"data": [{"id": "other-unneeded-model"}]}
-
-        # 2. Après déchargement et chargement, le modèle requis 'qwen3.8-27b' apparaît actif
-        needed_resp = MagicMock()
-        needed_resp.is_success = True
-        needed_resp.status_code = 200
-        needed_resp.json.return_value = {"data": [{"id": "qwen3.8-27b"}]}
+    def test_load_model_in_memory_rejects_mismatched_requested_model(self, mock_client_cls):
+        resp = MagicMock()
+        resp.is_success = True
+        resp.status_code = 200
+        resp.json.return_value = {"data": [{"id": "other-model"}]}
 
         mock_client = MagicMock()
         mock_client.__enter__.return_value = mock_client
-        mock_client.get.side_effect = [unneeded_resp, needed_resp]
-        mock_client.post.return_value = MagicMock(is_success=True, status_code=200)
+        mock_client.get.return_value = resp
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
             ssh_host=None,
             remote_port=1234,
-            model_name="Qwen3.8-27B",
+            model_name="qwen3.8-27b",
+            auto_start=False,
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            compiler.load_model_in_memory()
+
+        self.assertIn("Le modèle demandé 'qwen3.8-27b' n'est pas chargé sur le serveur LM Studio", str(ctx.exception))
+        self.assertIn("other-model", str(ctx.exception))
+        compiler.close()
+
+    def test_close_does_not_unload_server_model(self):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name=None,
             auto_start=False,
         )
         with patch.object(compiler, "unload_model") as mock_unload:
-            compiler.load_model_in_memory()
-            # Doit avoir déchargé le modèle non requis
-            mock_unload.assert_called()
-            self.assertEqual(compiler.model_name, "qwen3.8-27b")
-            self.assertTrue(compiler._ready)
-        compiler.close()
+            compiler.close()
+            # La fermeture ne doit pas décharger les modèles du serveur
+            mock_unload.assert_not_called()
+            self.assertFalse(compiler._ready)
 
     def test_cli_stops_immediately_on_compilation_error(self):
         import typer
