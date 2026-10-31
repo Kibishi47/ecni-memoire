@@ -7,9 +7,11 @@ import type { EngineCardModel } from '../types/cardModel'
 import {
   applyAction,
   canPayEnergyCost,
+  computeAttackDamageToActive,
   createInitialMatchState,
   getLegalActions,
   getMaxBenchSlots,
+  runBetweenTurnsCheckup,
   startTurn,
 } from './engine'
 
@@ -369,5 +371,185 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
     }
 
     expect(getMaxBenchSlots(pBoard, { card: stadiumCard, ownerIndex: 0, usedThisTurn: false })).toBe(8)
+  })
+
+  it('calculates dynamic damage scaling, weakness multiplier and resistance', () => {
+    const fireEnergy = createNativeBasicEnergyModel('Feu')
+    const attackerBoard = {
+      deck: [],
+      hand: [],
+      prizes: [fireEnergy, fireEnergy], // 2 remaining -> 4 taken by opponent
+      discard: [],
+      activePokemon: {
+        instanceId: 'atk',
+        card: {
+          ...mockCharmander,
+          pokemonStats: { ...mockCharmander.pokemonStats!, types: ['Feu'] },
+        },
+        previousStages: [],
+        damage: 30, // 3 damage counters
+        attachedEnergies: [fireEnergy, fireEnergy],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+      bench: [],
+      lostZone: [],
+      extraTurnGranted: false,
+      itemLockActive: false,
+      supporterPlayedThisTurn: false,
+      energyAttachedThisTurn: false,
+      retreatUsedThisTurn: false,
+      usedOncePerTurnAbilities: new Set<string>(),
+      abilityUsageCountsThisTurn: {},
+      vstarPowerUsed: false,
+      koSufferedLastOpponentTurn: false,
+      mulliganCount: 0,
+      initialHandSnapshot: [],
+      initialPrizesSnapshot: [],
+      prizesKnownByPlayer: false,
+      firstSearchTurn: null,
+    }
+
+    const defenderBoard = {
+      deck: [],
+      hand: [],
+      prizes: [fireEnergy, fireEnergy, fireEnergy, fireEnergy, fireEnergy, fireEnergy],
+      discard: [],
+      activePokemon: {
+        instanceId: 'def',
+        card: {
+          ...mockTargetBasic,
+          pokemonStats: {
+            ...mockTargetBasic.pokemonStats!,
+            types: ['Plante'],
+            weaknesses: ['Feu'],
+            resistances: [],
+            isRuleBox: false,
+          },
+        },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+      bench: [],
+      lostZone: [],
+      extraTurnGranted: false,
+      itemLockActive: false,
+      supporterPlayedThisTurn: false,
+      energyAttachedThisTurn: false,
+      retreatUsedThisTurn: false,
+      usedOncePerTurnAbilities: new Set<string>(),
+      abilityUsageCountsThisTurn: {},
+      vstarPowerUsed: false,
+      koSufferedLastOpponentTurn: false,
+      mulliganCount: 0,
+      initialHandSnapshot: [],
+      initialPrizesSnapshot: [],
+      prizesKnownByPlayer: false,
+      firstSearchTurn: null,
+    }
+
+    // Test PER_DAMAGE_COUNTER_ON_SELF: 30 damage = 3 counters * 20 = 60 + base 50 = 110 * 2 (weakness) = 220
+    const rageAttack = {
+      actionId: 'atk_rage',
+      label: 'Rage',
+      sourceType: 'ATTACK' as const,
+      timing: 'END_OF_TURN_ATTACK' as const,
+      canUseTurn1GoingFirst: false,
+      canUseTurn1GoingSecond: true,
+      preconditions: [],
+      costs: [],
+      effects: [
+        {
+          primitive: 'DEAL_DAMAGE_ACTIVE' as const,
+          count: 1,
+          upTo: false,
+          baseDamage: 50,
+          damageScalingType: 'PER_DAMAGE_COUNTER_ON_SELF' as const,
+          damageScalingValue: 20,
+        },
+      ],
+    }
+
+    const res = computeAttackDamageToActive(attackerBoard, defenderBoard, rageAttack)
+    // (50 + 3 * 20) * 2 = 110 * 2 = 220
+    expect(res.activeDamage).toBe(220)
+  })
+
+  it('verifies between-turns checkup resolves poison and burn damage', () => {
+    const dummyState = createInitialMatchState(
+      [mockCharmander, mockCharmander],
+      [mockTargetBasic, mockTargetBasic],
+      { seed: 42, firstPlayerIndex: 0, maxTurns: 10 },
+    )
+
+    dummyState.player.activePokemon!.damage = 0
+    dummyState.player.activePokemon!.specialConditions = ['POISONED']
+
+    runBetweenTurnsCheckup(dummyState)
+
+    // Poison deals 10 damage in checkup
+    expect(dummyState.player.activePokemon!.damage).toBe(10)
+    expect(dummyState.player.activePokemon!.specialConditions).toContain('POISONED')
+  })
+
+  it('verifies self-KO cost awards prizes to opponent and discards source Pokémon', () => {
+    const p1Card = { ...mockCharmander }
+    const p2Card = { ...mockTargetBasic }
+    const dummyState = createInitialMatchState(
+      Array(60).fill(p1Card),
+      Array(60).fill(p2Card),
+      { seed: 123, firstPlayerIndex: 0, maxTurns: 10 },
+    )
+
+    const initialOppPrizes = dummyState.opponent.prizes.length // 6
+
+    const selfKoAction = {
+      actionId: 'ability_cursed_blast',
+      label: 'Explosion Maudite',
+      sourceType: 'ABILITY_ACTIVATED' as const,
+      timing: 'ONCE_PER_TURN_ABILITY' as const,
+      canUseTurn1GoingFirst: false,
+      canUseTurn1GoingSecond: false,
+      preconditions: [],
+      costs: [{ type: 'KNOCK_OUT_SELF' as const, count: 1 }],
+      effects: [{ primitive: 'PLACE_DAMAGE_COUNTERS' as const, count: 13, upTo: false }],
+    }
+
+    // Attach action to bench pokemon
+    dummyState.player.bench = [
+      {
+        instanceId: 'p_bench_dusclops',
+        card: { ...mockCharmander, playableActions: [selfKoAction] },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+    ]
+
+    const afterKoState = applyAction(dummyState, {
+      type: 'USE_ABILITY',
+      sourceSlot: 0,
+      cardId: mockCharmander.cardId,
+      actionId: 'ability_cursed_blast',
+      label: 'Explosion Maudite',
+    })
+
+    // Dusclops knocked out -> removed from bench, opponent takes 1 prize
+    expect(afterKoState.player.bench.length).toBe(0)
+    expect(afterKoState.opponent.prizes.length).toBe(initialOppPrizes - 1)
   })
 })

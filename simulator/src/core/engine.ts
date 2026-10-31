@@ -444,13 +444,107 @@ export function computeAttackDamageToActive(
   for (const eff of action.effects) {
     if (eff.primitive === 'DEAL_DAMAGE_ACTIVE') {
       let dmg = eff.baseDamage ?? 0
+      const scalingType = eff.damageScalingType
+      const scalingValue = eff.damageScalingValue ?? 0
+
       if (eff.damageScalingPerOpponentPrizeTaken) {
         const oppPrizesTaken = Math.max(0, 6 - attackerBoard.prizes.length)
         dmg += oppPrizesTaken * eff.damageScalingPerOpponentPrizeTaken
       }
 
-      // Cas spécifique Tempête Éclats (Ire-Foudre-ex) : 70 dégâts par Énergie de base défaussée en jeu
-      if (action.actionId === 'attack_bellowing_thunder' || (energyToDiscard > 0 && dmg === 70)) {
+      if (scalingType && scalingValue > 0) {
+        switch (scalingType) {
+          case 'PER_OPPONENT_PRIZE_TAKEN': {
+            const oppPrizesTaken = Math.max(0, 6 - attackerBoard.prizes.length)
+            dmg += oppPrizesTaken * scalingValue
+            break
+          }
+          case 'PER_COIN_FLIP_HEADS': {
+            dmg += Math.round((eff.count || 2) * 0.5) * scalingValue
+            break
+          }
+          case 'PER_ENERGY_ATTACHED_SELF': {
+            dmg += attacker.attachedEnergies.length * scalingValue
+            break
+          }
+          case 'PER_ENERGY_ATTACHED_ALL': {
+            const allEnergies =
+              countMatchingEnergiesInPlay(attackerBoard) +
+              countMatchingEnergiesInPlay(defenderBoard)
+            dmg += allEnergies * scalingValue
+            break
+          }
+          case 'PER_ENERGY_ATTACHED_TARGET': {
+            dmg += defender.attachedEnergies.length * scalingValue
+            break
+          }
+          case 'PER_DAMAGE_COUNTER_ON_SELF': {
+            const counters = Math.floor(attacker.damage / 10)
+            dmg += counters * scalingValue
+            break
+          }
+          case 'PER_DAMAGE_COUNTER_ON_FRIENDLY': {
+            const allPokes = [attacker, ...attackerBoard.bench]
+            const totalCounters = allPokes.reduce(
+              (sum, p) => sum + Math.floor(p.damage / 10),
+              0,
+            )
+            dmg += totalCounters * scalingValue
+            break
+          }
+          case 'PER_ENERGY_DISCARDED': {
+            const totalEnergiesInPlay = countMatchingEnergiesInPlay(
+              attackerBoard,
+              eff.targetFilter || {
+                category: 'ENERGY',
+                subCategory: 'BASIC_ENERGY',
+              },
+            )
+            if (totalEnergiesInPlay > 0) {
+              const defHpLeft = getRemainingHp(defender)
+              const neededCards = Math.max(1, Math.ceil(defHpLeft / scalingValue))
+              const chosenDiscard = Math.min(totalEnergiesInPlay, Math.max(2, neededCards))
+              energyToDiscard = chosenDiscard
+              dmg += chosenDiscard * scalingValue
+            }
+            break
+          }
+          case 'IF_TARGET_IS_EX_OR_EVOLUTION': {
+            const isExOrEvo = Boolean(
+              defender.card.pokemonStats?.isRuleBox || defender.card.subCategory !== 'BASIC',
+            )
+            if (isExOrEvo) {
+              dmg += scalingValue
+            }
+            break
+          }
+          case 'PER_DAMAGE_COUNTER_ON_TARGET': {
+            const counters = Math.floor(defender.damage / 10)
+            dmg += counters * scalingValue
+            break
+          }
+          case 'PER_BENCHED_POKEMON': {
+            dmg += attackerBoard.bench.length * scalingValue
+            break
+          }
+          case 'PER_CARD_IN_DISCARD_OR_LOST_ZONE': {
+            const discCount = attackerBoard.discard.filter((c) =>
+              matchesCardFilter(c, eff.targetFilter),
+            ).length
+            const lostCount = (attackerBoard.lostZone || []).filter((c) =>
+              matchesCardFilter(c, eff.targetFilter),
+            ).length
+            dmg += (discCount + lostCount) * scalingValue
+            break
+          }
+        }
+      }
+
+      // Cas spécifique Tempête Éclats (Ire-Foudre-ex) si non couvert par scalingType
+      if (
+        !scalingType &&
+        (action.actionId === 'attack_bellowing_thunder' || (energyToDiscard > 0 && dmg === 70))
+      ) {
         const totalBasicEnergiesInPlay = countMatchingEnergiesInPlay(attackerBoard, {
           category: 'ENERGY',
           subCategory: 'BASIC_ENERGY',
@@ -465,19 +559,34 @@ export function computeAttackDamageToActive(
       }
 
       activeDamage += dmg
-    } else if (eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH') {
+    } else if (
+      eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
+      eff.primitive === 'PLACE_DAMAGE_COUNTERS' ||
+      eff.primitive === 'DEAL_DAMAGE_BENCH'
+    ) {
       benchDamage += eff.baseDamage ?? (eff.count || 1) * 10
     }
   }
 
   if (activeDamage > 0) {
-    // Bonus d'Outil (ex: Ceinture Vitalité +10)
+    // Bonus d'Outil attaquant (ex: Ceinture Vitalité +10, Maximum Belt +50 contre Pokémon ex)
     for (const tool of attacker.attachedTools) {
-      if (
-        tool.cardId === 'sv01-197' ||
-        normalizeCardNameForMatch(tool.identity.nameFr).includes('ceinture vitalite')
-      ) {
+      const toolNameNorm = normalizeCardNameForMatch(
+        tool.identity.nameFr + ' ' + (tool.identity.nameEn || ''),
+      )
+      if (toolNameNorm.includes('ceinture vitalite')) {
         activeDamage += 10
+      } else if (
+        toolNameNorm.includes('ceinture maximum') ||
+        toolNameNorm.includes('maximum belt')
+      ) {
+        if (defender.card.pokemonStats?.isRuleBox) {
+          activeDamage += 50
+        }
+      } else if (toolNameNorm.includes('ceinture choix') || toolNameNorm.includes('choice belt')) {
+        if (defender.card.pokemonStats?.isRuleBox) {
+          activeDamage += 30
+        }
       }
     }
 
@@ -493,6 +602,15 @@ export function computeAttackDamageToActive(
       )
       if (atkTypes.some((t) => defWeaknesses.includes(t))) {
         activeDamage *= 2
+      }
+
+      // Application de la Résistance (-30)
+      const defResistances = (defender.card.pokemonStats?.resistances || []).map(
+        normalizeCardNameForMatch,
+      )
+      if (atkTypes.some((t) => defResistances.includes(t))) {
+        const resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
+        activeDamage = Math.max(0, activeDamage + resMod)
       }
     }
   }
@@ -1917,11 +2035,12 @@ export function applyAction(
     // ------------------------------------------------------------------------
     case 'USE_ABILITY': {
       let pAction: PlayableAction | undefined
+      let sourcePoke: InPlayPokemon | null = null
       if (state.activeStadium && state.activeStadium.card.cardId === action.cardId) {
         pAction = state.activeStadium.card.playableActions.find((a) => a.actionId === action.actionId)
         state.activeStadium.usedThisTurn = true
       } else {
-        const sourcePoke =
+        sourcePoke =
           action.sourceSlot === 'ACTIVE'
             ? activeBoard.activePokemon
             : typeof action.sourceSlot === 'number'
@@ -1952,7 +2071,7 @@ export function applyAction(
 
       if (!pAction) break
 
-      // Paiement des coûts du talent (ex: Raffinement de Kirlia, Cartes Cachées d'Amphinobi Radieux, Enlacement Psy)
+      // Paiement des coûts du talent (ex: Raffinement de Kirlia, Cartes Cachées d'Amphinobi Radieux, Enlacement Psy, Explosion Maudite)
       let endsTurn = false
       for (const cost of pAction.costs) {
         if (cost.type === 'DISCARD_FROM_HAND') {
@@ -1961,6 +2080,59 @@ export function applyAction(
           // Pour Enlacement Psy (Gardevoir-ex), les marqueurs vont sur le Pokémon recevant l'énergie (géré dans ATTACH_ENERGY_FROM_DISCARD)
         } else if (cost.type === 'END_TURN_IMMEDIATELY') {
           endsTurn = true
+        } else if (cost.type === 'KNOCK_OUT_SELF') {
+          const isSourceActive =
+            sourcePoke && activeBoard.activePokemon?.instanceId === sourcePoke.instanceId
+          if (sourcePoke) {
+            activeBoard.discard.push(sourcePoke.card)
+            for (const st of sourcePoke.previousStages) activeBoard.discard.push(st)
+            for (const en of sourcePoke.attachedEnergies) activeBoard.discard.push(en)
+            for (const tool of sourcePoke.attachedTools) activeBoard.discard.push(tool)
+
+            if (isSourceActive) {
+              activeBoard.activePokemon = null
+              if (activeBoard.bench.length > 0) {
+                activeBoard.activePokemon = activeBoard.bench.shift()!
+              }
+            } else {
+              const bIdx = activeBoard.bench.findIndex(
+                (b) => b.instanceId === sourcePoke.instanceId,
+              )
+              if (bIdx !== -1) activeBoard.bench.splice(bIdx, 1)
+            }
+
+            const prizes = sourcePoke.card.pokemonStats?.prizeCardsGiven ?? 1
+            for (let p = 0; p < prizes && passiveBoard.prizes.length > 0; p++) {
+              passiveBoard.hand.push(passiveBoard.prizes.shift()!)
+            }
+            if (passiveBoard.prizes.length === 0) {
+              state.winner = activeBoard === state.player ? 'OPPONENT' : 'PLAYER'
+              state.winReason = 'ALL_PRIZES_TAKEN'
+            }
+          }
+        } else if (cost.type === 'SELF_DAMAGE') {
+          if (sourcePoke) {
+            sourcePoke.damage += (cost.count || 1) * 10
+            if (sourcePoke.damage >= getPokemonMaxHp(sourcePoke)) {
+              const isSourceActive = activeBoard.activePokemon?.instanceId === sourcePoke.instanceId
+              handleKnockOut(state, passiveBoard, activeBoard, isSourceActive ? 'ACTIVE' : 0)
+            }
+          }
+        } else if (cost.type === 'SHUFFLE_ATTACHED_ENERGY_TO_DECK') {
+          if (sourcePoke) {
+            while (sourcePoke.attachedEnergies.length > 0) {
+              activeBoard.deck.push(sourcePoke.attachedEnergies.pop()!)
+            }
+            fisherYatesShuffle(activeBoard.deck, rng)
+          }
+        } else if (cost.type === 'PUT_HAND_CARD_BOTTOM_DECK') {
+          if (activeBoard.hand.length > 0) {
+            activeBoard.deck.push(activeBoard.hand.pop()!)
+          }
+        } else if (cost.type === 'CANT_ATTACK_NEXT_TURN') {
+          if (sourcePoke) {
+            sourcePoke.cantAttackNextTurn = true
+          }
         }
       }
 
@@ -2022,9 +2194,27 @@ export function applyAction(
               handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
             }
           }
-        } else if (eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH') {
+        } else if (eff.primitive === 'DEAL_DAMAGE_BENCH') {
+          // DEAL_DAMAGE_BENCH inflige des DÉGÂTS au Banc.
+          // Les Pokémon Téracristal (isTera === true) sont immunisés aux dégâts sur le Banc !
+          if (passiveBoard.bench.length > 0) {
+            const benchDmg = eff.baseDamage ?? (eff.count || 1) * 10
+            for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+              const bPoke = passiveBoard.bench[bIdx]!
+              if (bPoke.card.pokemonStats?.isTera) continue
+              bPoke.damage += benchDmg
+              if (bPoke.damage >= getPokemonMaxHp(bPoke)) {
+                handleKnockOut(state, activeBoard, passiveBoard, bIdx)
+              }
+            }
+          }
+        } else if (
+          eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
+          eff.primitive === 'PLACE_DAMAGE_COUNTERS'
+        ) {
+          // PLACE_DAMAGE_COUNTERS place des MARQUEURS de dégâts.
+          // Les marqueurs contournent la prévention des dégâts et affectent les Pokémon Téracristal normalement !
           if (passiveBoard.bench.length > 0 && dmgInfo.benchDamage > 0) {
-            // Cible le Pokémon du Banc adverse qui peut être mis KO ou ayant la plus forte valeur stratégique
             let bestBenchIdx = 0
             let bestBenchScore = -9999
             passiveBoard.bench.forEach((bPoke, bIdx) => {
@@ -2415,6 +2605,205 @@ function resolveAtomicEffect(
       break
     }
 
+    case 'DRAW_UNTIL_HAND_SIZE': {
+      const limit = eff.count || 5
+      while (activeBoard.hand.length < limit && activeBoard.deck.length > 0) {
+        activeBoard.hand.push(activeBoard.deck.shift()!)
+      }
+      break
+    }
+
+    case 'HEAL_DAMAGE': {
+      const healAmt = eff.baseDamage ?? (eff.count || 1) * 10
+      const target =
+        action.targetSlot === 'ACTIVE'
+          ? activeBoard.activePokemon
+          : typeof action.targetSlot === 'number'
+            ? activeBoard.bench[action.targetSlot] ?? activeBoard.activePokemon
+            : activeBoard.activePokemon
+      if (target) {
+        target.damage = Math.max(0, target.damage - healAmt)
+      }
+      break
+    }
+
+    case 'PLACE_DAMAGE_COUNTERS': {
+      const counters = eff.count || 1
+      const dmg = counters * 10
+      const target =
+        action.targetSlot === 'ACTIVE'
+          ? passiveBoard.activePokemon
+          : typeof action.targetSlot === 'number'
+            ? passiveBoard.bench[action.targetSlot] ?? passiveBoard.activePokemon
+            : passiveBoard.activePokemon
+      if (target) {
+        target.damage += dmg
+        if (target.damage >= getPokemonMaxHp(target)) {
+          const slot =
+            action.targetSlot === 'ACTIVE' ? 'ACTIVE' : (action.targetSlot as number) ?? 'ACTIVE'
+          handleKnockOut(state, activeBoard, passiveBoard, slot)
+        }
+      }
+      break
+    }
+
+    case 'DEAL_DAMAGE_BENCH': {
+      const dmg = eff.baseDamage ?? (eff.count || 1) * 10
+      for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+        const bPoke = passiveBoard.bench[bIdx]!
+        if (bPoke.card.pokemonStats?.isTera) continue
+        bPoke.damage += dmg
+        if (bPoke.damage >= getPokemonMaxHp(bPoke)) {
+          handleKnockOut(state, activeBoard, passiveBoard, bIdx)
+        }
+      }
+      break
+    }
+
+    case 'APPLY_SPECIAL_CONDITION': {
+      const cond = eff.specialCondition || 'POISONED'
+      const target = passiveBoard.activePokemon
+      if (target) {
+        target.specialConditions = target.specialConditions || []
+        if (cond === 'ASLEEP' || cond === 'CONFUSED' || cond === 'PARALYZED') {
+          target.specialConditions = target.specialConditions.filter(
+            (c) => c === 'POISONED' || c === 'BURNED',
+          )
+        }
+        if (!target.specialConditions.includes(cond)) {
+          target.specialConditions.push(cond)
+        }
+      }
+      break
+    }
+
+    case 'MOVE_ENERGY_BETWEEN_POKEMON': {
+      if (activeBoard.activePokemon && activeBoard.bench.length > 0) {
+        const bPoke = activeBoard.bench.find((b) => b.attachedEnergies.length > 0)
+        if (bPoke) {
+          const en = bPoke.attachedEnergies.pop()!
+          activeBoard.activePokemon.attachedEnergies.push(en)
+        }
+      }
+      break
+    }
+
+    case 'MOVE_DAMAGE_COUNTERS': {
+      const counters = eff.count || 1
+      const dmg = counters * 10
+      if (
+        activeBoard.activePokemon &&
+        activeBoard.activePokemon.damage >= dmg &&
+        passiveBoard.activePokemon
+      ) {
+        activeBoard.activePokemon.damage -= dmg
+        passiveBoard.activePokemon.damage += dmg
+        if (passiveBoard.activePokemon.damage >= getPokemonMaxHp(passiveBoard.activePokemon)) {
+          handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
+        }
+      }
+      break
+    }
+
+    case 'RETURN_POKEMON_TO_HAND': {
+      const target =
+        action.targetSlot === 'ACTIVE'
+          ? activeBoard.activePokemon
+          : typeof action.targetSlot === 'number'
+            ? activeBoard.bench[action.targetSlot] ?? null
+            : null
+      if (target) {
+        activeBoard.hand.push(target.card)
+        for (const st of target.previousStages) activeBoard.hand.push(st)
+        for (const en of target.attachedEnergies) activeBoard.hand.push(en)
+        for (const tool of target.attachedTools) activeBoard.hand.push(tool)
+        if (action.targetSlot === 'ACTIVE') {
+          activeBoard.activePokemon = null
+          if (activeBoard.bench.length > 0) {
+            activeBoard.activePokemon = activeBoard.bench.shift()!
+          }
+        } else if (typeof action.targetSlot === 'number') {
+          activeBoard.bench.splice(action.targetSlot, 1)
+        }
+      }
+      break
+    }
+
+    case 'DISCARD_OPPONENT_ENERGY': {
+      const oppPoke = passiveBoard.activePokemon || passiveBoard.bench[0]
+      if (oppPoke && oppPoke.attachedEnergies.length > 0) {
+        const discarded = oppPoke.attachedEnergies.pop()!
+        passiveBoard.discard.push(discarded)
+      }
+      break
+    }
+
+    case 'DISCARD_TOOL_OR_STADIUM': {
+      if (state.activeStadium) {
+        const prevOwner = state.activeStadium.ownerIndex === 0 ? state.player : state.opponent
+        prevOwner.discard.push(state.activeStadium.card)
+        state.activeStadium = null
+        enforceBenchCapacity(activeBoard, getMaxBenchSlots(activeBoard, null))
+        enforceBenchCapacity(passiveBoard, getMaxBenchSlots(passiveBoard, null))
+      } else if (passiveBoard.activePokemon && passiveBoard.activePokemon.attachedTools.length > 0) {
+        const tool = passiveBoard.activePokemon.attachedTools.pop()!
+        passiveBoard.discard.push(tool)
+      }
+      break
+    }
+
+    case 'MILL_OPPONENT_DECK': {
+      const count = eff.count || 1
+      for (let i = 0; i < count && passiveBoard.deck.length > 0; i++) {
+        passiveBoard.discard.push(passiveBoard.deck.shift()!)
+      }
+      break
+    }
+
+    case 'DISCARD_FROM_OPPONENT_HAND': {
+      const count = eff.count || 1
+      for (let i = 0; i < count && passiveBoard.hand.length > 0; i++) {
+        passiveBoard.discard.push(passiveBoard.hand.pop()!)
+      }
+      break
+    }
+
+    case 'DEVOLVE_OPPONENT_POKEMON': {
+      const allOppPokes = [
+        ...(passiveBoard.activePokemon ? [passiveBoard.activePokemon] : []),
+        ...passiveBoard.bench,
+      ]
+      for (const oppPoke of allOppPokes) {
+        if (oppPoke.previousStages.length > 0) {
+          const topStage = oppPoke.card
+          const lowerStage = oppPoke.previousStages.pop()!
+          oppPoke.card = lowerStage
+          passiveBoard.hand.push(topStage)
+          if (oppPoke.damage >= getPokemonMaxHp(oppPoke)) {
+            const slot =
+              passiveBoard.activePokemon?.instanceId === oppPoke.instanceId ? 'ACTIVE' : 0
+            handleKnockOut(state, activeBoard, passiveBoard, slot)
+          }
+        }
+      }
+      break
+    }
+
+    case 'TAKE_EXTRA_PRIZE_CARDS': {
+      if (activeBoard.prizes.length > 0) {
+        const extraCount = eff.count || 1
+        for (let i = 0; i < extraCount && activeBoard.prizes.length > 0; i++) {
+          activeBoard.hand.push(activeBoard.prizes.shift()!)
+        }
+      }
+      break
+    }
+
+    case 'PASSIVE_ABILITY_OR_ITEM_LOCK': {
+      passiveBoard.itemLockActive = true
+      break
+    }
+
     default:
       break
   }
@@ -2613,6 +3002,66 @@ export function handleKnockOut(
 /**
  * Termine le tour courant et passe au joueur suivant ou conclut au plafond `maxTurns`.
  */
+/**
+ * Exécute le Checkup entre deux tours (Between-Turns Checkup) :
+ * - Poison (+10 dégâts)
+ * - Brûlure (+20 dégâts + flip de guérison)
+ * - Sommeil (flip de réveil)
+ * - Paralysie (fin au tour du joueur affecté)
+ * - Vérification des K.O.
+ */
+export function runBetweenTurnsCheckup(state: MatchState): void {
+  if (state.winner !== null) return
+
+  const boards = [state.player, state.opponent]
+  const rng = new Mulberry32(state.rngState)
+
+  for (let boardIdx = 0; boardIdx < 2; boardIdx++) {
+    const board = boards[boardIdx]!
+    const oppBoard = boards[1 - boardIdx]!
+    const active = board.activePokemon
+    if (!active) continue
+
+    const conds = active.specialConditions || []
+    const remainingConds: SpecialConditionType[] = []
+
+    for (const cond of conds) {
+      if (cond === 'POISONED') {
+        active.damage += 10
+        remainingConds.push('POISONED')
+      } else if (cond === 'BURNED') {
+        active.damage += 20
+        const flip = rng.nextFloat() >= 0.5
+        if (!flip) {
+          remainingConds.push('BURNED')
+        }
+      } else if (cond === 'ASLEEP') {
+        const flip = rng.nextFloat() >= 0.5
+        if (!flip) {
+          remainingConds.push('ASLEEP')
+        }
+      } else if (cond === 'PARALYZED') {
+        if (state.activePlayerIndex !== boardIdx) {
+          remainingConds.push('PARALYZED')
+        }
+      } else if (cond === 'CONFUSED') {
+        remainingConds.push('CONFUSED')
+      }
+    }
+
+    active.specialConditions = remainingConds
+
+    if (active.damage >= getPokemonMaxHp(active)) {
+      handleKnockOut(state, oppBoard, board, 'ACTIVE')
+    }
+  }
+
+  state.rngState = rng.getState()
+}
+
+/**
+ * Termine le tour courant et passe au joueur suivant ou conclut au plafond `maxTurns`.
+ */
 export function endTurnAndAdvance(state: MatchState): void {
   if (state.winner !== null) return
 
@@ -2639,6 +3088,10 @@ export function endTurnAndAdvance(state: MatchState): void {
   }
 
   endingBoard.abilityUsageCountsThisTurn = {}
+
+  // Exécution du Checkup officiel entre les deux tours
+  runBetweenTurnsCheckup(state)
+  if (state.winner !== null) return
 
   if (state.turnNumber >= state.maxTurns) {
     state.winReason = 'MAX_TURNS_REACHED'
