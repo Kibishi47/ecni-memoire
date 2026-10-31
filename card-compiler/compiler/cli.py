@@ -434,11 +434,13 @@ def create_compiler_engine(
     ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
         return LMStudioCardCompiler(
             tier=tier,
+            model_name=model,
             ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
@@ -469,6 +471,7 @@ def _execute_run_pipeline(
     thinking: Optional[str] = None,
     parallel: int = 1,
     continue_on_error: bool = False,
+    model: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -659,6 +662,7 @@ def _execute_run_pipeline(
             ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
+            model=model,
         )
         try:
             try:
@@ -1043,7 +1047,14 @@ def run_command(
         ModelTier.qwen3,
         "--tier",
         "-t",
+        envvar=["MODEL_TIER", "LLM_TIER", "TIER"],
         help="Palier de modèle LLM : 'qwen3' (Qwen3-14B Q6_K par défaut), 'max' (Qwen3-30B-A3B / 32B Q4_K_M), ou 'fast' (7B Q4_K_M).",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["LM_STUDIO_MODEL", "LLM_MODEL", "MODEL"],
+        help="Nom du modèle LLM cible (pour LM Studio). Si non renseigné, auto-détecte le modèle actif sur le serveur.",
     ),
     fast: bool = typer.Option(
         False,
@@ -1081,14 +1092,14 @@ def run_command(
         False,
         "--no-think",
         "--disable-thinking",
-        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
+        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK", "DISABLE_THINKING"],
         help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
     ),
     thinking: Optional[str] = typer.Option(
         None,
         "--thinking",
         "-tk",
-        envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
+        envvar=["LM_STUDIO_THINKING", "THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
         help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
     parallel: int = typer.Option(
@@ -1134,6 +1145,7 @@ def run_command(
         thinking=effective_thinking,
         parallel=parallel,
         continue_on_error=continue_on_error,
+        model=model,
     )
 
 
@@ -1157,7 +1169,19 @@ def compile_alias(
         envvar=["LLM_PROVIDER"],
         help="Fournisseur d'inférence LLM : 'local' ou 'lm_studio'.",
     ),
-    tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t"),
+    tier: ModelTier = typer.Option(
+        ModelTier.qwen3,
+        "--tier",
+        "-t",
+        envvar=["MODEL_TIER", "LLM_TIER", "TIER"],
+        help="Palier de modèle LLM : 'qwen3' (Qwen3-14B Q6_K par défaut), 'max' (Qwen3-30B-A3B / 32B Q4_K_M), ou 'fast' (7B Q4_K_M).",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["LM_STUDIO_MODEL", "LLM_MODEL", "MODEL"],
+        help="Nom du modèle LLM cible (pour LM Studio). Si non renseigné, auto-détecte le modèle actif sur le serveur.",
+    ),
     fast: bool = typer.Option(False, "--fast"),
     force: bool = typer.Option(False, "--force"),
     limit: Optional[int] = typer.Option(None, "--limit"),
@@ -1182,14 +1206,14 @@ def compile_alias(
         False,
         "--no-think",
         "--disable-thinking",
-        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
+        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK", "DISABLE_THINKING"],
         help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
     ),
     thinking: Optional[str] = typer.Option(
         None,
         "--thinking",
         "-tk",
-        envvar=["LM_STUDIO_THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
+        envvar=["LM_STUDIO_THINKING", "THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
         help="Niveau de réflexion / thinking pour les modèles raisonnants dans LM Studio : 'null' pour désactiver, ou un niveau ('low', 'medium', 'high', ou nombre de tokens).",
     ),
     parallel: int = typer.Option(
@@ -1235,6 +1259,7 @@ def compile_alias(
         thinking=effective_thinking,
         parallel=parallel,
         continue_on_error=continue_on_error,
+        model=model,
     )
 
 

@@ -642,26 +642,26 @@ class LocalLLMCardCompiler:
             or os.environ.get("THINKING")
             or os.environ.get("THINKING_LEVEL")
         )
-        env_disable_thinking = (
-            os.environ.get("LM_STUDIO_DISABLE_THINKING")
-            or os.environ.get("LM_STUDIO_NO_THINK")
-            or os.environ.get("NO_THINK")
+        is_env_disabled = any(
+            str(os.environ.get(k) or "").strip().lower() in {"1", "true", "yes", "on"}
+            for k in ("LM_STUDIO_DISABLE_THINKING", "LM_STUDIO_NO_THINK", "NO_THINK", "DISABLE_THINKING")
         )
 
         resolved_thinking = thinking
         if resolved_thinking is None and env_thinking:
             resolved_thinking = env_thinking.strip()
 
-        if disable_thinking is True or (
-            resolved_thinking is None and env_disable_thinking and env_disable_thinking.lower() in {"1", "true", "yes", "on"}
-        ):
+        if disable_thinking is True or (resolved_thinking is None and is_env_disabled):
             resolved_thinking = "null"
         elif disable_thinking is False and resolved_thinking is None:
             resolved_thinking = None
 
         if resolved_thinking is not None:
             cleaned_tk = str(resolved_thinking).strip().lower()
-            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+            if not cleaned_tk:
+                self.thinking = None
+                self.disable_thinking = False
+            elif cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
                 self.thinking: Optional[str] = "null"
                 self.disable_thinking: bool = True
             else:
@@ -671,10 +671,19 @@ class LocalLLMCardCompiler:
             self.thinking = None
             self.disable_thinking = False
 
-        if fast and tier == ModelTier.qwen3:
+        resolved_tier = tier
+        if tier == ModelTier.qwen3 and not fast:
+            env_tier = os.environ.get("MODEL_TIER") or os.environ.get("LLM_TIER") or os.environ.get("TIER")
+            if env_tier and env_tier.strip():
+                try:
+                    resolved_tier = ModelTier(env_tier.strip().lower())
+                except Exception:
+                    pass
+
+        if fast and resolved_tier == ModelTier.qwen3:
             self.tier = ModelTier.fast
         else:
-            self.tier = tier
+            self.tier = resolved_tier
 
         if repo_id and filename:
             self.repo_id = repo_id

@@ -377,26 +377,26 @@ class LMStudioCardCompiler:
             or os.environ.get("THINKING")
             or os.environ.get("THINKING_LEVEL")
         )
-        env_disable_thinking = (
-            os.environ.get("LM_STUDIO_DISABLE_THINKING")
-            or os.environ.get("LM_STUDIO_NO_THINK")
-            or os.environ.get("NO_THINK")
+        is_env_disabled = any(
+            str(os.environ.get(k) or "").strip().lower() in {"1", "true", "yes", "on"}
+            for k in ("LM_STUDIO_DISABLE_THINKING", "LM_STUDIO_NO_THINK", "NO_THINK", "DISABLE_THINKING")
         )
 
         resolved_thinking = thinking
         if resolved_thinking is None and env_thinking:
             resolved_thinking = env_thinking.strip()
 
-        if disable_thinking is True or (
-            resolved_thinking is None and env_disable_thinking and env_disable_thinking.lower() in {"1", "true", "yes", "on"}
-        ):
+        if disable_thinking is True or (resolved_thinking is None and is_env_disabled):
             resolved_thinking = "null"
         elif disable_thinking is False and resolved_thinking is None:
             resolved_thinking = None
 
         if resolved_thinking is not None:
             cleaned_tk = str(resolved_thinking).strip().lower()
-            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+            if not cleaned_tk:
+                self.thinking = None
+                self.disable_thinking = False
+            elif cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
                 self.thinking: Optional[str] = "null"
                 self.disable_thinking: bool = True
             else:
@@ -446,7 +446,7 @@ class LMStudioCardCompiler:
         self.local_port = getattr(self, "local_port", 12345)
 
         # 3. Modèle d'inférence
-        env_model = os.environ.get("LM_STUDIO_MODEL")
+        env_model = os.environ.get("LM_STUDIO_MODEL") or os.environ.get("LLM_MODEL") or os.environ.get("MODEL")
         if model_name and model_name.strip():
             self.model_name = model_name.strip()
         elif env_model and env_model.strip():
@@ -904,7 +904,10 @@ class LMStudioCardCompiler:
 
         if effective_thinking is not None:
             cleaned_tk = str(effective_thinking).strip().lower()
-            if cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
+            if not cleaned_tk:
+                is_thinking_disabled = self.disable_thinking
+                thinking_level = self.thinking
+            elif cleaned_tk in {"null", "none", "off", "false", "0", "disabled", "disable"}:
                 is_thinking_disabled = True
                 thinking_level: Optional[str] = "null"
             else:
