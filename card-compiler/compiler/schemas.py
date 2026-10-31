@@ -14,7 +14,7 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ============================================================================
@@ -815,6 +815,33 @@ class PlayableAction(BaseModel):
         if isinstance(v, list):
             return v
         return []
+
+    @model_validator(mode="before")
+    @classmethod
+    def filter_or_migrate_attack_costs(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Si le LLM a placé un coût en énergie dans `costs` au lieu de `energyCost`
+            raw_costs = data.get("costs")
+            if isinstance(raw_costs, list):
+                valid_costs = []
+                for c in raw_costs:
+                    if isinstance(c, dict):
+                        if ("energyType" in c or "energy" in c) and "type" not in c:
+                            e_val = c.get("energyType") or c.get("energy")
+                            if e_val and isinstance(e_val, str):
+                                if "energyCost" not in data or not isinstance(data["energyCost"], list):
+                                    data["energyCost"] = []
+                                count = c.get("count", 1)
+                                try:
+                                    cnt = int(count)
+                                except Exception:
+                                    cnt = 1
+                                for _ in range(max(1, cnt)):
+                                    data["energyCost"].append(e_val)
+                            continue
+                    valid_costs.append(c)
+                data["costs"] = valid_costs
+        return data
 
 
 class TurnPhaseWeights(BaseModel):

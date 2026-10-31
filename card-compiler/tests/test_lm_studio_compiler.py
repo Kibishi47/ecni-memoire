@@ -745,14 +745,8 @@ class TestLMStudioCompiler(unittest.TestCase):
         resp_400_schema = MagicMock()
         resp_400_schema.is_success = False
         resp_400_schema.status_code = 400
-        resp_400_schema.json.return_value = {"error": {"message": "Invalid response_format: json_schema not supported"}}
-        resp_400_schema.text = "json_schema not supported"
-
-        resp_400_obj = MagicMock()
-        resp_400_obj.is_success = False
-        resp_400_obj.status_code = 400
-        resp_400_obj.json.return_value = {"error": {"message": "Invalid response_format: json_object not supported"}}
-        resp_400_obj.text = "json_object not supported"
+        resp_400_schema.json.return_value = {"error": {"message": "'response_format.type' must be 'json_schema' or 'text'"}}
+        resp_400_schema.text = "'response_format.type' must be 'json_schema' or 'text'"
 
         resp_200_raw = MagicMock()
         resp_200_raw.is_success = True
@@ -770,7 +764,7 @@ class TestLMStudioCompiler(unittest.TestCase):
 
         mock_client = MagicMock()
         mock_client.__enter__.return_value = mock_client
-        mock_client.post.side_effect = [resp_400_schema, resp_400_obj, resp_200_raw]
+        mock_client.post.side_effect = [resp_400_schema, resp_200_raw]
         mock_client_cls.return_value = mock_client
 
         from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
@@ -1737,6 +1731,93 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(meta.tokensPerSecond, 1.0)
         self.assertEqual(meta.timeToFirstTokenSeconds, 5.0)
         self.assertAlmostEqual(meta.compilationTimeSeconds, 7.1, places=1)
+
+    @patch("httpx.Client")
+    def test_granivol_sv02_001_compilation_with_json_schema(self, mock_client_cls):
+        """Vérifie la compilation de Granivol (sv02-001) avec schéma JSON et évite toute erreur 'response_format.type'."""
+        compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+        compiler._ready = True
+
+        fake_granivol_json = {
+            "reasoningAnalysis": "Analyse de Granivol (sv02-001) avec Esquive Éclaboussante.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [
+                {
+                    "actionId": "attack_splash_hide",
+                    "label": "Esquive Éclaboussante",
+                    "sourceType": "ATTACK",
+                    "timing": "END_OF_TURN_ATTACK",
+                    "canUseTurn1GoingFirst": False,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [{"energyType": "GRASS", "count": 1}],
+                    "effects": [
+                        {
+                            "primitive": "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS",
+                            "baseDamage": 10,
+                        }
+                    ],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "STALL_WALL",
+                "intrinsicBaseScore": 40,
+                "discardPriorityWhenDead": 75,
+                "holdForNextTurnBonus": 5,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.2, "turn2": 1.0, "turn3": 0.8, "turn4Plus": 0.5},
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_granivol_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 120},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "id": "sv02-001",
+            "name": "Granivol",
+            "category": "Pokémon",
+            "stage": "Base",
+            "hp": 50,
+            "types": ["Plante"],
+            "attacks": [{"name": "Esquive Éclaboussante", "damage": 10, "cost": ["Plante"]}],
+        }
+        identity, pstats = fetcher.build_deterministic_models("sv02-001", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv02-001",
+            resolved_tcgdex_id="sv02-001",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv02-001.json"),
+        )
+
+        engine_card = compiler.compile_card(bundle)
+        self.assertIsInstance(engine_card, EngineCardModel)
+        self.assertEqual(engine_card.cardId, "sv02-001")
+        self.assertEqual(engine_card.identity.nameFr, "Granivol")
+
+        # Vérifier que le format envoyé est bien json_schema et JAMAIS json_object
+        mock_instance.post.assert_called_once()
+        _, kwargs = mock_instance.post.call_args
+        sent_payload = kwargs["json"]
+        self.assertIn("response_format", sent_payload)
+        self.assertEqual(sent_payload["response_format"]["type"], "json_schema")
+        self.assertNotEqual(sent_payload["response_format"]["type"], "json_object")
 
 
 if __name__ == "__main__":

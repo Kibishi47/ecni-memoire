@@ -942,11 +942,13 @@ class LMStudioCardCompiler:
                     elif thinking_level.isdigit():
                         payload["max_thinking_tokens"] = int(thinking_level)
 
-                # Cascade de formats : json_schema -> json_object -> none (prompt direct)
+                # Cascade de formats supportés par LM Studio :
+                # 1. 'json_schema' (Structured Outputs avec grammaire GBNF)
+                # 2. 'none' (sans response_format, LM Studio rejette strictement 'json_object' avec HTTP 400)
                 formats_to_try: List[str] = []
                 if self._use_json_schema_format:
                     formats_to_try.append("json_schema")
-                formats_to_try.extend(["json_object", "none"])
+                formats_to_try.append("none")
 
                 data: Optional[Dict[str, Any]] = None
                 call_err: Optional[Exception] = None
@@ -960,8 +962,6 @@ class LMStudioCardCompiler:
                                 "schema": self._json_schema,
                             },
                         }
-                    elif fmt == "json_object":
-                        payload["response_format"] = {"type": "json_object"}
                     else:
                         payload.pop("response_format", None)
 
@@ -993,7 +993,7 @@ class LMStudioCardCompiler:
                                 self._use_json_schema_format = False
                             break
                         else:
-                            # Le format actuel a produit une réponse vide, tronquée ou invalide (conflit GBNF/thinking)
+                            # Le format actuel a produit une réponse vide ou invalide pour cette tentative
                             if fmt == "json_schema":
                                 self._use_json_schema_format = False
                             continue
@@ -1058,6 +1058,11 @@ class LMStudioCardCompiler:
 
                     # 3. Si 400 causé par response_format ou paramètres non supportés : on retire les paramètres optionnels et on tente le format suivant
                     if resp.status_code == 400:
+                        err_lower = err_msg.lower()
+                        if any(k in err_lower for k in ["response_format", "json_schema", "schema", "'text'"]):
+                            self._use_json_schema_format = False
+                            payload.pop("response_format", None)
+
                         for param in [
                             "chat_template_kwargs",
                             "chat_template_args",
@@ -1111,7 +1116,6 @@ class LMStudioCardCompiler:
                     break
                 except Exception as val_err:
                     last_error = val_err
-                    self._use_json_schema_format = False  # Désactiver json_schema si validation échoue
                     try:
                         raw_dict = json.loads(cleaned_json)
                         if isinstance(raw_dict, dict):
