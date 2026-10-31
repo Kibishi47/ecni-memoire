@@ -111,4 +111,42 @@ Total Cards: 60`
     const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
     expect(parsed.isDatabaseLoaded).toBe(true)
   })
+
+  it('invalide un deck contenant plus d\'une carte ACE SPEC', () => {
+    // Deck contenant 2 ACE SPECs
+    const text2AceSpecs = `Pokémon: 6
+4 Ire-Foudre-ex TEF 123
+2 Favianos-ex SFA 38
+
+Dresseurs: 28
+4 Pepper SVI 166
+4 Mashynn PAL 185
+4 Hyper Ball SVI 196
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
+4 Super Bonbon PAF 125
+2 Attrape-Suprême TEF 162
+2 Attrape-Riposte PAR 160
+
+Énergies: 26
+15 Énergie Combat de base SVE 6
+11 Énergie Électrik de base SVE 4
+
+Total Cards: 60`
+
+    const parsed = parsePtcglDecklist(text2AceSpecs)
+    expect(parsed.totalCards).toBe(60)
+    expect(parsed.aceSpecCount).toBe(2)
+    expect(parsed.isValid60).toBe(false)
+    expect(
+      parsed.warnings.some((w) =>
+        w.message.includes('Le deck contient 2 cartes HIGH-TECH (ACE SPEC). Une seule carte HIGH-TECH est autorisée par deck.'),
+      ),
+    ).toBe(true)
+  })
+
+  it('valide la légalité Standard des cartes régulées G, H, I et énergies de base', () => {
+    const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    expect(parsed.isStandardLegal).toBe(true)
+  })
 })

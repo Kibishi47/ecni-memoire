@@ -6,7 +6,7 @@ import type {
   ParseWarning,
   SynergyAuditItem,
 } from '../types/deck'
-import type { CardFilter, EngineCardModel } from '../types/cardModel'
+import { isCardStandardLegal, type CardFilter, type EngineCardModel } from '../types/cardModel'
 import { inferFormat, isCardLine, isSectionLine, isTotalLine, splitCardTokens } from './lines'
 import { detectBasicEnergy, isEnergyCardName } from './energy'
 import { lookupSetMapping } from '../data/ptcglSetMapping'
@@ -152,7 +152,9 @@ export function buildDeckEntryFromTokens(input: {
     model.category === 'POKEMON' ? 'pokemon' : model.category === 'TRAINER' ? 'trainer' : 'energy'
 
   const isAceSpec =
-    (model.identity.rarity || '').includes('ACE SPEC') ||
+    model.identity.isAceSpec === true ||
+    (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
+    (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH') ||
     /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr)
   const isRadiant = /radieux|radiant/i.test(model.identity.nameFr)
   const isEx = Boolean(model.pokemonStats?.isRuleBox)
@@ -219,7 +221,10 @@ export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number
     unpaddedCardId: `${model.identity.setId}-${cleanNumber}`,
     ptcglId: `${mapping.ptcglCode}-${cleanNumber}`,
     imageUrl: model.identity.imageUrl || `https://assets.tcgdex.net/fr/${mapping.serie}/${model.identity.setId}/${paddedNumber}`,
-    isAceSpec: (model.identity.rarity || '').includes('ACE SPEC'),
+    isAceSpec:
+      model.identity.isAceSpec === true ||
+      (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
+      (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH'),
     isRadiant: /radieux|radiant/i.test(model.identity.nameFr),
     isEx: Boolean(model.pokemonStats?.isRuleBox),
     line: lineIndex,
@@ -359,6 +364,27 @@ export function computeDeckSummary(
     })
   }
 
+  // Règle stricte ACE SPEC : au maximum 1 seule carte ACE SPEC autorisée par deck
+  const aceSpecCount = activeCards
+    .filter((c) => c.isAceSpec || c.model.identity.isAceSpec)
+    .reduce((sum, c) => sum + c.quantity, 0)
+
+  if (aceSpecCount > 1) {
+    warnings.push({
+      message: `Le deck contient ${aceSpecCount} cartes HIGH-TECH (ACE SPEC). Une seule carte HIGH-TECH est autorisée par deck.`,
+    })
+  }
+
+  // Validation de légalité Standard (marques de régulation G, H, I ou Énergies de base)
+  const illegalStandardCards = activeCards.filter((c) => !isCardStandardLegal(c.model))
+  if (illegalStandardCards.length > 0) {
+    const illegalCount = illegalStandardCards.reduce((sum, c) => sum + c.quantity, 0)
+    warnings.push({
+      message: `Le deck contient ${illegalCount} carte(s) non légales au format Standard (seules les marques de régulation G, H, I et les Énergies de base sont autorisées).`,
+    })
+  }
+
+  const isStandardLegal = illegalStandardCards.length === 0
   const synergyAudit = computeDeckSynergyAudit(activeCards)
 
   return {
@@ -370,7 +396,12 @@ export function computeDeckSummary(
     energyCount,
     basicPokemonCount,
     uniqueCardCount: uniqueIds.size,
-    isValid60: totalCards === 60 && basicPokemonCount >= 1 && isFullyResolved,
+    isValid60:
+      totalCards === 60 &&
+      basicPokemonCount >= 1 &&
+      isFullyResolved &&
+      aceSpecCount <= 1 &&
+      isStandardLegal,
     hasAtLeastOneBasic: basicPokemonCount >= 1,
     isFullyResolved,
     isDatabaseLoaded,
@@ -378,5 +409,7 @@ export function computeDeckSummary(
     unresolvedCards,
     warnings,
     synergyAudit,
+    aceSpecCount,
+    isStandardLegal,
   }
 }

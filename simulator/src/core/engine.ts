@@ -74,6 +74,8 @@ export interface PlayerBoardState {
   firstSearchTurn: number | null
 }
 
+export type ActiveStadiumState = { card: EngineCardModel; ownerIndex: 0 | 1; usedThisTurn: boolean }
+
 export interface MatchState {
   player: PlayerBoardState
   opponent: PlayerBoardState
@@ -86,7 +88,7 @@ export interface MatchState {
   rngState: number
   nextInstanceSeq: number
   lastActionLog: string[]
-  activeStadium: { card: EngineCardModel; ownerIndex: 0 | 1; usedThisTurn: boolean } | null
+  activeStadium: ActiveStadiumState | null
 }
 
 export type GameActionType =
@@ -643,10 +645,11 @@ export function isCardDeadInHand(
   card: EngineCardModel,
   myBoard: PlayerBoardState,
   oppBoard: PlayerBoardState,
+  activeStadium?: ActiveStadiumState | null,
 ): boolean {
   const conditions = card.strategicEvaluator.inGameDeadCardConditions || []
   for (const cond of conditions) {
-    if (evaluateDeadCondition(cond, myBoard, oppBoard)) {
+    if (evaluateDeadCondition(cond, myBoard, oppBoard, activeStadium, card)) {
       return true
     }
   }
@@ -657,10 +660,14 @@ function evaluateDeadCondition(
   cond: DeadCardCondition,
   myBoard: PlayerBoardState,
   oppBoard: PlayerBoardState,
+  activeStadium?: ActiveStadiumState | null,
+  cardBeingEvaluated?: EngineCardModel,
 ): boolean {
   switch (cond.reason) {
-    case 'BENCH_ALREADY_FULL':
-      return myBoard.bench.length >= 5
+    case 'BENCH_ALREADY_FULL': {
+      const maxSlots = activeStadium?.card.cardId === 'sv07-141' ? 8 : 5
+      return myBoard.bench.length >= maxSlots
+    }
 
     case 'NOT_BEHIND_ON_PRIZES':
       return myBoard.prizes.length <= oppBoard.prizes.length
@@ -675,6 +682,42 @@ function evaluateDeadCondition(
       const zones = cond.zonesToCheck.length > 0 ? cond.zonesToCheck : (['DECK'] as ZoneType[])
       return countMatchingCardsInZones(myBoard, zones, cond.targetFilter) === 0
     }
+
+    case 'NO_TERA_POKEMON_IN_PLAY': {
+      const allInPlay = [myBoard.activePokemon, ...myBoard.bench].filter(
+        (p): p is InPlayPokemon => p !== null,
+      )
+      return !allInPlay.some((p) => Boolean(p.card.pokemonStats?.isTera))
+    }
+
+    case 'HAND_ALREADY_FULL_OR_AT_LIMIT': {
+      return myBoard.hand.length >= 7
+    }
+
+    case 'NO_DAMAGE_ON_OWN_POKEMON': {
+      const allInPlay = [myBoard.activePokemon, ...myBoard.bench].filter(
+        (p): p is InPlayPokemon => p !== null,
+      )
+      return !allInPlay.some((p) => p.damage > 0)
+    }
+
+    case 'NO_KO_LAST_TURN': {
+      return !myBoard.koSufferedLastOpponentTurn
+    }
+
+    case 'STADIUM_ALREADY_IN_PLAY_SAME_NAME': {
+      if (!activeStadium) return false
+      if (cardBeingEvaluated && activeStadium.card.cardId === cardBeingEvaluated.cardId) return true
+      if (
+        cardBeingEvaluated &&
+        normalizeCardNameForMatch(activeStadium.card.identity.nameFr) ===
+          normalizeCardNameForMatch(cardBeingEvaluated.identity.nameFr)
+      ) {
+        return true
+      }
+      return false
+    }
+
     default:
       return false
   }

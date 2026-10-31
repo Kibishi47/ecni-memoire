@@ -4,7 +4,7 @@ import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { createNativeBasicEnergyModel } from '../utils/energy'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
 import type { EngineCardModel } from '../types/cardModel'
-import { applyAction, createInitialMatchState } from './engine'
+import { applyAction, createInitialMatchState, isCardDeadInHand } from './engine'
 import { evaluateState, getStateHash, selectBestTurnBranch } from './evaluator'
 
 const mockCharmander: EngineCardModel = {
@@ -229,5 +229,72 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
           10,
       ) / 10
     expect(chosenTrace!.totalScore).toBeCloseTo(expectedWeighted, 1)
+  })
+
+  it('évalue avec exactitude les 5 nouvelles conditions de cartes mortes en main', () => {
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+
+    const state = createInitialMatchState(deckA, deckB, {
+      seed: 123,
+      firstPlayerIndex: 0,
+      maxTurns: 10,
+    })
+
+    const dummyCard: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'test-dead-card',
+      strategicEvaluator: {
+        ...mockCharmander.strategicEvaluator,
+        inGameDeadCardConditions: [{ reason: 'NO_TERA_POKEMON_IN_PLAY', zonesToCheck: [] }],
+      },
+    }
+
+    // Aucun Pokémon Téracristal n'est en jeu côté joueur -> carte morte
+    expect(state.player.activePokemon?.card.pokemonStats?.isTera).toBeFalsy()
+    expect(isCardDeadInHand(dummyCard, state.player, state.opponent, state.activeStadium)).toBe(true)
+
+    // Si on active le flag isTera sur l'Actif allié -> la carte n'est plus morte !
+    state.player.activePokemon!.card = {
+      ...state.player.activePokemon!.card,
+      pokemonStats: { ...state.player.activePokemon!.card.pokemonStats!, isTera: true },
+    }
+    expect(isCardDeadInHand(dummyCard, state.player, state.opponent, state.activeStadium)).toBe(false)
+  })
+
+  it('pondère positivement les 5 nouveaux rôles stratégiques dans evaluateState', () => {
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+
+    const state = createInitialMatchState(deckA, deckB, {
+      seed: 999,
+      firstPlayerIndex: 0,
+      maxTurns: 10,
+    })
+
+    const initialScore = evaluateState(state, 0)
+
+    // Ajout d'un Pokémon Tank Défensif intact à 100% de PV
+    state.player.bench.push({
+      instanceId: 'tank-wall',
+      card: {
+        ...mockTargetBasic,
+        strategicEvaluator: {
+          ...mockTargetBasic.strategicEvaluator,
+          primaryRole: 'DEFENSIVE_TANK_WALL',
+        },
+      },
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    })
+
+    const scoreWithTank = evaluateState(state, 0)
+    expect(scoreWithTank).toBeGreaterThan(initialScore)
   })
 })
