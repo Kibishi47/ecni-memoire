@@ -1,13 +1,18 @@
 # Pokémon TCG Card Compiler (`card-compiler`)
 
-Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il interroge l'API **TCGdex**, charge directement un LLM local en mémoire via `llama-cpp-python` (accélération GPU Apple Metal M4 + **Constrained Decoding GBNF** natif via Pydantic V2) et génère les modèles JSON déterministes (`EngineCardModel`) sur le disque.
+Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il interroge l'API **TCGdex**, charge un LLM local en mémoire via `llama-cpp-python` (accélération GPU Apple Metal M4 + **Constrained Decoding GBNF** natif via Pydantic V2) ou se connecte à un serveur **LM Studio** distant / local via son API REST OpenAI-compatible (directe par IP ou via tunnel SSH sécurisé). Il génère des modèles JSON déterministes et validés (`EngineCardModel`) conservés 100 % localement.
 
 ## Architecture & Caractéristiques
 
-- **Zéro serveur / Zéro démon externe** : Aucun serveur FastAPI/Flask ni démon Ollama/LM Studio. Le modèle `.gguf` (`Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` en `Q4_K_M` par défaut, ou `7B` avec `--fast`) est téléchargé automatiquement via `huggingface_hub` et chargé en RAM/VRAM avec `n_gpu_layers=-1`.
-- **Constrained Decoding GBNF Natif** : Utilisation de `response_format={"type": "json_object", "schema": LLMCompiledCardPart.model_json_schema()}` pour garantir mathématiquement le respect des `Enum` fermés et du schéma Pydantic V2.
-- **Résolution de lignée d'évolution** : Calcul automatique du Pokémon de base racine (`rootBasicName`, `evolvesFrom`) via l'API TCGdex pour alimenter les synergies et conditions de cartes mortes (ex. *Super Bonbon*).
-- **Cache disque & Reprise sur lot** : Les réponses brutes TCGdex (`FR` + secours `EN`) sont mises en cache dans `data/raw_tcgdex/`, et les cartes compilées sont sauvegardées individuellement dans `data/compiled_cards/{id}.json` ainsi que consolidées dans `data/cards_database.json`.
+- **Deux Moteurs d'Inférence LLM au Choix** :
+  - **Local Apple Metal (`local`)** : Chargement direct du modèle GGUF en RAM/VRAM unifiée via `llama-cpp-python` (`n_gpu_layers=-1`, Metal M4 natif, 0 démon externe).
+  - **LM Studio (`lm_studio`)** : Connexion à un serveur LM Studio distant ou local via son API REST standard (`/v1/chat/completions`), soit en accès direct par IP/Port, soit au travers d'un tunnel SSH automatisé. Les modèles déjà chargés dans LM Studio sont auto-détectés.
+- **Débit en Temps Réel (Streaming SSE & Tokens/sec)** : Affichage dynamique du débit d'inférence en direct dans la barre de progression Rich (`t/s` et tokens générés) et récapitulatif dans le tableau final.
+- **Option Désactivation du Thinking (`--no-think`)** : Prise en charge des modèles raisonnants (DeepSeek-R1, Qwen 2.5 / 3.8, QwQ) avec injection des paramètres Jinja `chat_template_kwargs={"enable_thinking": False}`, `reasoning_effort="none"` et des balises anti-thinking (`<|think_off|>`, `/no_think`) pour réduire la latence et économiser les tokens.
+- **Normalisation Robuste des Enums & Auto-Guérison** : Validateurs Pydantic V2 pré-évaluation (`mode="before"`) avec dictionnaire de synonymes et correspondance floue (`difflib`) pour normaliser automatiquement les primitives (`EffectPrimitive`), motifs de carte morte (`DeadCardReason`), rôles stratégiques et timings sans plantage.
+- **Court-circuit Déterministe des Énergies de Base** : Compilation instantanée (0 token, 0.00s) pour les Énergies de base.
+- **Résolution de lignée d'évolution** : Calcul automatique du Pokémon de base racine (`rootBasicName`, `evolvesFrom`, `evolutionChain`) via l'index TCGdex pour alimenter les synergies et conditions de cartes mortes (ex. *Super Bonbon*).
+- **Cache disque & Reprise sur lot** : Les réponses brutes TCGdex (`FR` + secours `EN`) sont mises en cache dans `data/raw_tcgdex/`, et les cartes compilées sont sauvegardées individuellement dans `data/compiled_cards/{id}.json` et consolidées dans `data/cards_database.json`.
 
 ## Structure du Projet
 
@@ -15,17 +20,22 @@ Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il int
 card-compiler/
 ├── requirements.txt         # llama-cpp-python, huggingface-hub, httpx, pydantic>=2.9, typer, rich
 ├── setup_mac_metal.sh       # Installation et compilation Metal (CMAKE_ARGS="-DGGML_METAL=on")
+├── .env.example             # Modèle de configuration d'environnement (LLM, hôte, SSH, provider)
 ├── README.md
 ├── data/
 │   ├── raw_tcgdex/          # Cache JSON brut de TCGdex (.json) + _cards_index.json
 │   ├── compiled_cards/      # 1 fichier JSON compilé par carte (.json)
 │   └── cards_database.json  # Fichier consolidé regroupant toutes les cartes compilées
-└── compiler/
-    ├── __init__.py
-    ├── schemas.py           # Tous les Enums stricts et modèles Pydantic V2
-    ├── tcgdex_fetcher.py    # Client HTTP asynchrone + cache disque + résolveur de lignée d'évolution
-    ├── llm_engine.py        # Chargement direct Llama() en RAM + Prompt Système PTCG + Constrained Decoding
-    └── cli.py               # CLI Typer (commandes run/compile, inspect, stats/validate)
+├── compiler/
+│   ├── __init__.py
+│   ├── schemas.py           # Tous les Enums stricts et modèles Pydantic V2 avec normaliseurs
+│   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx) + cache disque + lignées
+│   ├── llm_engine.py        # Moteur local Metal llama.cpp + Prompt Système PTCG + CoT GBNF
+│   ├── lm_studio_compiler.py# Provider LM Studio (REST direct ou tunnel SSH, streaming t/s)
+│   ├── post_processor.py    # Enrichissement déterministe et règles d'invariants PTCG
+│   ├── static_cards.py      # Court-circuit déterministe pour Énergies de Base
+│   └── cli.py               # Interface CLI Typer (run/compile, count, remaining, sync, inspect, stats)
+└── tests/                   # Suite de tests unitaires (60 tests automatisés)
 ```
 
 ## Installation (Apple Silicon M4 / Metal)
@@ -34,100 +44,174 @@ card-compiler/
 chmod +x setup_mac_metal.sh
 ./setup_mac_metal.sh
 source .venv/bin/activate
-# Renseigne ton jeton Hugging Face dans .env (fichier ignoré par git)
+# Créer le fichier .env à partir de l'exemple
 cp .env.example .env
-# Remplir HF_TOKEN=hf_... dans .env
 ```
 
-## Utilisation du CLI
+---
 
-### 1. Compiler le jeu de 10 cartes stratégiques de référence (mode test par défaut)
+## Configuration de LM Studio (`.env`)
+
+Pour utiliser LM Studio sur une machine distante (ou locale) :
+
+```dotenv
+# 1. Fournisseur LLM
+LLM_PROVIDER=lm_studio
+
+# 2. Connexion Directe par IP Publique et Port (Recommandé)
+LM_STUDIO_HOST=192.168.1.50      # Laissez vide pour localhost (127.0.0.1)
+LM_STUDIO_PORT=1234
+# Laissez VIDE pour utiliser automatiquement le modèle actuellement chargé dans LM Studio
+LM_STUDIO_MODEL=
+
+# Option : Désactiver le thinking des modèles raisonnants (DeepSeek, Qwen, QwQ)
+LM_STUDIO_DISABLE_THINKING=false
+
+# 3. Tunnel SSH (Requis uniquement si le port 1234 n'est pas ouvert publiquement)
+LM_STUDIO_USE_TUNNEL=false
+SSH_HOST=
+SSH_PORT=22
+SSH_USER=
+SSH_KEY_PATH=
+SSH_PASSWORD=
+LM_STUDIO_LOCAL_PORT=12345
+```
+
+---
+
+## Guide des Commandes CLI
+
+### 1. Compiler des Cartes (`run` / `compile`)
 
 ```bash
-python -m compiler.cli run --mode test
+# Compilation du jeu de 11 cartes stratégiques de référence (mode test par défaut)
+python -m compiler.cli run
+
+# Compilation d'une ou plusieurs cartes spécifiques par identifiant TCGdex
+python -m compiler.cli run --ids sv06.5-001,sv04-125
+
+# Compilation via LM Studio (API REST)
+python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001
+
+# Désactiver le thinking / raisonnement pour LM Studio (gain de temps et économie de tokens)
+python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --no-think
+
+# Compilation du format Standard complet (avec reprise sur cache)
+python -m compiler.cli run --standard --limit 50
+
+# Forcer la recompilation complète en écrasant les fichiers existants
+python -m compiler.cli run --ids sv03-125 --force
 ```
 
-Options disponibles sur `run` (alias `compile`) :
-- `--mode test` (défaut) : Compile les 10 cartes stratégiques de référence (`TEST_CARD_IDS`).
-- `--mode standard` : Compile toutes les cartes légales au format Standard (`legal.standard == true`).
-- `--ids sv04-125,sv03-125` : Compile uniquement la liste d'identifiants fournie.
-- `--provider sdk|rest` (défaut : `sdk`) : Source des données TCGdex (SDK officiel `tcgdex-sdk` ou API REST `httpx`).
-- `--llm-provider local|lm_studio` (défaut : `local`, ou configurable via `LLM_PROVIDER` dans `.env`) :
-  - `local` : Moteur in-memory Apple Metal M4 local via `llama-cpp-python` (0 serveur externe).
-  - `lm_studio` : Exécution sur LM Studio (local ou machine distante via SSH et tunnel sécurisé, pilotable avec `lms`). Les données et cartes générées restent 100 % locales sur votre machine.
-- `--tier qwen3|max|fast` (défaut : `qwen3`) :
-  - `qwen3` : `Qwen/Qwen3-14B-GGUF` (`Q6_K` / `Q5_K_M`, ~11-12 Go, sélection dynamique via `list_repo_files` et fallback automatique).
-  - `max` : `Qwen/Qwen3-30B-A3B-GGUF` ou `Qwen/Qwen2.5-Coder-32B-Instruct-GGUF` (`Q4_K_M`, ~16-18.5 Go).
-  - `fast` : `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF` (`Q4_K_M`).
-- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer le téléchargement du modèle GGUF (peut aussi être configuré via `.env` ou `export HF_TOKEN="hf_..."`).
+**Options disponibles sur `run` (alias `compile`) :**
+- `--mode test|standard` (`-m`) : Mode d'exécution (`test` : 11 cartes de référence, `standard` : format Standard).
+- `--test` / `--standard` : Raccourcis pour forcer le mode test ou standard.
+- `--ids <ID1,ID2>` : Liste d'identifiants TCGdex séparés par des virgules (ex: `sv06.5-001,sv03-125`).
+- `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Metal ou `lm_studio` REST).
+- `--no-think` / `--disable-thinking` : Désactive le mode réflexion/thinking des modèles raisonnants sous LM Studio.
+- `--tier qwen3|max|fast` (`-t`) : Palier de modèle en mode local (`qwen3` 14B Q6_K, `max` 30B/32B, `fast` 7B).
 - `--fast` : Raccourci pour `--tier fast`.
-- `--force` : Force la recompilation même si le fichier existe déjà dans `data/compiled_cards/`.
+- `--provider sdk|rest` (`-p`) : Fournisseur d'accès TCGdex (`sdk` : tcgdex-sdk officiel, `rest` : API HTTP directe).
+- `--force` : Recompile même si la carte est déjà présente dans `data/compiled_cards/`.
+- `--limit <N>` : Limite le nombre de cartes à traiter en mode standard.
+- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer les téléchargements de modèles GGUF.
+- `--ssh-password <PWD>` : Mot de passe SSH (si connexion sans clé publique).
+- `--prompt-ssh-password` : Demande le mot de passe SSH de façon masquée dans le terminal.
 
-### 2. Exécution Distante sur Serveur GPU via SSH & LM Studio (`lms`)
+---
 
-Si vous disposez d'un serveur ou PC distant équipé d'un GPU plus puissant et de LM Studio avec son CLI `lms` :
-1. Renseignez la configuration SSH dans votre fichier `.env` :
-   ```bash
-   LLM_PROVIDER=lm_studio
-   SSH_HOST=ip_ou_domaine_serveur
-   SSH_USER=ubuntu
-   SSH_KEY_PATH=~/.ssh/id_ed25519
-   LM_STUDIO_PORT=1234
-   LM_STUDIO_LOCAL_PORT=12345
-   LM_STUDIO_MODEL=qwen2.5-coder-14b-instruct
-   LM_STUDIO_USE_TUNNEL=true
-   LM_STUDIO_AUTO_START=true
-   ```
-2. Lancez la compilation depuis votre ordinateur :
-   ```bash
-   python -m compiler.cli run --llm-provider lm_studio
-   ```
-   *Un tunnel SSH sécurisé (`127.0.0.1:12345 -> 127.0.0.1:1234`) est ouvert automatiquement pendant le traitement, et **tous les fichiers générés restent stockés localement sur votre ordinateur** dans `data/compiled_cards/` sans nécessiter de transfert SFTP/rsync.*
+### 2. Connaître le Nombre de Cartes Restant à Compiler (`remaining`)
 
-### 3. Inspecter le modèle JSON d'une carte compilée
+Affiche le statut global et le nombre de cartes restantes à compiler, avec la progression et la ventilation détaillée par extension :
 
 ```bash
-python -m compiler.cli inspect sv04-125
-python -m compiler.cli inspect sv03-125
-```
-
-### 4. Compter les cartes compilées
-
-```bash
-python -m compiler.cli count
-# Options : --details (-d) pour la liste complète, --quiet (-q) pour le nombre seul
-```
-
-### 5. Synchroniser le fichier global consolidé (`cards_database.json`)
-
-Vérifie que toutes les cartes compilées dans `data/compiled_cards/` sont présentes dans le fichier JSON global (`data/cards_database.json`). Si des cartes sont manquantes, elles y sont automatiquement ajoutées :
-
-```bash
-python -m compiler.cli sync
-```
-
-Options disponibles sur `sync` (alias `sync-database`, `sync-db`, `check-database`) :
-- `--details` (`-d`) : Affiche le tableau détaillé de toutes les cartes ajoutées.
-- `--dry-run` (`-n`) : Simule la vérification sans écrire sur le disque.
-- `--db-path` (`-p`) : Chemin alternatif vers un fichier JSON consolidé.
-- `--update` (`-u`) : Met également à jour les cartes déjà existantes si leur version disque a changé.
-
-### 6. Connaître le nombre de cartes restant à compiler
-
-Calcule et affiche le nombre de cartes cibles restant à compiler, avec la progression globale et la ventilation détaillée par extension :
-
-```bash
+# Vue synthétique globale
 python -m compiler.cli remaining
+
+# Filtrer sur une extension précise (ex: Mascarade Crépusculaire sv06, Fable Nébuleuse sv06.5)
+python -m compiler.cli remaining --set sv06.5
+
+# Afficher la liste complète des identifiants manquants
+python -m compiler.cli remaining --set sv06.5 --details
+
+# Mode discret pour scripts bash (affiche uniquement l'entier restant)
+python -m compiler.cli remaining -q
 ```
 
-Options disponibles sur `remaining` (alias `todo`, `left`, `pending`, `a-compiler`) :
-- `--set <CODE>` (`-s`) : Filtre sur une extension précise (ex: `-s sv01`, `-s sv05`, `-s sve`).
-- `--details` (`-d`) : Affiche la liste complète des identifiants (IDs) des cartes non compilées.
-- `--quiet` (`-q`) : Affiche uniquement le nombre entier restant (idéal pour scripts bash).
-- `--mode standard|test|all` (`-m`) : Sélectionne le périmètre cible (défaut : `standard`).
+**Options disponibles sur `remaining` (alias `todo`, `left`, `pending`, `a-compiler`) :**
+- `--set <CODE>` (`-s`) : Filtre sur une extension (ex: `sv01`, `sv06.5`, `sve`).
+- `--details` (`-d`) : Affiche la liste des identifiants manquants.
+- `--quiet` (`-q`) : Affiche uniquement le nombre entier restant.
+- `--mode standard|test|all` (`-m`) : Périmètre de calcul (défaut : `standard`).
 
-### 7. Vérifier l'intégrité Pydantic et afficher les statistiques du corpus
+---
+
+### 3. Synchroniser la Base Globale Consolidée (`sync`)
+
+Vérifie que toutes les cartes compilées présentes dans `data/compiled_cards/` figurent bien dans `data/cards_database.json`, et y ajoute automatiquement les cartes manquantes :
+
+```bash
+# Vérification et synchronisation automatique
+python -m compiler.cli sync
+
+# Afficher le détail des cartes ajoutées ou mises à jour
+python -m compiler.cli sync --details
+
+# Simuler la synchronisation sans écrire sur le disque
+python -m compiler.cli sync --dry-run
+
+# Forcer la réécriture des cartes déjà présentes si leur version disque a changé
+python -m compiler.cli sync --update
+```
+
+**Options disponibles sur `sync` (alias `sync-database`, `sync-db`, `check-database`) :**
+- `--details` (`-d`) : Affiche le tableau détaillé des cartes traitées.
+- `--dry-run` (`-n`) : Simulation en lecture seule.
+- `--update` (`-u`) : Met à jour les cartes existantes en cas de modification.
+- `--db-path` (`-p`) : Chemin personnalisé vers un fichier JSON consolidé.
+
+---
+
+### 4. Compter les Cartes Compilées (`count`)
+
+```bash
+# Compteur global et ventilation par catégorie (Pokémon, Dresseurs, Énergies)
+python -m compiler.cli count
+
+# Afficher la liste de toutes les cartes compilées
+python -m compiler.cli count --details
+
+# Nombre seul pour scripts bash
+python -m compiler.cli count --quiet
+```
+
+---
+
+### 5. Inspecter le Modèle Compilé d'une Carte (`inspect`)
+
+Affiche avec coloration syntaxique le JSON généré (`EngineCardModel`) pour une carte :
+
+```bash
+python -m compiler.cli inspect sv06.5-001
+python -m compiler.cli inspect sv04-125
+```
+
+---
+
+### 6. Statistiques & Validation d'Intégrité (`stats` / `validate`)
+
+Valide l'ensemble des fichiers compilés contre les schémas Pydantic V2 et affiche la distribution des rôles stratégiques, des primitives d'effets et des métriques de temps :
 
 ```bash
 python -m compiler.cli stats
+```
+
+---
+
+## Exécution des Tests Unitaires
+
+Le projet inclut une suite complète de 60 tests automatisés couvrant les validateurs de schémas, les normalisations d'enums, le streaming de débit, LM Studio (REST et tunnel SSH), les replis défensifs et le pipeline CLI :
+
+```bash
+PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
 ```
