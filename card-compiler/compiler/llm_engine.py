@@ -534,9 +534,11 @@ def build_user_prompt(bundle: FetchedCardBundle) -> str:
         f"Utilise obligatoirement `category`: \"{identity.category.value}\" et "
         f"`subCategory`: \"{identity.subCategory.value}\".\n"
         "Si c'est un POKEMON, génère une action par Talent (`abilitiesFr`) ET une action `ATTACK` par attaque (`attacksFr`).\n"
-        "Si le texte mentionne `défaussez X autres cartes de votre main`, ajoute `HAND_MIN_OTHER_CARDS` et `DISCARD_FROM_HAND`.\n\n"
+        "Si le texte mentionne `défaussez X autres cartes de votre main`, ajoute `HAND_MIN_OTHER_CARDS` et `DISCARD_FROM_HAND`.\n"
+        "ATTENTION : L'objet JSON racine doit obligatoirement être `LLMCompiledCardPart` avec `playableActions` et `strategicEvaluator`. Ne renvoie JAMAIS un `ActionEffect` (`primitive`) seul à la racine !\n\n"
         "DONNÉES TCGDEX DE LA CARTE :\n"
-        f"{json.dumps(payload, ensure_ascii=False, indent=2)} /no_think"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        "Produis uniquement l'objet JSON racine `LLMCompiledCardPart`. /no_think"
     )
 
 
@@ -861,6 +863,57 @@ class LocalLLMCardCompiler:
                 try:
                     raw_dict = json.loads(raw_content)
                     if isinstance(raw_dict, dict):
+                        # Cas A : Le LLM a renvoyé uniquement un ActionEffect à la racine (primitive, etc.)
+                        if "primitive" in raw_dict and "playableActions" not in raw_dict:
+                            attack_label = "Attaque 1"
+                            if bundle.raw_fr.get("attacks"):
+                                attack_label = bundle.raw_fr["attacks"][0].get("name") or "Attaque 1"
+                            raw_dict = {
+                                "reasoningAnalysis": f"Encapsulation automatique de l'effet d'attaque '{raw_dict.get('primitive')}' pour {bundle.card_id}.",
+                                "category": bundle.identity.category.value,
+                                "subCategory": bundle.identity.subCategory.value,
+                                "playableActions": [
+                                    {
+                                        "actionId": "attack_1",
+                                        "label": attack_label,
+                                        "sourceType": "ATTACK",
+                                        "timing": "END_OF_TURN_ATTACK",
+                                        "canUseTurn1GoingFirst": False,
+                                        "canUseTurn1GoingSecond": True,
+                                        "preconditions": [],
+                                        "costs": [],
+                                        "effects": [raw_dict],
+                                    }
+                                ],
+                                "strategicEvaluator": {
+                                    "primaryRole": "MAIN_ATTACKER",
+                                    "intrinsicBaseScore": 50,
+                                    "discardPriorityWhenDead": 70,
+                                    "holdForNextTurnBonus": 10,
+                                    "decklistSynergyRequirements": [],
+                                    "inGameDeadCardConditions": [],
+                                    "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                                },
+                            }
+
+                        # Cas B : Le LLM a renvoyé directement une PlayableAction à la racine (actionId, etc.)
+                        elif "actionId" in raw_dict and "playableActions" not in raw_dict:
+                            raw_dict = {
+                                "reasoningAnalysis": f"Encapsulation automatique de l'action '{raw_dict.get('actionId')}' pour {bundle.card_id}.",
+                                "category": bundle.identity.category.value,
+                                "subCategory": bundle.identity.subCategory.value,
+                                "playableActions": [raw_dict],
+                                "strategicEvaluator": {
+                                    "primaryRole": "MAIN_ATTACKER",
+                                    "intrinsicBaseScore": 50,
+                                    "discardPriorityWhenDead": 70,
+                                    "holdForNextTurnBonus": 10,
+                                    "decklistSynergyRequirements": [],
+                                    "inGameDeadCardConditions": [],
+                                    "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                                },
+                            }
+
                         strat = raw_dict.get("strategicEvaluator")
                         if isinstance(strat, dict):
                             weights = strat.get("turnPhaseWeights")
