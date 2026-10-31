@@ -236,6 +236,31 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertIn(EffectPrimitive.SWITCH_ACTIVE_POKEMON, primitives)
         self.assertIn(EffectPrimitive.MOVE_ENERGY_BETWEEN_POKEMON, primitives)
 
+    def test_compilation_metadata_tokens_per_second(self):
+        from compiler.schemas import CompilationMetadata
+
+        # Sans tokens (rétro-compatibilité)
+        meta_basic = CompilationMetadata(
+            modelRepoId="repo",
+            modelFilename="file.gguf",
+            compilationTimeSeconds=2.5,
+            compiledAtIso="2026-10-31T12:00:00Z",
+        )
+        self.assertIsNone(meta_basic.tokensPerSecond)
+        self.assertIsNone(meta_basic.completionTokens)
+
+        # Avec métriques de débit
+        meta_with_speed = CompilationMetadata(
+            modelRepoId="repo",
+            modelFilename="file.gguf",
+            compilationTimeSeconds=2.5,
+            compiledAtIso="2026-10-31T12:00:00Z",
+            completionTokens=125,
+            tokensPerSecond=50.0,
+        )
+        self.assertEqual(meta_with_speed.completionTokens, 125)
+        self.assertEqual(meta_with_speed.tokensPerSecond, 50.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -758,6 +758,16 @@ class CompilationMetadata(BaseModel):
     modelFilename: str = Field(..., description="Nom du fichier GGUF utilisé.")
     compilationTimeSeconds: float = Field(..., ge=0.0, description="Temps d'inférence en secondes.")
     compiledAtIso: str = Field(..., description="Date/heure ISO 8601 de génération.")
+    completionTokens: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Nombre total de tokens générés lors de la complétion.",
+    )
+    tokensPerSecond: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Débit moyen de génération en tokens par seconde (t/s).",
+    )
 
 
 class EngineCardModel(BaseModel):

@@ -781,7 +781,7 @@ class LMStudioCardCompiler:
                         continue
                     raise RuntimeError(f"Erreur de communication avec LM Studio : {last_error}") from last_error
 
-                elapsed = round(time.perf_counter() - t0, 3)
+                elapsed = max(0.001, round(time.perf_counter() - t0, 3))
                 choices = data.get("choices") or []
                 if not choices:
                     raise RuntimeError(f"Réponse vide reçue de LM Studio : {data}")
@@ -841,11 +841,20 @@ class LMStudioCardCompiler:
         assert compiled_part is not None
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
+        # Calcul des métriques de débit (tokens par seconde)
+        usage = data.get("usage") if isinstance(data, dict) else {}
+        completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+        tokens_per_second: Optional[float] = None
+        if isinstance(completion_tokens, (int, float)) and completion_tokens > 0 and elapsed > 0:
+            tokens_per_second = round(float(completion_tokens) / float(elapsed), 1)
+
         metadata = CompilationMetadata(
             modelRepoId=self.repo_id,
             modelFilename=self.filename,
             compilationTimeSeconds=elapsed,
             compiledAtIso=datetime.now(timezone.utc).isoformat(),
+            completionTokens=int(completion_tokens) if isinstance(completion_tokens, (int, float)) else None,
+            tokensPerSecond=tokens_per_second,
         )
 
         engine_card = EngineCardModel(
