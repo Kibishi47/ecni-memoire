@@ -816,8 +816,18 @@ class LocalLLMCardCompiler:
             self.filename = default_cand[2]
             self._resolved = False
 
-        self.n_ctx = n_ctx
-        self.n_gpu_layers = n_gpu_layers
+        env_n_ctx = os.environ.get("LOCAL_N_CTX") or os.environ.get("N_CTX")
+        self.n_ctx = int(env_n_ctx.strip()) if env_n_ctx and env_n_ctx.strip().isdigit() else n_ctx
+
+        env_gpu = os.environ.get("LOCAL_GPU_LAYERS") or os.environ.get("N_GPU_LAYERS")
+        if env_gpu and env_gpu.strip():
+            try:
+                self.n_gpu_layers = int(env_gpu.strip())
+            except ValueError:
+                self.n_gpu_layers = n_gpu_layers
+        else:
+            self.n_gpu_layers = n_gpu_layers
+
         self.verbose = verbose
         self._llm: Any = None
         self._json_schema: Dict[str, Any] = LLMCompiledCardPart.model_json_schema()
@@ -1040,94 +1050,105 @@ class LocalLLMCardCompiler:
                         basic["stream"] = True
                     return self._llm.create_chat_completion(**basic)
 
-            if should_stream:
-                try:
-                    stream_resp = _call_create_chat(True)
-                    accumulated_content = []
-                    token_count = 0
-                    last_cb_time = 0.0
-                    first_token_time: Optional[float] = None
-                    last_token_time: Optional[float] = None
-                    window_start_time: Optional[float] = None
-                    window_start_tokens = 0
-                    live_tps = 0.0
-                    finish_reason = None
-                    for chunk in stream_resp:
-                        choices = chunk.get("choices") or []
-                        if choices:
-                            c0 = choices[0]
-                            if c0.get("finish_reason"):
-                                finish_reason = c0["finish_reason"]
-                            delta = c0.get("delta") or {}
-                            d_content = delta.get("content") or ""
-                            if d_content:
-                                accumulated_content.append(d_content)
-                                token_count += 1
-                                now = time.perf_counter()
-                                if first_token_time is None:
-                                    first_token_time = now
-                                    window_start_time = now
-                                    window_start_tokens = token_count
-                                last_token_time = now
-
-                                # Rafraîchissement du débit instantané toutes les secondes (sliding window de 1s)
-                                if window_start_time is not None:
-                                    window_elapsed = now - window_start_time
-                                    if window_elapsed >= 1.0:
-                                        delta_tokens = max(0, token_count - window_start_tokens)
-                                        live_tps = round(delta_tokens / max(0.0001, window_elapsed), 1)
+            try:
+                if should_stream:
+                    try:
+                        stream_resp = _call_create_chat(True)
+                        accumulated_content = []
+                        token_count = 0
+                        last_cb_time = 0.0
+                        first_token_time: Optional[float] = None
+                        last_token_time: Optional[float] = None
+                        window_start_time: Optional[float] = None
+                        window_start_tokens = 0
+                        live_tps = 0.0
+                        finish_reason = None
+                        for chunk in stream_resp:
+                            choices = chunk.get("choices") or []
+                            if choices:
+                                c0 = choices[0]
+                                if c0.get("finish_reason"):
+                                    finish_reason = c0["finish_reason"]
+                                delta = c0.get("delta") or {}
+                                d_content = delta.get("content") or ""
+                                if d_content:
+                                    accumulated_content.append(d_content)
+                                    token_count += 1
+                                    now = time.perf_counter()
+                                    if first_token_time is None:
+                                        first_token_time = now
                                         window_start_time = now
                                         window_start_tokens = token_count
+                                    last_token_time = now
 
-                                if on_token:
-                                    if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
-                                        on_token(token_count, live_tps)
-                                        last_cb_time = now
+                                    # Rafraîchissement du débit instantané toutes les secondes (sliding window de 1s)
+                                    if window_start_time is not None:
+                                        window_elapsed = now - window_start_time
+                                        if window_elapsed >= 1.0:
+                                            delta_tokens = max(0, token_count - window_start_tokens)
+                                            live_tps = round(delta_tokens / max(0.0001, window_elapsed), 1)
+                                            window_start_time = now
+                                            window_start_tokens = token_count
 
-                    if on_token and token_count > 0:
-                        now = time.perf_counter()
-                        if live_tps > 0.0:
-                            final_tps = live_tps
-                        elif token_count > 1 and first_token_time is not None:
-                            final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
-                            final_tps = round((token_count - 1) / final_gen_elapsed, 1)
-                        elif token_count == 1 and first_token_time is not None:
-                            final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
-                            final_tps = round(1.0 / final_gen_elapsed, 1)
-                        else:
-                            final_tps = 0.0
-                        on_token(token_count, final_tps)
+                                    if on_token:
+                                        if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
+                                            on_token(token_count, live_tps)
+                                            last_cb_time = now
 
-                    gen_duration: Optional[float] = None
-                    tps: Optional[float] = None
-                    ttft: Optional[float] = None
-                    if first_token_time is not None:
-                        ttft = round(max(0.0, first_token_time - t0), 3)
-                        end_t = last_token_time or time.perf_counter()
-                        raw_delta = max(0.0001, end_t - first_token_time)
-                        if token_count > 1:
-                            gen_duration = raw_delta * (token_count / (token_count - 1))
-                            tps = round((token_count - 1) / raw_delta, 1)
-                        elif token_count == 1:
-                            gen_duration = raw_delta
-                            tps = round(1.0 / raw_delta, 1)
+                        if on_token and token_count > 0:
+                            now = time.perf_counter()
+                            if live_tps > 0.0:
+                                final_tps = live_tps
+                            elif token_count > 1 and first_token_time is not None:
+                                final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
+                                final_tps = round((token_count - 1) / final_gen_elapsed, 1)
+                            elif token_count == 1 and first_token_time is not None:
+                                final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
+                                final_tps = round(1.0 / final_gen_elapsed, 1)
+                            else:
+                                final_tps = 0.0
+                            on_token(token_count, final_tps)
 
-                    raw_content = "".join(accumulated_content)
-                    choice = {
-                        "message": {"content": raw_content},
-                        "finish_reason": finish_reason or "stop",
-                    }
-                    completion = {
-                        "choices": [choice],
-                        "usage": {"completion_tokens": token_count},
-                        "generation_duration": gen_duration,
-                        "time_to_first_token": ttft,
-                        "tokens_per_second": tps,
-                    }
-                except (AttributeError, TypeError):
+                        gen_duration: Optional[float] = None
+                        tps: Optional[float] = None
+                        ttft: Optional[float] = None
+                        if first_token_time is not None:
+                            ttft = round(max(0.0, first_token_time - t0), 3)
+                            end_t = last_token_time or time.perf_counter()
+                            raw_delta = max(0.0001, end_t - first_token_time)
+                            if token_count > 1:
+                                gen_duration = raw_delta * (token_count / (token_count - 1))
+                                tps = round((token_count - 1) / raw_delta, 1)
+                            elif token_count == 1:
+                                gen_duration = raw_delta
+                                tps = round(1.0 / raw_delta, 1)
+
+                        raw_content = "".join(accumulated_content)
+                        choice = {
+                            "message": {"content": raw_content},
+                            "finish_reason": finish_reason or "stop",
+                        }
+                        completion = {
+                            "choices": [choice],
+                            "usage": {"completion_tokens": token_count},
+                            "generation_duration": gen_duration,
+                            "time_to_first_token": ttft,
+                            "tokens_per_second": tps,
+                        }
+                    except (AttributeError, TypeError):
+                        completion = _call_create_chat(False)
+                else:
                     completion = _call_create_chat(False)
-            else:
-                completion = _call_create_chat(False)
+            except RuntimeError as rt_err:
+                err_text = str(rt_err)
+                if "-3" in err_text or "out of memory" in err_text.lower() or "insufficient memory" in err_text.lower():
+                    raise RuntimeError(
+                        f"Mémoire GPU/Metal saturée sur Apple Silicon ({rt_err}). "
+                        f"Le modèle '{self.filename or self.repo_id}' (20+ Go) dépasse les ~18.6 Go allouables par Metal sur votre Mac 24 Go. "
+                        "Conseil : Utilisez 'LLM_PROVIDER=lm_studio' pour déporter ce modèle sur votre serveur dédié, "
+                        "ou utilisez un modèle local 14B (ex: laissez LLM_MODEL vide dans .env)."
+                    ) from rt_err
+                raise
 
             elapsed = max(0.001, round(time.perf_counter() - t0, 3))
             choice = completion["choices"][0]
