@@ -659,11 +659,10 @@ class TestLMStudioCompiler(unittest.TestCase):
             find_best_model_candidate(cands, "qwen2.5-coder-7b-instruct"),
             "qwen2.5-coder-7b-instruct",
         )
-        # Fallback premier
-        self.assertEqual(
-            find_best_model_candidate(cands, "unknown-model"),
-            "qwen2.5-coder-7b-instruct",
-        )
+        # Si aucun match, retourne None pour signaler un modèle non désiré
+        self.assertIsNone(find_best_model_candidate(cands, "unknown-model"))
+        # Si aucun target n'est fourni, retourne le premier candidat
+        self.assertEqual(find_best_model_candidate(cands, None), "qwen2.5-coder-7b-instruct")
 
     @patch("time.sleep", return_value=None)
     @patch("httpx.Client")
@@ -740,9 +739,108 @@ class TestLMStudioCompiler(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             compiler.load_model_in_memory()
 
-        self.assertIn("Aucun modèle n'est actuellement chargé dans LM Studio", str(ctx.exception))
+        self.assertIn("Aucun modèle n'est chargé dans LM Studio", str(ctx.exception))
         self.assertIn("lms load", str(ctx.exception))
         compiler.close()
+
+    @patch("subprocess.run")
+    def test_unload_model_calls_unload_all(self, mock_subproc):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="test-model",
+            auto_start=False,
+        )
+        compiler.unload_model()
+        mock_subproc.assert_called_with(
+            [compiler.cli_path, "unload", "--all"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_close_unloads_model_first(self):
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="test-model",
+            auto_start=False,
+        )
+        with patch.object(compiler, "unload_model") as mock_unload:
+            compiler.close()
+            mock_unload.assert_called_once()
+            self.assertFalse(compiler._ready)
+
+    @patch("time.sleep", return_value=None)
+    @patch("httpx.Client")
+    def test_startup_deloads_unneeded_models_and_loads_needed(self, mock_client_cls, mock_sleep):
+        # 1. Au départ, un modèle non requis 'other-unneeded-model' est actif
+        unneeded_resp = MagicMock()
+        unneeded_resp.is_success = True
+        unneeded_resp.status_code = 200
+        unneeded_resp.json.return_value = {"data": [{"id": "other-unneeded-model"}]}
+
+        # 2. Après déchargement et chargement, le modèle requis 'qwen3.8-27b' apparaît actif
+        needed_resp = MagicMock()
+        needed_resp.is_success = True
+        needed_resp.status_code = 200
+        needed_resp.json.return_value = {"data": [{"id": "qwen3.8-27b"}]}
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.get.side_effect = [unneeded_resp, needed_resp]
+        mock_client.post.return_value = MagicMock(is_success=True, status_code=200)
+        mock_client_cls.return_value = mock_client
+
+        compiler = LMStudioCardCompiler(
+            ssh_host=None,
+            remote_port=1234,
+            model_name="Qwen3.8-27B",
+            auto_start=False,
+        )
+        with patch.object(compiler, "unload_model") as mock_unload:
+            compiler.load_model_in_memory()
+            # Doit avoir déchargé le modèle non requis
+            mock_unload.assert_called()
+            self.assertEqual(compiler.model_name, "qwen3.8-27b")
+            self.assertTrue(compiler._ready)
+        compiler.close()
+
+    def test_cli_stops_immediately_on_compilation_error(self):
+        import typer
+        from compiler.cli import _execute_run_pipeline, RunMode, FetcherProvider, LLMProvider
+        mock_engine = MagicMock()
+        mock_engine.load_model_in_memory.return_value = None
+        mock_engine.compile_card.side_effect = RuntimeError("Fatal LLM crash")
+
+        with patch("compiler.cli.create_compiler_engine", return_value=mock_engine), \
+             patch("compiler.cli.TCGdexFetcher") as mock_fetcher_cls:
+            mock_fetcher = MagicMock()
+            mock_bundle = MagicMock()
+            mock_bundle.card_id = "test-fail-001"
+            mock_bundle.identity.nameFr = "Test Carte"
+            async def _fake_fetch(*args, **kwargs):
+                return [mock_bundle]
+            mock_fetcher.fetch_batch = _fake_fetch
+            mock_fetcher_cls.return_value = mock_fetcher
+
+            with patch("compiler.cli.is_basic_energy", return_value=False), \
+                 patch("pathlib.Path.exists", return_value=False):
+                with self.assertRaises(typer.Exit) as ctx:
+                    _execute_run_pipeline(
+                        mode=RunMode.test,
+                        test_flag=True,
+                        standard_flag=False,
+                        ids="test-fail-001",
+                        provider=FetcherProvider.sdk,
+                        llm_provider=LLMProvider.lm_studio,
+                        tier=ModelTier.qwen3,
+                        fast=False,
+                        force=True,
+                        limit=None,
+                    )
+                self.assertEqual(ctx.exception.exit_code, 1)
+                mock_engine.close.assert_called_once()
 
 
 if __name__ == "__main__":
