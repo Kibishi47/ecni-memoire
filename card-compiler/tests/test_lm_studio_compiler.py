@@ -1733,6 +1733,123 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertAlmostEqual(meta.compilationTimeSeconds, 7.1, places=1)
 
     @patch("httpx.Client")
+    def test_live_tokens_per_second_refreshes_every_second_not_cumulative_average(self, mock_client_cls):
+        """Vérifie que le débit live est un rafraîchissement instantané toutes les secondes et non une moyenne cumulative."""
+        compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Test live tps 1-second refresh.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+        json_str = json.dumps(fake_card_json)
+        # 6 morceaux SSE pour 6 tokens
+        sse_lines = [
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[:15]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[15:30]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[30:45]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[45:60]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[60:75]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': json_str[75:]}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}], 'usage': {'completion_tokens': 6}})}",
+            "data: [DONE]",
+        ]
+
+        mock_stream_resp = MagicMock()
+        mock_stream_resp.is_success = True
+        mock_stream_resp.status_code = 200
+        mock_stream_resp.iter_lines.return_value = sse_lines
+
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__enter__.return_value = mock_stream_resp
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.stream.return_value = mock_stream_cm
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        identity, pstats = fetcher.build_deterministic_models(
+            "sv06.5-001",
+            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
+            None,
+        )
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr={"id": "sv06.5-001"},
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        # Chronologie simulée :
+        # t0 = 100.0 (envoi)
+        # tok 1: t = 101.0 (window_start à 101.0, tokens = 1)
+        # tok 2: t = 101.4 (0.4s écoulé < 1.0s -> live_tps reste 0.0)
+        # tok 3: t = 102.1 (1.1s écoulé >= 1.0s -> delta = 3-1 = 2 tok, 2 / 1.1 = 1.8 t/s)
+        # tok 4: t = 102.5 (0.4s écoulé < 1.0s -> live_tps reste 1.8 t/s)
+        # tok 5: t = 103.2 (1.1s écoulé >= 1.0s -> delta = 5-3 = 2 tok, 2 / 1.1 = 1.8 t/s)
+        # tok 6: t = 104.3 (1.1s écoulé >= 1.0s -> delta = 6-5 = 1 tok, 1 / 1.1 = 0.9 t/s)
+        # final callback: t = 104.3
+        # fin compile_card: t = 104.4
+        time_sequence = [
+            100.0,  # t0
+            101.0,  # tok 1
+            101.4,  # tok 2
+            102.1,  # tok 3
+            102.5,  # tok 4
+            103.2,  # tok 5
+            104.3,  # tok 6
+            104.3,  # final callback
+            104.4,  # fin
+        ]
+        time_idx = 0
+
+        def fake_perf_counter():
+            nonlocal time_idx
+            if time_idx < len(time_sequence):
+                val = time_sequence[time_idx]
+                time_idx += 1
+                return val
+            return 104.4
+
+        live_updates = []
+        with patch("time.perf_counter", side_effect=fake_perf_counter):
+            model = compiler.compile_card(bundle, on_token=lambda tok, tps: live_updates.append((tok, tps)))
+
+        # Vérification des mises à jour en direct :
+        # Au tok 2 (t=101.4, < 1.0s): live_tps est 0.0 ("calcul...")
+        tok2_update = [up for up in live_updates if up[0] == 2]
+        self.assertTrue(tok2_update)
+        self.assertEqual(tok2_update[0][1], 0.0)
+
+        # Au tok 3 (t=102.1, >= 1.0s): 1er rafraîchissement à 1.8 t/s
+        tok3_update = [up for up in live_updates if up[0] == 3]
+        self.assertTrue(tok3_update)
+        self.assertEqual(tok3_update[0][1], 1.8)
+
+        # Au tok 6 (t=104.3, >= 1.0s après tok 5): ralentissement à 1 tok en 1.1s = 0.9 t/s
+        # Si c'était une moyenne cumulative: (6-1)/(104.3-101.0) = 5/3.3 = 1.5 t/s
+        # Mais avec le rafraîchissement chaque seconde: live_tps est bien 0.9 t/s !
+        tok6_update = [up for up in live_updates if up[0] == 6]
+        self.assertTrue(tok6_update)
+        self.assertEqual(tok6_update[0][1], 0.9)
+
+    @patch("httpx.Client")
     def test_granivol_sv02_001_compilation_with_json_schema(self, mock_client_cls):
         """Vérifie la compilation de Granivol (sv02-001) avec schéma JSON et évite toute erreur 'response_format.type'."""
         compiler = LMStudioCardCompiler(remote_host="127.0.0.1")

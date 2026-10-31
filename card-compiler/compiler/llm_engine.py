@@ -852,6 +852,9 @@ class LocalLLMCardCompiler:
                     last_cb_time = 0.0
                     first_token_time: Optional[float] = None
                     last_token_time: Optional[float] = None
+                    window_start_time: Optional[float] = None
+                    window_start_tokens = 0
+                    live_tps = 0.0
                     finish_reason = None
                     for chunk in stream_resp:
                         choices = chunk.get("choices") or []
@@ -867,22 +870,29 @@ class LocalLLMCardCompiler:
                                 now = time.perf_counter()
                                 if first_token_time is None:
                                     first_token_time = now
+                                    window_start_time = now
+                                    window_start_tokens = token_count
                                 last_token_time = now
+
+                                # Rafraîchissement du débit instantané toutes les secondes (sliding window de 1s)
+                                if window_start_time is not None:
+                                    window_elapsed = now - window_start_time
+                                    if window_elapsed >= 1.0:
+                                        delta_tokens = max(0, token_count - window_start_tokens)
+                                        live_tps = round(delta_tokens / max(0.0001, window_elapsed), 1)
+                                        window_start_time = now
+                                        window_start_tokens = token_count
 
                                 if on_token:
                                     if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
-                                        if token_count > 1 and first_token_time is not None:
-                                            # Calcul du débit mesuré strictement à partir du début de génération des tokens
-                                            gen_elapsed = max(0.0001, now - first_token_time)
-                                            live_tps = round((token_count - 1) / gen_elapsed, 1)
-                                        else:
-                                            live_tps = 0.0
                                         on_token(token_count, live_tps)
                                         last_cb_time = now
 
                     if on_token and token_count > 0:
                         now = time.perf_counter()
-                        if token_count > 1 and first_token_time is not None:
+                        if live_tps > 0.0:
+                            final_tps = live_tps
+                        elif token_count > 1 and first_token_time is not None:
                             final_gen_elapsed = max(0.0001, (last_token_time or now) - first_token_time)
                             final_tps = round((token_count - 1) / final_gen_elapsed, 1)
                         elif token_count == 1 and first_token_time is not None:
