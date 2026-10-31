@@ -208,6 +208,11 @@ IMPORTANT : Reste synthétique et concis dans `reasoningAnalysis` (environ 100 �
    - `intrinsicBaseScore` et `discardPriorityWhenDead` : entiers compris entre `0` et `100`.
    - `holdForNextTurnBonus` : entier compris entre `0` et `50`.
 
+9. **VALEURS STRICTES DES PRIMITIVES (`primitive`) ET MOTIFS DE CARTE MORTE (`reason`)** :
+   - Pour toute attaque infligeant des dégâts : `primitive: "DEAL_DAMAGE_ACTIVE"`.
+   - Pour un effet d'esquive / protection / immunité : `primitive: "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS"`.
+   - Pour `inGameDeadCardConditions` : si la carte n'a pas de condition de carte morte, mets TOUJOURS la liste vide `[]` (n'invente JAMAIS `"NONE"`, `"NOT_APPLICABLE"`, etc.).
+
 ---
 
 ### 3. EXEMPLE FEW-SHOT #1 — CARTE DRESSEUR OBJET : Super Bonbon (Rare Candy)
@@ -544,6 +549,7 @@ def build_user_prompt(bundle: FetchedCardBundle, disable_thinking: bool = False)
         f"`subCategory`: \"{identity.subCategory.value}\".\n"
         "Si c'est un POKEMON, génère une action par Talent (`abilitiesFr`) ET une action `ATTACK` par attaque (`attacksFr`).\n"
         "Si le texte mentionne `défaussez X autres cartes de votre main`, ajoute `HAND_MIN_OTHER_CARDS` et `DISCARD_FROM_HAND`.\n"
+        "Pour les dégâts d'attaque, utilise `primitive`: 'DEAL_DAMAGE_ACTIVE'. Si la carte n'a pas de condition de carte morte, `inGameDeadCardConditions` doit obligatoirement être [].\n"
         "ATTENTION : L'objet JSON racine doit obligatoirement être `LLMCompiledCardPart` avec `playableActions` et `strategicEvaluator`. Ne renvoie JAMAIS un `ActionEffect` (`primitive`) seul à la racine !\n\n"
         "DONNÉES TCGDEX DE LA CARTE :\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"

@@ -16,7 +16,7 @@ from compiler.lm_studio_compiler import (
     find_best_model_candidate,
     parse_lms_ls_output,
 )
-from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel
+from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel, LLMCompiledCardPart
 
 
 class TestLMStudioCompiler(unittest.TestCase):
@@ -1400,6 +1400,113 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertNotIn("chat_template_kwargs", second_payload)
         self.assertNotIn("enable_thinking", second_payload)
         self.assertNotIn("reasoning_effort", second_payload)
+
+    @patch("httpx.Client")
+    def test_statitik_enum_normalization_recovers_from_invalid_primitive_and_reason(self, mock_client_cls):
+        """Vérifie la robustesse face aux erreurs de validation remontées pour sv06.5-001 (Statitik).
+
+        Cas où le LLM a généré:
+        1. Une primitive invalide (ex: 'FLIP_COIN', 'COIN_FLIP', 'PREVENT_DAMAGE' ou 'DEAL_DAMAGE')
+        2. Un motif de carte morte 'NONE' ou 'BENCH_FULL' au lieu des enums stricts.
+        """
+        compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+        compiler._ready = True
+
+        raw_statitik_llm_json = {
+            "reasoningAnalysis": "Analyse de Statitik (sv06.5-001) avec attaque Esquive Éclaboussante.",
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "playableActions": [
+                {
+                    "actionId": "attack_splashing_dodge",
+                    "label": "Esquive Éclaboussante",
+                    "sourceType": "ATTACK",
+                    "timing": "END_OF_TURN_ATTACK",
+                    "canUseTurn1GoingFirst": False,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [],
+                    "effects": [
+                        {
+                            "primitive": "COIN_FLIP",  # Valeur hors enum renvoyée par le LLM pour Esquive Éclaboussante
+                            "sourceZone": "ACTIVE",
+                            "targetZone": "ACTIVE",
+                            "count": 1,
+                            "upTo": False,
+                            "baseDamage": 10,
+                        }
+                    ],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 40,
+                "discardPriorityWhenDead": 70,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [
+                    {
+                        "reason": "NONE",  # Valeur hors enum ('NONE') renvoyée pour une carte sans carte morte
+                        "zonesToCheck": [],
+                    },
+                    {
+                        "reason": "BENCH_FULL",  # Synonyme informel de BENCH_ALREADY_FULL
+                        "zonesToCheck": ["BENCH"],
+                    },
+                ],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        # 1. Vérification directe sur le modèle Pydantic LLMCompiledCardPart
+        parsed_part = LLMCompiledCardPart.model_validate_json(json.dumps(raw_statitik_llm_json))
+        self.assertIsInstance(parsed_part, LLMCompiledCardPart)
+        # La primitive COIN_FLIP / PREVENT_DAMAGE doit être normalisée
+        self.assertEqual(parsed_part.playableActions[0].effects[0].primitive.value, "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS")
+        # L'entrée 'NONE' doit être filtrée, et 'BENCH_FULL' normalisée vers BENCH_ALREADY_FULL
+        self.assertEqual(len(parsed_part.strategicEvaluator.inGameDeadCardConditions), 1)
+        self.assertEqual(
+            parsed_part.strategicEvaluator.inGameDeadCardConditions[0].reason.value,
+            "BENCH_ALREADY_FULL",
+        )
+
+        # 2. Vérification de bout en bout via compile_card
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(raw_statitik_llm_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 150},
+        }
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "id": "sv06.5-001",
+            "name": "Statitik",
+            "category": "Pokémon",
+            "stage": "Base",
+            "hp": 40,
+            "types": ["Plante"],
+        }
+        identity, pstats = fetcher.build_deterministic_models("sv06.5-001", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+        engine_card = compiler.compile_card(bundle)
+        self.assertIsInstance(engine_card, EngineCardModel)
+        self.assertEqual(engine_card.cardId, "sv06.5-001")
 
 
 if __name__ == "__main__":
