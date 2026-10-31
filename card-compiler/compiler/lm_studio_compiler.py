@@ -69,6 +69,27 @@ LM_STUDIO_TIER_MODELS: Dict[ModelTier, str] = {
 }
 
 
+def extract_json_payload(text: str) -> str:
+    """Extrait et nettoie le JSON généré par le LLM (retrait balises <think> et markdown fences)."""
+    if not text:
+        return ""
+    text = text.strip()
+    # Retrait des balises de réflexion type <think>...</think>
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # Si le bloc est entouré de blocs markdown ```json ... ``` ou ``` ... ```
+    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    candidate = md_match.group(1).strip() if md_match else text
+
+    # Recherche du premier '{' et du dernier '}' pour isoler l'objet JSON racine
+    first_brace = candidate.find("{")
+    last_brace = candidate.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return candidate[first_brace : last_brace + 1].strip()
+
+    return candidate
+
+
 class LMStudioCardCompiler:
     """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (local ou via SSH)."""
 
@@ -409,17 +430,38 @@ class LMStudioCardCompiler:
                     if active_ids:
                         matched = None
                         if self.model_name:
-                            target_l = self.model_name.lower()
+                            # 1. Correspondance exacte ou insensible à la casse
                             for act_id in active_ids:
-                                act_l = act_id.lower()
-                                if (
-                                    target_l in act_l
-                                    or ("27b" in target_l and "27b" in act_l)
-                                    or ("qwen3.8" in target_l and "qwen3.8" in act_l)
-                                ):
+                                if act_id == self.model_name or act_id.lower() == self.model_name.lower():
                                     matched = act_id
                                     break
-                        self.model_name = matched or self.model_name or active_ids[0]
+
+                            # 2. Correspondance par sous-chaîne ou mots-clés normalisés
+                            if not matched:
+                                target_norm = re.sub(r"[^a-zA-Z0-9]", "", self.model_name.lower())
+                                for act_id in active_ids:
+                                    act_norm = re.sub(r"[^a-zA-Z0-9]", "", act_id.lower())
+                                    if target_norm in act_norm or act_norm in target_norm:
+                                        matched = act_id
+                                        break
+
+                            # 3. Correspondance par palier (27b, 30b, 14b, 7b, qwen, llama...)
+                            if not matched:
+                                target_l = self.model_name.lower()
+                                for act_id in active_ids:
+                                    act_l = act_id.lower()
+                                    if (
+                                        ("27b" in target_l and "27b" in act_l)
+                                        or ("30b" in target_l and "30b" in act_l)
+                                        or ("14b" in target_l and "14b" in act_l)
+                                        or ("7b" in target_l and "7b" in act_l)
+                                        or ("qwen" in target_l and "qwen" in act_l)
+                                    ):
+                                        matched = act_id
+                                        break
+
+                        # Si aucun match n'est trouvé, on utilise impérativement le premier modèle actif dans LM Studio
+                        self.model_name = matched or active_ids[0]
         except Exception as exc:
             self.close()
             target_desc = f"{self.ssh_target} (via tunnel {self.api_base_url})" if self.ssh_host else self.api_base_url
@@ -457,7 +499,7 @@ class LMStudioCardCompiler:
         with httpx.Client(timeout=self.timeout_seconds) as client:
             for attempt in range(max_retries + 1):
                 if attempt > 0:
-                    current_max_tokens += 2048
+                    current_max_tokens = min(current_max_tokens + 1024, 8192)
 
                 t0 = time.perf_counter()
 
@@ -472,35 +514,107 @@ class LMStudioCardCompiler:
                     "max_tokens": current_max_tokens,
                 }
 
-                # Tentative avec structured output `json_schema` (spécification OpenAI / LM Studio récent)
+                # Cascade de formats : json_schema -> json_object -> none (prompt direct)
+                formats_to_try: List[str] = []
                 if self._use_json_schema_format:
-                    payload["response_format"] = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "LLMCompiledCardPart",
-                            "strict": True,
-                            "schema": self._json_schema,
-                        },
-                    }
-                else:
-                    payload["response_format"] = {"type": "json_object"}
+                    formats_to_try.append("json_schema")
+                formats_to_try.extend(["json_object", "none"])
 
-                try:
-                    resp = client.post(chat_url, json=payload)
-                    if resp.status_code == 400 and self._use_json_schema_format:
-                        # Fallback automatique sur json_object si la version de LM Studio ne supporte pas json_schema
-                        self._use_json_schema_format = False
+                data: Optional[Dict[str, Any]] = None
+                call_err: Optional[Exception] = None
+
+                for fmt in formats_to_try:
+                    if fmt == "json_schema":
+                        payload["response_format"] = {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "LLMCompiledCardPart",
+                                "schema": self._json_schema,
+                            },
+                        }
+                    elif fmt == "json_object":
                         payload["response_format"] = {"type": "json_object"}
-                        resp = client.post(chat_url, json=payload)
+                    else:
+                        payload.pop("response_format", None)
 
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception as req_err:
-                    last_error = req_err
+                    try:
+                        resp = client.post(chat_url, json=payload)
+                    except httpx.RequestError as net_err:
+                        call_err = net_err
+                        break
+
+                    if resp.is_success:
+                        data = resp.json()
+                        if fmt != "json_schema":
+                            self._use_json_schema_format = False
+                        break
+
+                    # Analyse détaillée de l'erreur HTTP retournée par LM Studio
+                    err_msg = ""
+                    try:
+                        err_json = resp.json()
+                        err_obj = err_json.get("error", {})
+                        if isinstance(err_obj, dict):
+                            err_msg = err_obj.get("message") or str(err_obj)
+                        else:
+                            err_msg = str(err_obj)
+                    except Exception:
+                        err_msg = resp.text
+
+                    call_err = RuntimeError(
+                        f"Erreur LM Studio (HTTP {resp.status_code}) : {err_msg or resp.text}"
+                    )
+
+                    # 1. Gestion du modèle non trouvé ou non chargé
+                    if resp.status_code == 400 and any(
+                        w in err_msg.lower() for w in ["model", "not loaded", "not found"]
+                    ):
+                        try:
+                            models_resp = client.get(f"{self.api_base_url}/models")
+                            if models_resp.is_success:
+                                m_list = models_resp.json().get("data", [])
+                                active_m = [
+                                    m.get("id")
+                                    for m in m_list
+                                    if isinstance(m, dict) and m.get("id")
+                                ]
+                                if active_m and payload.get("model") != active_m[0]:
+                                    payload["model"] = active_m[0]
+                                    self.model_name = active_m[0]
+                                    model_to_request = active_m[0]
+                                    retry_resp = client.post(chat_url, json=payload)
+                                    if retry_resp.is_success:
+                                        data = retry_resp.json()
+                                        break
+                        except Exception:
+                            pass
+
+                    # 2. Gestion du dépassement de la fenêtre de contexte / tokens
+                    if resp.status_code == 400 and any(
+                        w in err_msg.lower()
+                        for w in ["token", "context", "length", "exceed", "n_ctx", "maximum"]
+                    ):
+                        if payload["max_tokens"] > 1536:
+                            payload["max_tokens"] = 1536
+                            current_max_tokens = 1536
+                            retry_resp = client.post(chat_url, json=payload)
+                            if retry_resp.is_success:
+                                data = retry_resp.json()
+                                break
+
+                    # 3. Si 400 causé par response_format : on continue sur le format de repli suivant
+                    if resp.status_code == 400:
+                        continue
+
+                    # Pour toute autre erreur non-400 (500, 401, etc.)
+                    break
+
+                if data is None:
+                    last_error = call_err or RuntimeError("Réponse vide ou indisponible de LM Studio")
                     if attempt < max_retries:
                         time.sleep(1.0)
                         continue
-                    raise RuntimeError(f"Erreur de communication avec LM Studio : {req_err}") from req_err
+                    raise RuntimeError(f"Erreur de communication avec LM Studio : {last_error}") from last_error
 
                 elapsed = round(time.perf_counter() - t0, 3)
                 choices = data.get("choices") or []
@@ -515,13 +629,15 @@ class LMStudioCardCompiler:
                 if finish_reason == "length" and attempt < max_retries:
                     continue
 
+                cleaned_json = extract_json_payload(raw_content)
+
                 try:
-                    compiled_part = LLMCompiledCardPart.model_validate_json(raw_content)
+                    compiled_part = LLMCompiledCardPart.model_validate_json(cleaned_json)
                     break
                 except Exception as val_err:
                     last_error = val_err
                     try:
-                        raw_dict = json.loads(raw_content)
+                        raw_dict = json.loads(cleaned_json)
                         if isinstance(raw_dict, dict):
                             strat = raw_dict.get("strategicEvaluator")
                             if isinstance(strat, dict):
