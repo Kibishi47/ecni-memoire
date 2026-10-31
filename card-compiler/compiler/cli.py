@@ -418,11 +418,12 @@ def create_compiler_engine(
     fast: bool = False,
     hf_token: Optional[str] = None,
     ssh_password: Optional[str] = None,
+    disable_thinking: bool = False,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
-        return LMStudioCardCompiler(tier=tier, ssh_password=ssh_password)
-    return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token)
+        return LMStudioCardCompiler(tier=tier, ssh_password=ssh_password, disable_thinking=disable_thinking)
+    return LocalLLMCardCompiler(tier=tier, fast=fast, hf_token=hf_token, disable_thinking=disable_thinking)
 
 
 def _execute_run_pipeline(
@@ -438,6 +439,7 @@ def _execute_run_pipeline(
     limit: Optional[int],
     hf_token: Optional[str] = None,
     ssh_password: Optional[str] = None,
+    disable_thinking: bool = False,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -462,9 +464,18 @@ def _execute_run_pipeline(
     )
 
     if llm_provider == LLMProvider.lm_studio:
-        engine_preview = LMStudioCardCompiler(tier=effective_tier, ssh_password=ssh_password)
+        engine_preview = LMStudioCardCompiler(
+            tier=effective_tier,
+            ssh_password=ssh_password,
+            disable_thinking=disable_thinking,
+        )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution LM Studio (API REST)[/bold cyan]"
         model_display = engine_preview.model_name or "Auto-détection (modèle actuellement actif sur le serveur)"
+        thinking_display = (
+            "[yellow]Désactivé (--no-think)[/yellow]"
+            if engine_preview.disable_thinking
+            else "[green]Activé / Standard[/green]"
+        )
         if engine_preview.use_tunnel and engine_preview.ssh_host:
             auth_info = (
                 "[green]Mot de passe (SSH_PASSWORD)[/green]"
@@ -477,28 +488,41 @@ def _execute_run_pipeline(
                 f"• [bold]Authentification[/bold] : {auth_info}\n"
                 f"• [bold]Tunnel SSH[/bold] : Actif (port local {engine_preview.local_port} -> distant {engine_preview.remote_port})\n"
                 f"• [bold]URL API Locale[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
+                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
+                f"• [bold]Mode Thinking[/bold] : {thinking_display}"
             )
         else:
             conn_type = f"Distant ({engine_preview.remote_host})" if engine_preview.remote_host and engine_preview.remote_host not in {"127.0.0.1", "localhost"} else "Local"
             llm_lines = (
                 f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio ({conn_type} REST direct)[/bold magenta]\n"
                 f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]"
+                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
+                f"• [bold]Mode Thinking[/bold] : {thinking_display}"
             )
     else:
-        engine_preview = LocalLLMCardCompiler(tier=effective_tier, fast=fast, hf_token=hf_token)
+        engine_preview = LocalLLMCardCompiler(
+            tier=effective_tier,
+            fast=fast,
+            hf_token=hf_token,
+            disable_thinking=disable_thinking,
+        )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple Metal (GBNF + CoT)[/bold cyan]"
         token_status = (
             "[green]Configuré ✓ (téléchargement accéléré)[/green]"
             if engine_preview.hf_token
             else "[yellow]Non renseigné (anonyme)[/yellow]"
         )
+        thinking_display = (
+            "[yellow]Désactivé (--no-think)[/yellow]"
+            if engine_preview.disable_thinking
+            else "[green]Activé / Standard[/green]"
+        )
         llm_lines = (
             f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Metal in-memory)[/bold magenta]\n"
             f"• [bold]Palier (--tier)[/bold] : [bold yellow]{effective_tier.value}[/bold yellow] — [yellow]{engine_preview.repo_id}[/yellow] ([green]{engine_preview.filename}[/green])\n"
             f"• [bold]HF Token[/bold] : {token_status}\n"
-            f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]"
+            f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
+            f"• [bold]Mode Thinking[/bold] : {thinking_display}"
         )
 
     console.print(
@@ -580,6 +604,7 @@ def _execute_run_pipeline(
             fast=fast,
             hf_token=hf_token,
             ssh_password=ssh_password,
+            disable_thinking=disable_thinking,
         )
         try:
             try:
@@ -853,6 +878,13 @@ def run_command(
         "--prompt-ssh-password",
         help="Demande interactivement le mot de passe SSH dans le terminal de manière masquée.",
     ),
+    no_think: bool = typer.Option(
+        False,
+        "--no-think",
+        "--disable-thinking",
+        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
+        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
@@ -873,6 +905,7 @@ def run_command(
         limit=limit,
         hf_token=hf_token,
         ssh_password=ssh_password,
+        disable_thinking=no_think,
     )
 
 
@@ -917,6 +950,13 @@ def compile_alias(
         "--prompt-ssh-password",
         help="Demande interactivement le mot de passe SSH dans le terminal.",
     ),
+    no_think: bool = typer.Option(
+        False,
+        "--no-think",
+        "--disable-thinking",
+        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK"],
+        help="Désactive le mode réflexion / thinking des modèles raisonnants (ex: Qwen, DeepSeek) dans LM Studio.",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
@@ -937,6 +977,7 @@ def compile_alias(
         limit=limit,
         hf_token=hf_token,
         ssh_password=ssh_password,
+        disable_thinking=no_think,
     )
 
 

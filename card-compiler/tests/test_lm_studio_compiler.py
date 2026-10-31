@@ -1113,6 +1113,294 @@ class TestLMStudioCompiler(unittest.TestCase):
                 self.assertEqual(ctx.exception.exit_code, 1)
                 mock_engine.close.assert_called_once()
 
+    def test_disable_thinking_init_and_env(self):
+        # 1. Par défaut : False
+        with patch.dict("os.environ", {}, clear=True):
+            compiler = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertFalse(compiler.disable_thinking)
+
+            # 2. Argument explicite : True
+            compiler_true = LMStudioCardCompiler(remote_host="127.0.0.1", disable_thinking=True)
+            self.assertTrue(compiler_true.disable_thinking)
+
+        # 3. Variable d'environnement LM_STUDIO_DISABLE_THINKING
+        with patch.dict("os.environ", {"LM_STUDIO_DISABLE_THINKING": "true"}):
+            compiler_env = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertTrue(compiler_env.disable_thinking)
+
+        # 4. Variable d'environnement LM_STUDIO_NO_THINK
+        with patch.dict("os.environ", {"LM_STUDIO_NO_THINK": "1"}):
+            compiler_env2 = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertTrue(compiler_env2.disable_thinking)
+
+        # 5. Variable d'environnement NO_THINK
+        with patch.dict("os.environ", {"NO_THINK": "yes"}):
+            compiler_env3 = LMStudioCardCompiler(remote_host="127.0.0.1")
+            self.assertTrue(compiler_env3.disable_thinking)
+
+        # 6. Factory create_compiler_engine
+        engine = create_compiler_engine(
+            provider=LLMProvider.lm_studio,
+            disable_thinking=True,
+        )
+        self.assertTrue(engine.disable_thinking)
+
+    @patch("httpx.Client")
+    def test_compile_card_with_disable_thinking_injects_payload_and_prompts(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            remote_host="127.0.0.1",
+            disable_thinking=True,
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Analyse sans thinking.",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [
+                {
+                    "actionId": "play_item",
+                    "label": "Test Item",
+                    "sourceType": "TRAINER_PLAY",
+                    "timing": "ONCE_PER_CARD",
+                    "canUseTurn1GoingFirst": True,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [],
+                    "effects": [
+                        {
+                            "primitive": "DRAW_CARDS",
+                            "count": 2,
+                        }
+                    ],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "CONSISTENCY_TUTOR",
+                "intrinsicBaseScore": 70,
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 120},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {
+            "id": "sv01-181",
+            "name": "Faiblo Ball",
+            "category": "Dresseur",
+            "trainerType": "Objet",
+        }
+        identity, pstats = fetcher.build_deterministic_models("sv01-181", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv01-181",
+            resolved_tcgdex_id="sv01-181",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv01-181.json"),
+        )
+
+        res = compiler.compile_card(bundle)
+        self.assertIsInstance(res, EngineCardModel)
+
+        # Vérifier le payload envoyé à httpx
+        mock_instance.post.assert_called_once()
+        _, kwargs = mock_instance.post.call_args
+        sent_payload = kwargs["json"]
+
+        self.assertEqual(sent_payload.get("chat_template_kwargs"), {"enable_thinking": False})
+        self.assertEqual(sent_payload.get("chat_template_args"), {"enable_thinking": False})
+        self.assertIs(sent_payload.get("enable_thinking"), False)
+        self.assertEqual(sent_payload.get("reasoning_effort"), "none")
+
+        messages = sent_payload.get("messages", [])
+        self.assertEqual(len(messages), 2)
+        sys_msg = messages[0]["content"]
+        user_msg = messages[1]["content"]
+
+        self.assertIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ", sys_msg)
+        self.assertIn("/no_think", user_msg)
+        self.assertIn("<|think_off|>", user_msg)
+
+    @patch("httpx.Client")
+    def test_compile_card_with_thinking_enabled_does_not_inject_no_think(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            remote_host="127.0.0.1",
+            disable_thinking=False,
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Analyse avec thinking actif.",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [
+                {
+                    "actionId": "play_item",
+                    "label": "Test Item",
+                    "sourceType": "TRAINER_PLAY",
+                    "timing": "ONCE_PER_CARD",
+                    "canUseTurn1GoingFirst": True,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [],
+                    "effects": [{"primitive": "DRAW_CARDS", "count": 2}],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "CONSISTENCY_TUTOR",
+                "intrinsicBaseScore": 70,
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 120},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_resp
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {"id": "sv01-181", "name": "Faiblo Ball", "category": "Dresseur", "trainerType": "Objet"}
+        identity, pstats = fetcher.build_deterministic_models("sv01-181", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv01-181",
+            resolved_tcgdex_id="sv01-181",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv01-181.json"),
+        )
+
+        res = compiler.compile_card(bundle)
+        self.assertIsInstance(res, EngineCardModel)
+
+        _, kwargs = mock_instance.post.call_args
+        sent_payload = kwargs["json"]
+
+        self.assertNotIn("chat_template_kwargs", sent_payload)
+        self.assertNotIn("reasoning_effort", sent_payload)
+
+        messages = sent_payload.get("messages", [])
+        sys_msg = messages[0]["content"]
+        user_msg = messages[1]["content"]
+
+        self.assertNotIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ", sys_msg)
+        self.assertNotIn("/no_think", user_msg)
+        self.assertNotIn("<|think_off|>", user_msg)
+
+    @patch("httpx.Client")
+    def test_compile_card_400_fallback_removes_thinking_params(self, mock_client_cls):
+        compiler = LMStudioCardCompiler(
+            remote_host="127.0.0.1",
+            disable_thinking=True,
+        )
+        compiler._ready = True
+
+        fake_card_json = {
+            "reasoningAnalysis": "Analyse de secours.",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [
+                {
+                    "actionId": "play_item",
+                    "label": "Test Item",
+                    "sourceType": "TRAINER_PLAY",
+                    "timing": "ONCE_PER_CARD",
+                    "canUseTurn1GoingFirst": True,
+                    "canUseTurn1GoingSecond": True,
+                    "preconditions": [],
+                    "costs": [],
+                    "effects": [{"primitive": "DRAW_CARDS", "count": 1}],
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "CONSISTENCY_TUTOR",
+                "intrinsicBaseScore": 70,
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        }
+
+        # Première réponse HTTP 400 (rejet du paramètre chat_template_kwargs)
+        mock_resp_400 = MagicMock()
+        mock_resp_400.is_success = False
+        mock_resp_400.status_code = 400
+        mock_resp_400.json.return_value = {"error": {"message": "Unknown parameter chat_template_kwargs"}}
+
+        # Deuxième réponse HTTP 200 (succès au repli)
+        mock_resp_200 = MagicMock()
+        mock_resp_200.is_success = True
+        mock_resp_200.status_code = 200
+        mock_resp_200.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 80},
+        }
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__.return_value = mock_instance
+        mock_instance.post.side_effect = [mock_resp_400] + [mock_resp_200] * 5
+        mock_client_cls.return_value = mock_instance
+
+        from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
+        fetcher = TCGdexFetcher(data_dir=Path("data"))
+        raw_card = {"id": "sv01-181", "name": "Faiblo Ball", "category": "Dresseur", "trainerType": "Objet"}
+        identity, pstats = fetcher.build_deterministic_models("sv01-181", raw_card, None)
+        bundle = FetchedCardBundle(
+            card_id="sv01-181",
+            resolved_tcgdex_id="sv01-181",
+            raw_fr=raw_card,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv01-181.json"),
+        )
+
+        res = compiler.compile_card(bundle)
+        self.assertIsInstance(res, EngineCardModel)
+        self.assertEqual(mock_instance.post.call_count, 2)
+
+        # La 2e requête ne doit plus contenir les paramètres de thinking qui avaient causé le 400
+        second_call_kwargs = mock_instance.post.call_args_list[1][1]
+        second_payload = second_call_kwargs["json"]
+        self.assertNotIn("chat_template_kwargs", second_payload)
+        self.assertNotIn("enable_thinking", second_payload)
+        self.assertNotIn("reasoning_effort", second_payload)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -362,11 +362,25 @@ class LMStudioCardCompiler:
         auto_start: Optional[bool] = None,
         timeout_seconds: float = 180.0,
         tier: ModelTier = ModelTier.qwen3,
+        disable_thinking: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         load_env_file()
 
         self.tier = tier
+
+        # Mode Thinking / Raisonnement (pour modèles tels que Qwen, DeepSeek, QwQ)
+        env_disable_thinking = (
+            os.environ.get("LM_STUDIO_DISABLE_THINKING")
+            or os.environ.get("LM_STUDIO_NO_THINK")
+            or os.environ.get("NO_THINK")
+        )
+        if disable_thinking is not None:
+            self.disable_thinking = bool(disable_thinking)
+        elif env_disable_thinking:
+            self.disable_thinking = env_disable_thinking.lower() in {"1", "true", "yes", "on"}
+        else:
+            self.disable_thinking = False
 
         # 1. Résolution de l'URL REST LM Studio (Directe IP/port ou tunnel SSH)
         env_base_url = os.environ.get("LM_STUDIO_BASE_URL")
@@ -785,6 +799,7 @@ class LMStudioCardCompiler:
         max_retries: int = 2,
         stream: Optional[bool] = None,
         on_token: Optional[Callable[[int, float], None]] = None,
+        disable_thinking: Optional[bool] = None,
     ) -> EngineCardModel:
         """Compile une carte Pokémon TCG via LM Studio (remote SSH / local REST) avec format contraint."""
         from compiler.llm_engine import SYSTEM_PROMPT, build_user_prompt, enforce_ptcg_invariants
@@ -794,7 +809,16 @@ class LMStudioCardCompiler:
             return build_basic_energy_model(bundle)
 
         self.load_model_in_memory()
-        user_prompt = build_user_prompt(bundle)
+        is_thinking_disabled = self.disable_thinking if disable_thinking is None else disable_thinking
+        user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
+        sys_prompt = SYSTEM_PROMPT
+        if is_thinking_disabled:
+            sys_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
+                "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
+                "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."
+            )
         current_max_tokens = max_tokens
         last_error: Optional[Exception] = None
         compiled_part: Optional[LLMCompiledCardPart] = None
@@ -815,12 +839,19 @@ class LMStudioCardCompiler:
                 payload: Dict[str, Any] = {
                     "model": model_to_request,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
                     "temperature": temperature,
                     "max_tokens": current_max_tokens,
                 }
+
+                if is_thinking_disabled:
+                    payload["chat_template_kwargs"] = {"enable_thinking": False}
+                    payload["chat_template_args"] = {"enable_thinking": False}
+                    payload["enable_thinking"] = False
+                    payload["reasoning_effort"] = "none"
+                    payload["reasoning"] = {"effort": "none"}
 
                 # Cascade de formats : json_schema -> json_object -> none (prompt direct)
                 formats_to_try: List[str] = []
@@ -936,8 +967,16 @@ class LMStudioCardCompiler:
                                 data = retry_data
                                 break
 
-                    # 3. Si 400 causé par response_format : on continue sur le format de repli suivant
+                    # 3. Si 400 causé par response_format ou paramètres non supportés : on retire les paramètres optionnels et on tente le format suivant
                     if resp.status_code == 400:
+                        for param in [
+                            "chat_template_kwargs",
+                            "chat_template_args",
+                            "enable_thinking",
+                            "reasoning_effort",
+                            "reasoning",
+                        ]:
+                            payload.pop(param, None)
                         continue
 
                     # Pour toute autre erreur non-400 (500, 401, etc.)
