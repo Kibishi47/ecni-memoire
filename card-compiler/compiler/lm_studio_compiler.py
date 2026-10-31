@@ -733,6 +733,7 @@ class LMStudioCardCompiler:
                     usage_info: Dict[str, Any] = {}
                     finish_reason: Optional[str] = None
 
+                    stream_error: Optional[str] = None
                     for line in resp.iter_lines():
                         if not line:
                             continue
@@ -747,6 +748,12 @@ class LMStudioCardCompiler:
                             chunk = json.loads(line_str)
                         except Exception:
                             continue
+
+                        # Capture des erreurs explicites renvoyées dans les chunks SSE
+                        if isinstance(chunk, dict) and "error" in chunk:
+                            err_obj = chunk["error"]
+                            stream_error = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+                            break
 
                         if "usage" in chunk and chunk["usage"]:
                             usage_info = chunk["usage"]
@@ -785,6 +792,9 @@ class LMStudioCardCompiler:
                                         on_token(token_count, live_tps)
                                         last_cb_time = now
 
+                    if stream_error:
+                        return None, resp, RuntimeError(f"Erreur streaming LM Studio : {stream_error}")
+
                     if on_token and token_count > 0:
                         now = time.perf_counter()
                         if token_count > 1 and first_token_time is not None:
@@ -801,6 +811,12 @@ class LMStudioCardCompiler:
                     reasoning = "".join(accumulated_reasoning).strip()
                     if not content and reasoning:
                         content = reasoning
+
+                    if token_count == 0 and not content:
+                        return None, resp, RuntimeError(
+                            "Le serveur LM Studio a fermé la connexion sans générer de tokens (0 token reçu). "
+                            "Vérifiez que la taille de contexte allouée par slot (context-length / parallel) est suffisante."
+                        )
 
                     gen_duration: Optional[float] = None
                     tps: Optional[float] = None
@@ -897,7 +913,10 @@ class LMStudioCardCompiler:
                 "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
                 "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."
             )
-        current_max_tokens = max_tokens
+        if is_thinking_disabled and max_tokens == 4096:
+            current_max_tokens = 2048
+        else:
+            current_max_tokens = max_tokens
         last_error: Optional[Exception] = None
         compiled_part: Optional[LLMCompiledCardPart] = None
         elapsed: float = 0.0
@@ -994,6 +1013,15 @@ class LMStudioCardCompiler:
                             break
                         else:
                             # Le format actuel a produit une réponse vide ou invalide pour cette tentative
+                            if not content:
+                                call_err = RuntimeError(
+                                    "Le modèle LM Studio a renvoyé un flux vide (0 token). "
+                                    "La fenêtre de contexte allouée par slot (context-length / parallel) est probablement insuffisante pour contenir le prompt (~4500-5000 tokens)."
+                                )
+                            else:
+                                call_err = ValueError(
+                                    f"Le modèle LM Studio n'a pas produit d'objet JSON valide (contenu: {content[:150]!r})"
+                                )
                             if fmt == "json_schema":
                                 self._use_json_schema_format = False
                             continue
