@@ -91,18 +91,27 @@ def normalize_lm_studio_model_name(name: Optional[str]) -> str:
 
 
 def extract_json_payload(text: str) -> str:
-    """Extrait et nettoie le JSON généré par le LLM (retrait balises <think> et markdown fences)."""
+    """Extrait et nettoie le JSON généré par le LLM (retrait balises <think>, markdown fences, et isolation de l'objet JSON racine)."""
     if not text:
         return ""
     text = text.strip()
-    # Retrait des balises de réflexion type <think>...</think>
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    # Si le bloc est entouré de blocs markdown ```json ... ``` ou ``` ... ```
-    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-    candidate = md_match.group(1).strip() if md_match else text
+    # 1. Retrait des balises de réflexion fermées type <think>...</think>
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
 
-    # Recherche du premier '{' et du dernier '}' pour isoler l'objet JSON racine
+    # 2. Si un bloc <think> n'a pas été fermé (ex: modèle interrompu ou token limit)
+    if "<think>" in cleaned:
+        first_brace = cleaned.find("{")
+        if first_brace != -1:
+            cleaned = cleaned[first_brace:]
+        else:
+            cleaned = ""
+
+    # 3. Extraction du bloc markdown ```json ... ``` ou ``` ... ```
+    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    candidate = md_match.group(1).strip() if md_match else cleaned
+
+    # 4. Recherche de l'objet JSON racine délimité par premier '{' et dernier '}'
     first_brace = candidate.find("{")
     last_brace = candidate.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
@@ -679,10 +688,31 @@ class LMStudioCardCompiler:
                         break
 
                     if resp.is_success:
-                        data = resp.json()
-                        if fmt != "json_schema":
-                            self._use_json_schema_format = False
-                        break
+                        data_candidate = resp.json()
+                        choices = data_candidate.get("choices") or []
+                        content = ""
+                        if choices:
+                            msg = choices[0].get("message") or {}
+                            content = (msg.get("content") or choices[0].get("text") or "").strip()
+                            reasoning = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+                            if not content and reasoning:
+                                cand_json = extract_json_payload(reasoning)
+                                if cand_json.startswith("{") and cand_json.endswith("}"):
+                                    content = cand_json
+                                    if "message" in choices[0]:
+                                        choices[0]["message"]["content"] = cand_json
+
+                        cleaned_candidate = extract_json_payload(content)
+                        if cleaned_candidate.startswith("{") and cleaned_candidate.endswith("}"):
+                            data = data_candidate
+                            if fmt != "json_schema":
+                                self._use_json_schema_format = False
+                            break
+                        else:
+                            # Le format actuel a produit une réponse vide ou sans JSON (conflit GBNF/thinking)
+                            if fmt == "json_schema":
+                                self._use_json_schema_format = False
+                            continue
 
                     # Analyse détaillée de l'erreur HTTP retournée par LM Studio
                     err_msg = ""
@@ -758,13 +788,26 @@ class LMStudioCardCompiler:
 
                 choice = choices[0]
                 finish_reason = choice.get("finish_reason")
-                raw_content = choice.get("message", {}).get("content", "")
+                msg = choice.get("message") or {}
+                raw_content = (msg.get("content") or choice.get("text") or "").strip()
+                if not raw_content and (msg.get("reasoning_content") or msg.get("reasoning")):
+                    raw_content = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
 
                 # Troncation de tokens détectée
                 if finish_reason == "length" and attempt < max_retries:
                     continue
 
                 cleaned_json = extract_json_payload(raw_content)
+
+                if not cleaned_json or not cleaned_json.startswith("{") or not cleaned_json.endswith("}"):
+                    val_err = ValueError(
+                        f"Le modèle LLM n'a pas retourné d'objet JSON valide pour la carte {bundle.card_id} "
+                        f"(contenu brut : {raw_content[:200]!r})"
+                    )
+                    last_error = val_err
+                    if attempt < max_retries:
+                        continue
+                    raise val_err
 
                 try:
                     compiled_part = LLMCompiledCardPart.model_validate_json(cleaned_json)
