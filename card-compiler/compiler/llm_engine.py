@@ -530,19 +530,149 @@ Réponds UNIQUEMENT avec l'objet JSON valide respectant strictement le schéma `
 CODING_SYSTEM_PROMPT = """Tu es un compilateur de code et ingénieur logiciel expert en modélisation formelle pour le Jeu de Cartes à Collectionner Pokémon (Pokémon TCG - Format Standard).
 Ta mission est de transcrire l'analyse préalable des règles et les données TCGdex d'une carte Pokémon en un objet JSON rigoureusement conforme au schéma `LLMCompiledCardPart`.
 
-Tu recevras :
-1. Une analyse technique préalable des règles du jeu détaillée par un maître des règles.
-2. Les données officielles TCGdex de la carte (catégorie, types, PV, talents, attaques, effets).
+### 1. STRUCTURE EXACTE ET CONTRAINTES DU SCHÉMA `LLMCompiledCardPart`
 
-Consignes impératives :
-- Génère obligatoirement l'objet JSON racine conforme au schéma `LLMCompiledCardPart`.
-- Utilise les informations de l'analyse préalable pour renseigner :
-  * `reasoningAnalysis` : une synthèse fidèle et concise (100 à 250 mots).
-  * `category` et `subCategory` exactes.
-  * `playableActions` : toutes les actions jouables (Talents `ABILITY_*` et Attaques `ATTACK`, ou Dresseurs `TRAINER_PLAY`) avec leurs `actionId`, `timing`, préconditions, coûts et primitives d'effet.
-  * `strategicEvaluator` : `primaryRole`, `intrinsicBaseScore`, `discardPriorityWhenDead`, `holdForNextTurnBonus`, `decklistSynergyRequirements`, `inGameDeadCardConditions`, `turnPhaseWeights`.
-- Interdiction formelle d'inventer des talents si la carte n'en possède pas dans ses données brutes.
-- Produis UNIQUEMENT le bloc JSON commençant par '{' et se terminant par '}'."""
+L'objet JSON racine doit contenir strictement les champs suivants :
+1. `reasoningAnalysis` (string) : Synthèse claire et concise (100 à 250 mots) issue de l'analyse préalable des règles.
+2. `category` (string) : "POKEMON", "TRAINER", ou "ENERGY".
+3. `subCategory` (string) : "BASIC", "STAGE_1", "STAGE_2", "ITEM", "SUPPORTER", "TOOL", "STADIUM", "BASIC_ENERGY", ou "SPECIAL_ENERGY".
+4. `playableActions` (liste d'objets) : Chaque action jouable (effet de Dresseur, Talent, Attaque) DOIT obligatoirement contenir TOUS ces champs :
+   - `actionId` (string) : identifiant technique snake_case (ex: "play_rare_candy", "attack_burning_darkness", "ability_quick_search").
+   - `label` (string) : nom officiel de l'action, de l'attaque ou du talent.
+   - `sourceType` (string) : "TRAINER_PLAY", "ABILITY_ACTIVATED", "ABILITY_PASSIVE", "ATTACK", "TOOL_EFFECT", "STADIUM_EFFECT".
+   - `timing` (string) : "ONCE_PER_CARD", "ONCE_PER_TURN_ABILITY", "ONCE_PER_TURN_SUPPORTER", "END_OF_TURN_ATTACK", "ON_EVOLVE_TRIGGER", "PASSIVE_CONTINUOUS".
+   - `canUseTurn1GoingFirst` (booléen) : false pour toute attaque, tout supporter et toute évolution/Super Bonbon ; true pour les objets basiques.
+   - `canUseTurn1GoingSecond` (booléen) : false pour toute évolution/Super Bonbon ; true pour les supporters, attaques et objets basiques.
+   - `energyCost` (liste de chaînes) : liste des énergies requises pour les attaques (ex: ["Feu", "Incolore"] ou []).
+   - `preconditions` (liste d'objets) : liste d'objets `{"type": "...", "zone": "...", "minCount": 1, "targetFilter": {...}}` ou `[]`. N'utilise JAMAIS de simples chaînes !
+   - `costs` (liste d'objets) : coûts explicites (ex: défausse de cartes en main) `[{"type": "DISCARD_FROM_HAND", "count": 2, "targetFilter": null}]` ou `[]`.
+   - `effects` (liste d'objets) : primitives d'effets ordonnées. ATTENTION : le champ s'appelle obligatoirement `effects` (et non `primitives`). Chaque effet est un objet :
+     * `primitive` (string) : ex: "EVOLVE_SKIP_STAGE1", "DEAL_DAMAGE_ACTIVE", "SEARCH_DECK_TO_HAND", "DRAW_CARDS", "SWITCH_ACTIVE_POKEMON".
+     * `sourceZone` (string ou null) : "DECK", "HAND", "DISCARD", "ACTIVE", "BENCH", "IN_PLAY_ALL".
+     * `targetZone` (string ou null) : "HAND", "BENCH", "ACTIVE", "DISCARD", "DECK", "IN_PLAY_ALL".
+     * `count` (entier) : nombre de cibles (défaut: 1).
+     * `upTo` (booléen) : true si le joueur peut choisir "jusqu'à" count cartes, false sinon.
+     * `targetFilter` (objet ou null) : `{"category": "...", "subCategory": "...", "maxHp": null, "energyType": null, "specificCardName": null}`.
+     * `baseDamage` (entier ou null) : dégâts de base pour les attaques.
+     * `damageScalingPerOpponentPrizeTaken` (entier ou null) : bonus de dégâts par carte Récompense adverse.
+5. `strategicEvaluator` (objet) : DOIT obligatoirement contenir TOUS ces champs :
+   - `primaryRole` (string) : ex: "MAIN_ATTACKER", "SECONDARY_ATTACKER", "BENCH_DEPLOYER", "CONSISTENCY_TUTOR", "EVOLUTION_ACCELERATOR", "HAND_DISRUPTION", "GUST_BOSS_EFFECT", "TECH_UTILITY".
+   - `intrinsicBaseScore` (entier de 0 à 100).
+   - `turnPhaseWeights` (objet OBLIGATOIRE avec exactement les 4 clés suivantes) :
+     `{"turn1": float, "turn2": float, "turn3": float, "turn4Plus": float}`
+     (Chaque valeur est un décimal compris entre 0.0 et 2.0. Il est STRICTEMENT INTERDIT d'utiliser des noms alternatifs comme PREPARATION ou MAIN_PHASE).
+   - `decklistSynergyRequirements` (liste d'objets) :
+     `[{"requiredFilter": {"category": "POKEMON", "subCategory": "STAGE_2", "maxHp": null, "energyType": null, "specificCardName": null}, "minCountInDeck": 1, "ifMissingSetValueToZero": true, "bonusWeightPerCopy": 15.0}]` ou `[]`. N'utilise JAMAIS de simples chaînes !
+   - `inGameDeadCardConditions` (liste d'objets) :
+     `[{"reason": "NO_STAGE2_LEFT_IN_DECK_OR_HAND", "zonesToCheck": ["HAND", "DECK"], "targetFilter": {...}}]` ou `[]`. N'utilise JAMAIS de simples chaînes !
+   - `discardPriorityWhenDead` (entier de 0 à 100).
+   - `holdForNextTurnBonus` (entier de 0 à 50).
+
+### 2. EXEMPLE FEW-SHOT DE RÉFÉRENCE : Super Bonbon (Rare Candy - sv04-125)
+```json
+{
+  "reasoningAnalysis": "Super Bonbon (Item) permet d'accélérer l'évolution directe d'un Pokémon de base en Niveau 2 sans passer par le Niveau 1. Injouable au Tour 1. Exige un Pokémon de Base en jeu depuis le tour précédent et un Niveau 2 en main. Carte morte si aucun Niveau 2 n'est disponible.",
+  "category": "TRAINER",
+  "subCategory": "ITEM",
+  "playableActions": [
+    {
+      "actionId": "play_rare_candy",
+      "label": "Super Bonbon",
+      "sourceType": "TRAINER_PLAY",
+      "timing": "ONCE_PER_CARD",
+      "canUseTurn1GoingFirst": false,
+      "canUseTurn1GoingSecond": false,
+      "energyCost": [],
+      "preconditions": [
+        {
+          "type": "BASIC_IN_PLAY_PREVIOUS_TURN",
+          "zone": "IN_PLAY_ALL",
+          "minCount": 1,
+          "targetFilter": {
+            "category": "POKEMON",
+            "subCategory": "BASIC",
+            "maxHp": null,
+            "energyType": null,
+            "specificCardName": null
+          }
+        },
+        {
+          "type": "ZONE_HAS_MATCHING_CARD",
+          "zone": "HAND",
+          "minCount": 1,
+          "targetFilter": {
+            "category": "POKEMON",
+            "subCategory": "STAGE_2",
+            "maxHp": null,
+            "energyType": null,
+            "specificCardName": null
+          }
+        }
+      ],
+      "costs": [],
+      "effects": [
+        {
+          "primitive": "EVOLVE_SKIP_STAGE1",
+          "sourceZone": "HAND",
+          "targetZone": "IN_PLAY_ALL",
+          "count": 1,
+          "upTo": false,
+          "targetFilter": {
+            "category": "POKEMON",
+            "subCategory": "STAGE_2",
+            "maxHp": null,
+            "energyType": null,
+            "specificCardName": null
+          },
+          "baseDamage": null,
+          "damageScalingPerOpponentPrizeTaken": null
+        }
+      ]
+    }
+  ],
+  "strategicEvaluator": {
+    "primaryRole": "EVOLUTION_ACCELERATOR",
+    "intrinsicBaseScore": 92,
+    "turnPhaseWeights": {
+      "turn1": 0.0,
+      "turn2": 1.9,
+      "turn3": 1.6,
+      "turn4Plus": 0.9
+    },
+    "decklistSynergyRequirements": [
+      {
+        "requiredFilter": {
+          "category": "POKEMON",
+          "subCategory": "STAGE_2",
+          "maxHp": null,
+          "energyType": null,
+          "specificCardName": null
+        },
+        "minCountInDeck": 1,
+        "ifMissingSetValueToZero": true,
+        "bonusWeightPerCopy": 15.0
+      }
+    ],
+    "inGameDeadCardConditions": [
+      {
+        "reason": "NO_STAGE2_LEFT_IN_DECK_OR_HAND",
+        "zonesToCheck": ["HAND", "DECK"],
+        "targetFilter": {
+          "category": "POKEMON",
+          "subCategory": "STAGE_2",
+          "maxHp": null,
+          "energyType": null,
+          "specificCardName": null
+        }
+      }
+    ],
+    "discardPriorityWhenDead": 80,
+    "holdForNextTurnBonus": 25
+  }
+}
+```
+
+RÈGLE D'OR : Produis UNIQUEMENT le bloc JSON commençant par '{' et se terminant par '}'."""
 
 
 def extract_json_payload(text: str) -> str:
@@ -741,6 +871,11 @@ def build_coding_prompt(
         f"```text\n{reasoning_text.strip()}\n```\n\n"
         "### 2. DONNÉES TCGDEX DE LA CARTE :\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        "### 3. RAPPELS DE CONFORMITÉ DU SCHÉMA JSON :\n"
+        "- `playableActions`: chaque action doit inclure `actionId`, `label`, `sourceType`, `timing`, `canUseTurn1GoingFirst`, `canUseTurn1GoingSecond`, `energyCost`, `preconditions`, `costs`, `effects`.\n"
+        "- `effects`: liste d'objets atomiques avec le champ `primitive` (ne pas utiliser la clé 'primitives').\n"
+        "- `strategicEvaluator.turnPhaseWeights`: doit contenir exactement les 4 clés `turn1`, `turn2`, `turn3`, `turn4Plus` (nombres décimaux 0.0 à 2.0).\n"
+        "- `decklistSynergyRequirements` et `inGameDeadCardConditions`: doivent être des listes d'objets (pas de simples chaînes).\n\n"
         f"Génère uniquement l'objet JSON racine `LLMCompiledCardPart`.{no_think_directive}"
     )
 
