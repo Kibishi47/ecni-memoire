@@ -443,7 +443,6 @@ def create_compiler_engine(
     tier: ModelTier = ModelTier.qwen3,
     fast: bool = False,
     hf_token: Optional[str] = None,
-    ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
     model: Optional[str] = None,
@@ -452,12 +451,11 @@ def create_compiler_engine(
     intensity: Optional[Union[IntensityMode, str]] = None,
     phase: Optional[Union[PipelinePhase, str]] = None,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler, MLXCardCompiler]:
-    """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal GGUF, local MLX ou LM Studio SSH/REST)."""
+    """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal GGUF, local MLX ou LM Studio REST)."""
     if provider == LLMProvider.lm_studio:
         return LMStudioCardCompiler(
             tier=tier,
             model_name=model,
-            ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
         )
@@ -508,7 +506,6 @@ def _execute_run_pipeline(
     force: bool,
     limit: Optional[int],
     hf_token: Optional[str] = None,
-    ssh_password: Optional[str] = None,
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
     parallel: int = 1,
@@ -574,7 +571,6 @@ def _execute_run_pipeline(
         engine_preview = LMStudioCardCompiler(
             tier=effective_tier,
             model_name=model,
-            ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
         )
@@ -586,31 +582,14 @@ def _execute_run_pipeline(
             thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
         else:
             thinking_display = "[green]Activé / Standard[/green]"
-        if engine_preview.use_tunnel and engine_preview.ssh_host:
-            auth_info = (
-                "[green]Mot de passe (SSH_PASSWORD)[/green]"
-                if engine_preview.ssh_password
-                else (f"Clé privée ([cyan]{engine_preview.ssh_key_path}[/cyan])" if engine_preview.ssh_key_path else "Clé SSH standard / Agent")
-            )
-            llm_lines = (
-                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio (Tunnel SSH)[/bold magenta]\n"
-                f"• [bold]Cible SSH[/bold] : [bold green]{engine_preview.ssh_target}[/bold green]\n"
-                f"• [bold]Authentification[/bold] : {auth_info}\n"
-                f"• [bold]Tunnel SSH[/bold] : Actif (port local {engine_preview.local_port} -> distant {engine_preview.remote_port})\n"
-                f"• [bold]URL API Locale[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
-                f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
-                f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
-            )
-        else:
-            conn_type = f"Distant ({engine_preview.remote_host})" if engine_preview.remote_host and engine_preview.remote_host not in {"127.0.0.1", "localhost"} else "Local"
-            llm_lines = (
-                f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio ({conn_type} REST direct)[/bold magenta]\n"
-                f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
-                f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
-                f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
-                f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
-            )
+        conn_type = f"Distant ({engine_preview.remote_host})" if engine_preview.remote_host and engine_preview.remote_host not in {"127.0.0.1", "localhost"} else "Local"
+        llm_lines = (
+            f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LM Studio ({conn_type} REST direct)[/bold magenta]\n"
+            f"• [bold]URL API[/bold] : [bold green]{engine_preview.api_base_url}[/bold green]\n"
+            f"• [bold]Modèle[/bold] : [cyan]{model_display}[/cyan]\n"
+            f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
+            f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
+        )
     elif effective_backend == "mlx":
         engine_preview = MLXCardCompiler(
             model=model,
@@ -785,7 +764,6 @@ def _execute_run_pipeline(
             tier=effective_tier,
             fast=fast,
             hf_token=hf_token,
-            ssh_password=ssh_password,
             disable_thinking=disable_thinking,
             thinking=thinking,
             model=model,
@@ -1168,7 +1146,7 @@ def run_command(
         "--llm-provider",
         "-lp",
         envvar=["LLM_PROVIDER"],
-        help="Fournisseur d'inférence LLM : 'local' (Apple Metal llama.cpp local par défaut) ou 'lm_studio' (machine distante via SSH ou serveur LM Studio).",
+        help="Fournisseur d'inférence LLM : 'local' (Apple Metal llama.cpp local par défaut) ou 'lm_studio' (serveur LM Studio local ou distant via API REST).",
     ),
     model: Optional[str] = typer.Option(
         None,
@@ -1198,17 +1176,6 @@ def run_command(
         "--hf-token",
         envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
-    ),
-    ssh_password: Optional[str] = typer.Option(
-        None,
-        "--ssh-password",
-        envvar=["SSH_PASSWORD"],
-        help="Mot de passe SSH pour la machine distante (si connexion sans clé publique).",
-    ),
-    prompt_ssh_password: bool = typer.Option(
-        False,
-        "--prompt-ssh-password",
-        help="Demande interactivement le mot de passe SSH dans le terminal de manière masquée.",
     ),
     no_think: bool = typer.Option(
         False,
@@ -1270,11 +1237,6 @@ def run_command(
     ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
-    if prompt_ssh_password and not ssh_password:
-        import getpass
-
-        ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
-
     effective_thinking = "null" if no_think else thinking
 
     _execute_run_pipeline(
@@ -1289,7 +1251,6 @@ def run_command(
         force=force,
         limit=limit,
         hf_token=hf_token,
-        ssh_password=ssh_password,
         disable_thinking=no_think,
         thinking=effective_thinking,
         parallel=parallel,
@@ -1342,17 +1303,6 @@ def compile_alias(
         "--hf-token",
         envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         help="Jeton Hugging Face (HF_TOKEN) pour accélérer le téléchargement du modèle GGUF.",
-    ),
-    ssh_password: Optional[str] = typer.Option(
-        None,
-        "--ssh-password",
-        envvar=["SSH_PASSWORD"],
-        help="Mot de passe SSH pour la machine distante (si connexion sans clé publique).",
-    ),
-    prompt_ssh_password: bool = typer.Option(
-        False,
-        "--prompt-ssh-password",
-        help="Demande interactivement le mot de passe SSH dans le terminal.",
     ),
     no_think: bool = typer.Option(
         False,
@@ -1414,11 +1364,6 @@ def compile_alias(
     ),
 ) -> None:
     """Alias de la commande `run`."""
-    if prompt_ssh_password and not ssh_password:
-        import getpass
-
-        ssh_password = getpass.getpass("Mot de passe SSH pour la machine distante : ")
-
     effective_thinking = "null" if no_think else thinking
 
     _execute_run_pipeline(
@@ -1433,7 +1378,6 @@ def compile_alias(
         force=force,
         limit=limit,
         hf_token=hf_token,
-        ssh_password=ssh_password,
         disable_thinking=no_think,
         thinking=effective_thinking,
         parallel=parallel,

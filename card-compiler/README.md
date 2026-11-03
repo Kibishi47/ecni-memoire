@@ -17,7 +17,7 @@ Il interroge l'API officielle **TCGdex**, charge des modèles d'IA locaux sur **
 - **Inférence Locale Apple Silicon Ultra-Rapide** :
   - **Apple MLX (`LOCAL_BACKEND=mlx`)** : Chargement direct en mémoire unifiée via `mlx-lm` avec streaming en temps réel (tokens/sec effectifs).
   - **Apple Metal GGUF (`LOCAL_BACKEND=llama_cpp`)** : Exécution locale Metal avec décodage contraint GBNF.
-- **Support LM Studio Distant** : Connexion REST directe ou via tunnel SSH sécurisé avec parallélisation multi-slots.
+- **Support LM Studio** : Connexion REST directe (locale ou distante sur réseau local / VPN) avec parallélisation multi-slots.
 - **Court-circuit Déterministe des Énergies de Base** : Compilation instantanée (0 token, 0.00s).
 - **Reprise sur Cache Intelligente** : Les cartes et analyses déjà calculées ne sont jamais recalculées inutilement.
 
@@ -87,7 +87,7 @@ card-compiler/
 │   ├── two_pass_pipeline.py # Orchestrateur Two-Pass avec libération stricte de mémoire
 │   ├── mlx_engine.py        # Moteur Apple MLX natif safetensors
 │   ├── llm_engine.py        # Moteur Apple Metal llama.cpp GGUF & prompts PTCG
-│   ├── lm_studio_compiler.py# Moteur client LM Studio (REST direct ou tunnel SSH)
+│   ├── lm_studio_compiler.py# Moteur client LM Studio (REST direct local ou distant)
 │   ├── schemas.py           # Schémas stricts Pydantic V2 & normalisation d'enums
 │   ├── post_processor.py    # Enrichissement et règles d'invariants Pokémon TCG
 │   ├── static_cards.py      # Court-circuit déterministe pour Énergies de Base

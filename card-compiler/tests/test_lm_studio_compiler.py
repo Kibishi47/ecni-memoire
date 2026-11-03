@@ -1,4 +1,4 @@
-"""Tests unitaires pour le provider LM Studio (local et distant via SSH)."""
+"""Tests unitaires pour le provider LM Studio (API REST locale et distante)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from compiler.llm_engine import ModelTier
 from compiler.lm_studio_compiler import (
     LMStudioCardCompiler,
     extract_json_payload,
-    find_available_port,
     find_best_model_candidate,
     parse_lms_ls_output,
 )
@@ -20,44 +19,11 @@ from compiler.schemas import CardCategory, CardSubCategory, EngineCardModel, LLM
 
 
 class TestLMStudioCompiler(unittest.TestCase):
-    def test_find_available_port(self):
-        port = find_available_port(19876)
-        self.assertIsInstance(port, int)
-        self.assertGreaterEqual(port, 19876)
-
-    def test_init_with_ssh_and_tunnel_config(self):
-        compiler = LMStudioCardCompiler(
-            ssh_host="gpu-node.internal",
-            ssh_port=2222,
-            ssh_user="ai-user",
-            ssh_key_path="~/.ssh/test_key",
-            remote_port=1234,
-            local_port=12345,
-            use_tunnel=True,
-            model_name="qwen3-14b",
-        )
-        self.assertEqual(compiler.ssh_host, "gpu-node.internal")
-        self.assertEqual(compiler.ssh_port, 2222)
-        self.assertEqual(compiler.ssh_user, "ai-user")
-        self.assertEqual(compiler.ssh_target, "ai-user@gpu-node.internal:2222")
-        self.assertEqual(compiler.repo_id, "LM_STUDIO_SSH_TUNNEL")
-        self.assertIn("qwen3-14b", compiler.filename)
-        self.assertIn("127.0.0.1", compiler.api_base_url)
-
-        # Vérification des arguments SSH de base
-        ssh_cmd = compiler._build_ssh_base_command()
-        self.assertEqual(ssh_cmd[0], "ssh")
-        self.assertIn("-p", ssh_cmd)
-        self.assertIn("2222", ssh_cmd)
-        self.assertIn("ai-user@gpu-node.internal", ssh_cmd)
-
-    def test_init_direct_ip_without_ssh(self):
+    def test_init_direct_ip(self):
         compiler = LMStudioCardCompiler(
             remote_host="198.51.100.1",
             remote_port=1234,
         )
-        self.assertFalse(compiler.use_tunnel)
-        self.assertIsNone(compiler.ssh_host)
         self.assertEqual(compiler.api_base_url, "http://198.51.100.1:1234/v1")
         self.assertEqual(compiler.repo_id, "LM_STUDIO_REMOTE")
         self.assertIn("http://198.51.100.1:1234/v1", compiler.filename)
@@ -67,87 +33,29 @@ class TestLMStudioCompiler(unittest.TestCase):
         compiler = LMStudioCardCompiler(
             api_base_url="http://198.51.100.1:8080",
         )
-        self.assertFalse(compiler.use_tunnel)
         self.assertEqual(compiler.api_base_url, "http://198.51.100.1:8080/v1")
         compiler.close()
-
-    def test_ssh_with_password_using_sshpass(self):
-        with patch("compiler.lm_studio_compiler._find_sshpass", return_value="/usr/bin/sshpass"):
-            compiler = LMStudioCardCompiler(
-                ssh_host="gpu-node.internal",
-                ssh_user="remoteuser",
-                ssh_password="mypassword123",
-            )
-            self.assertEqual(compiler.ssh_password, "mypassword123")
-
-            cmd = compiler._build_ssh_base_command()
-            self.assertEqual(cmd[0], "/usr/bin/sshpass")
-            self.assertEqual(cmd[1], "-e")
-            self.assertEqual(cmd[2], "ssh")
-            self.assertIn("BatchMode=no", " ".join(cmd))
-            self.assertIn("PreferredAuthentications=password,keyboard-interactive,publickey", " ".join(cmd))
-            self.assertIn("PubkeyAuthentication=no", " ".join(cmd))
-
-            env = compiler._get_ssh_env()
-            self.assertEqual(env["SSHPASS"], "mypassword123")
-            compiler.close()
-
-    def test_ssh_with_password_fallback_askpass(self):
-        with patch("compiler.lm_studio_compiler._find_sshpass", return_value=None):
-            compiler = LMStudioCardCompiler(
-                ssh_host="gpu-node.internal",
-                ssh_user="remoteuser",
-                ssh_password="askpass_secret",
-            )
-            self.assertEqual(compiler.ssh_password, "askpass_secret")
-
-            cmd = compiler._build_ssh_base_command()
-            self.assertEqual(cmd[0], "ssh")
-            self.assertIn("BatchMode=no", " ".join(cmd))
-
-            env = compiler._get_ssh_env()
-            self.assertEqual(env["SSHPASS"], "askpass_secret")
-            self.assertEqual(env.get("SSH_ASKPASS_REQUIRE"), "force")
-            askpass_path = env.get("SSH_ASKPASS")
-            self.assertIsNotNone(askpass_path)
-            self.assertTrue(Path(askpass_path).exists())
-
-            # Le nettoyage à la fermeture doit supprimer le script temporaire
-            compiler.close()
-            self.assertFalse(Path(askpass_path).exists())
-
-    def test_create_compiler_engine_with_ssh_password(self):
-        engine = create_compiler_engine(
-            provider=LLMProvider.lm_studio,
-            ssh_password="cli_passed_password",
-        )
-        self.assertIsInstance(engine, LMStudioCardCompiler)
-        self.assertEqual(engine.ssh_password, "cli_passed_password")
-        engine.close()
 
     def test_remote_model_defaults_to_none_for_auto_detection(self):
         # Sans variable LM_STUDIO_MODEL, le compilateur démarre en auto-détection (model_name=None)
         with patch.dict("os.environ", {}, clear=True):
-            compiler = LMStudioCardCompiler(ssh_host="gpu-node.internal")
+            compiler = LMStudioCardCompiler(remote_host="gpu-node.internal")
             self.assertIsNone(compiler.model_name)
 
             # Si LM_STUDIO_MODEL est renseigné dans l'environnement
             with patch.dict("os.environ", {"LM_STUDIO_MODEL": "lmstudio-community/Qwen3.8-27B-GGUF"}):
-                compiler_env = LMStudioCardCompiler(ssh_host="gpu-node.internal")
+                compiler_env = LMStudioCardCompiler(remote_host="gpu-node.internal")
                 self.assertEqual(compiler_env.model_name, "lmstudio-community/Qwen3.8-27B-GGUF")
 
             # Override explicite par argument
-            compiler_custom = LMStudioCardCompiler(ssh_host="gpu-node.internal", model_name="custom-model-40b")
+            compiler_custom = LMStudioCardCompiler(remote_host="gpu-node.internal", model_name="custom-model-40b")
             self.assertEqual(compiler_custom.model_name, "custom-model-40b")
 
-    def test_init_local_lm_studio_without_ssh(self):
+    def test_init_local_lm_studio(self):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="local-qwen",
         )
-        self.assertIsNone(compiler.ssh_host)
-        self.assertEqual(compiler.ssh_target, "localhost")
         self.assertEqual(compiler.repo_id, "LM_STUDIO")
         self.assertEqual(compiler.api_base_url, "http://127.0.0.1:1234/v1")
 
@@ -160,7 +68,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertIsInstance(lms_eng, LMStudioCardCompiler)
 
     def test_basic_energy_short_circuit(self):
-        compiler = LMStudioCardCompiler(ssh_host="dummy-host")
+        compiler = LMStudioCardCompiler(remote_host="dummy-host")
         raw_energy = {
             "requestedId": "sve-002",
             "fr": {
@@ -188,7 +96,6 @@ class TestLMStudioCompiler(unittest.TestCase):
     @patch("httpx.Client")
     def test_mocked_chat_completion(self, mock_client_cls):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="qwen3-14b",
             auto_start=False,
@@ -331,10 +238,8 @@ class TestLMStudioCompiler(unittest.TestCase):
     @patch("httpx.Client")
     def test_compile_card_falls_back_when_json_schema_returns_empty_content(self, mock_client_cls):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_host="127.0.0.1",
             remote_port=1234,
-            use_tunnel=False,
             model_name="qwen3.8-27b",
         )
         compiler._ready = True
@@ -413,10 +318,8 @@ class TestLMStudioCompiler(unittest.TestCase):
     @patch("httpx.Client")
     def test_compile_card_computes_tokens_per_second_from_usage(self, mock_client_cls):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_host="127.0.0.1",
             remote_port=1234,
-            use_tunnel=False,
             model_name="qwen3.8-27b",
         )
         compiler._ready = True
@@ -479,10 +382,8 @@ class TestLMStudioCompiler(unittest.TestCase):
     @patch("httpx.Client")
     def test_compile_card_with_streaming_and_live_token_callback(self, mock_client_cls):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_host="127.0.0.1",
             remote_port=1234,
-            use_tunnel=False,
             model_name="qwen3.8-27b",
         )
         compiler._ready = True
@@ -603,10 +504,8 @@ class TestLMStudioCompiler(unittest.TestCase):
     @patch("httpx.Client")
     def test_compile_card_recovers_when_llm_outputs_isolated_action_effect(self, mock_client_cls):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_host="127.0.0.1",
             remote_port=1234,
-            use_tunnel=False,
             model_name="qwen3.8-27b",
         )
         compiler._ready = True
@@ -680,7 +579,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name=None,
             auto_start=False,
@@ -706,7 +604,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="Qwen3.8-27B",
             auto_start=False,
@@ -720,7 +617,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         # Simule le cas où json_schema retourne 400, json_object retourne 400,
         # puis le format brut sans response_format retourne 200 avec Markdown JSON.
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="test-model",
             auto_start=False,
@@ -809,7 +705,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         # Simule le cas où LM Studio renvoie 400 'model not loaded',
         # puis le compilateur ré-interroge /models, trouve le modèle actif et réussit l'appel
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="unloaded-model",
             auto_start=False,
@@ -899,7 +794,6 @@ class TestLMStudioCompiler(unittest.TestCase):
     def test_compile_card_400_error_detail_transparency(self, mock_client_cls):
         # Vérifie que l'exception RuntimeError finale contient bien le détail exact de l'erreur LM Studio
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="test-model",
             auto_start=False,
@@ -1023,7 +917,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name=None,
             auto_start=False,
@@ -1047,7 +940,6 @@ class TestLMStudioCompiler(unittest.TestCase):
         mock_client_cls.return_value = mock_client
 
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name="qwen3.8-27b",
             auto_start=False,
@@ -1061,7 +953,6 @@ class TestLMStudioCompiler(unittest.TestCase):
 
     def test_close_does_not_unload_server_model(self):
         compiler = LMStudioCardCompiler(
-            ssh_host=None,
             remote_port=1234,
             model_name=None,
             auto_start=False,
@@ -2277,7 +2168,7 @@ class TestLMStudioCompiler(unittest.TestCase):
             mock_engine.close.assert_called_once()
 
     def test_env_and_cli_model_and_thinking_compatibility(self):
-        """Vérifie la compatibilité des variables d'environnement et options CLI pour le modèle unifié, thinking et tunnel."""
+        """Vérifie la compatibilité des variables d'environnement et options CLI pour le modèle unifié et le mode thinking."""
         import tempfile
         from compiler.llm_engine import LocalLLMCardCompiler
 
