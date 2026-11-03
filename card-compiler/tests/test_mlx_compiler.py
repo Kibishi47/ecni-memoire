@@ -252,6 +252,15 @@ class TestMLXCompiler(unittest.TestCase):
         )
         self.assertIsInstance(engine_param_mlx, MLXCardCompiler)
 
+    @patch("mlx_lm.load", side_effect=IndexError("[moveaxis] Invalid axis 2 for array with 1 dimensions."))
+    def test_load_model_non_standard_packed_error(self, mock_load: MagicMock) -> None:
+        """Vérifie le message d'erreur explicite et pédagogique en cas de modèle non standard (ex: GSQ-RCO packed)."""
+        compiler = MLXCardCompiler(model="uqer1244/Qwen3.8-27B-GSQ-RCO-MLX")
+        with self.assertRaises(RuntimeError) as ctx:
+            compiler.load_model_in_memory()
+        self.assertIn("mlx-community/Qwen3.8-27B-4bit", str(ctx.exception))
+        self.assertIn("GSQ-RCO", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
