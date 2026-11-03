@@ -42,6 +42,7 @@ from compiler.schemas import (
     CompilationMetadata,
     EngineCardModel,
     LLMCompiledCardPart,
+    build_fallback_compiled_part,
 )
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
@@ -452,15 +453,15 @@ class MLXCardCompiler:
                 except Exception:
                     pass
 
-                err_str = str(val_err).lower()
-                if (
-                    "eof" in err_str
-                    or "expecting value" in err_str
-                    or finish_reason == "length"
-                ) and attempt < max_retries:
+                if attempt < max_retries:
                     continue
         else:
-            raise last_error or RuntimeError(f"Échec de validation de la carte {bundle.card_id} avec Apple MLX")
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Modélisation de secours déterministe appliquée pour {bundle.card_id} ({bundle.identity.nameFr}) "
+                f"suite à l'échec de validation LLM : {last_error}"
+            )
+            compiled_part = build_fallback_compiled_part(bundle, reasoning_text)
 
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 

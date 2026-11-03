@@ -38,6 +38,7 @@ from compiler.schemas import (
     CompilationMetadata,
     EngineCardModel,
     LLMCompiledCardPart,
+    build_fallback_compiled_part,
 )
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
@@ -700,16 +701,18 @@ def extract_json_payload(text: str) -> str:
         last_brace = cand.rfind("}")
         while last_brace > first_brace:
             sub = cand[first_brace : last_brace + 1].strip()
+            # Nettoyage des virgules pendantes invalides avant '}' ou ']'
+            sub_cleaned = re.sub(r",\s*([\}\]])", r"\1", sub)
             try:
-                val = json.loads(sub)
+                val = json.loads(sub_cleaned)
                 if isinstance(val, dict):
                     if any(k in val for k in ("playableActions", "strategicEvaluator", "reasoningAnalysis")):
                         if "primitive" not in val and "actionId" not in val:
-                            return sub
+                            return sub_cleaned
                         elif not card_candidate:
-                            card_candidate = sub
+                            card_candidate = sub_cleaned
                     elif not fallback_candidate:
-                        fallback_candidate = sub
+                        fallback_candidate = sub_cleaned
             except Exception:
                 pass
             last_brace = cand.rfind("}", first_brace, last_brace)
@@ -1468,15 +1471,15 @@ class LocalLLMCardCompiler:
                 except Exception:
                     pass
 
-                err_str = str(val_err).lower()
-                if (
-                    "eof" in err_str
-                    or "expecting value" in err_str
-                    or finish_reason == "length"
-                ) and attempt < max_retries:
+                if attempt < max_retries:
                     continue
         else:
-            raise last_error or RuntimeError(f"Échec de validation de la carte {bundle.card_id}")
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Modélisation de secours déterministe appliquée pour {bundle.card_id} ({bundle.identity.nameFr}) "
+                f"suite à l'échec de validation LLM : {last_error}"
+            )
+            compiled_part = build_fallback_compiled_part(bundle, reasoning_text)
 
         compiled_part = enforce_ptcg_invariants(compiled_part, bundle)
 
