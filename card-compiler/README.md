@@ -94,7 +94,7 @@ card-compiler/
 │   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx)
 │   └── cli.py               # Interface CLI Typer unifiée
 │
-└── tests/                   # Suite complète de 96 tests unitaires automatisés
+└── tests/                   # Suite complète de 91 tests unitaires automatisés
 ```
 
 ---
@@ -239,7 +239,7 @@ python -m compiler.cli stats
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **96 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **91 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
@@ -247,15 +247,63 @@ PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p 
 
 ---
 
-## 💡 Résumé des Commandes Utiles
+## 📋 Référence Complète des Commandes & Options CLI
 
-| Commande | Action |
-| :--- | :--- |
-| `python run_reasoning.py` | Exécute la Passe 1 (Raisonnement) et stocke dans `data/reasoning_texts/` |
-| `python run_coding.py` | Exécute la Passe 2 (Codage JSON) et met à jour `cards_database.json` |
-| `python -m compiler.cli reason` | Alias CLI pour la Passe 1 |
-| `python -m compiler.cli code` | Alias CLI pour la Passe 2 |
-| `python -m compiler.cli run` | Exécute le pipeline selon la configuration de votre `.env` |
-| `python -m compiler.cli remaining` | Affiche les cartes restant à compiler |
-| `python -m compiler.cli sync` | Synchronise `data/cards_database.json` |
-| `python -m compiler.cli inspect <ID>` | Affiche le JSON d'une carte avec coloration syntaxique |
+### 1. Vue d'Ensemble des Commandes
+
+| Commande | Alias | Rôle & Description |
+| :--- | :--- | :--- |
+| `run` | `compile` | **Commande principale** : exécute le pipeline complet (mode Single-Pass direct ou Two-Pass enchaîné). |
+| `reason` | — | **Passe 1** : Exécute l'IA de raisonnement et sauvegarde les fiches d'analyse textuelles dans `data/reasoning_texts/`. |
+| `code` | — | **Passe 2** : Exécute l'IA de coding pour transformer les analyses textuelles en modèles JSON dans `data/compiled_cards/`. |
+| `remaining` | `todo`, `left`, `pending`, `a-compiler` | Calcule et affiche le nombre de cartes restant à compiler (globalement ou par extension). |
+| `count` | — | Compte les cartes compilées sur le disque avec répartition par catégories et statut de synchronisation. |
+| `sync` | `sync-database`, `check-database`, `sync-db` | Vérifie et synchronise le fichier JSON consolidé global `data/cards_database.json`. |
+| `inspect` | — | Affiche le modèle JSON complet d'une carte avec coloration syntaxique et validation Pydantic. |
+| `stats` | `validate` | Valide l'intégrité Pydantic V2 de 100% des cartes compilées et génère un rapport statistique complet. |
+
+---
+
+### 2. Options des Commandes de Compilation (`run`, `reason`, `code`)
+
+Ce tableau détaille toutes les options configurables pour la commande principale `run` ainsi que pour les commandes dédiées `reason` et `code` (et les scripts autonomes équivalents `run_reasoning.py` et `run_coding.py`) :
+
+| Option CLI | Alias court | Description | Valeurs possibles | Valeur par défaut | Variable `.env` | Commandes compatibles |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `--mode` | `-m` | Mode de sélection des cartes cibles | `test`, `standard` | `test` | `RUN_MODE` | `run`, `reason`, `code` |
+| `--test` | — | Raccourci pour forcer le lot test (11 cartes stratégiques de référence) | Flag booléen | `False` | — | `run`, `reason`, `code` |
+| `--standard` | — | Raccourci pour forcer toutes les cartes légales au format Standard | Flag booléen | `False` | — | `run`, `reason`, `code` |
+| `--ids` | — | Liste d'identifiants précis séparés par des virgules (ex: `sv08.5-001,sv04-125`) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code` |
+| `--pipeline` | `-pl` | Architecture du pipeline de traitement | `single`, `two_pass` | `single` | `PIPELINE_MODE` | `run` |
+| `--intensity` | `-it` | Niveau de puissance et consommation mémoire de l'IA | `soft`, `intense` | `soft` | `INTENSITY_MODE` | `run`, `reason`, `code` |
+| `--phase` | — | Phase à exécuter lorsque `--pipeline two_pass` est sélectionné | `all`, `reason`, `code` | `all` | `PIPELINE_PHASE` | `run` |
+| `--local-backend` | `--local-opt` | Moteur d'optimisation Apple Silicon pour l'exécution locale | `mlx`, `llama_cpp` | `mlx` | `LOCAL_BACKEND` | `run`, `reason`, `code` |
+| `--llm-provider` | `-lp` | Fournisseur d'inférence LLM | `local`, `lm_studio` | `local` | `LLM_PROVIDER` | `run` |
+| `--model` | — | Override manuel du modèle LLM (nom LM Studio, chemin `.gguf` local ou repo HF) | Chaîne texte | *Auto-détecté* | `LLM_MODEL` / `REASONING_MODEL` / `CODING_MODEL` | `run`, `reason`, `code` |
+| `--force` | — | Force le recalcul même si la carte ou l'analyse existe déjà en cache | Flag booléen | `False` | — | `run`, `reason`, `code` |
+| `--limit` | — | Nombre maximum de cartes à traiter (en mode `standard`) | Entier (`int`) | `None` (illimité) | — | `run`, `reason`, `code` |
+| `--continue-on-error` | `-k`, `--ignore-errors`, `--skip-errors` | Poursuit le traitement du lot en cas d'erreur sur une carte sans interrompre le script | Flag booléen | `False` | `CONTINUE_ON_ERROR` | `run`, `reason`, `code` |
+| `--parallel` | `-j`, `--concurrency` | Nombre de cartes compilées simultanément (multi-slots LM Studio uniquement) | Entier (`int`) | `1` (séquentiel) | `LM_STUDIO_PARALLEL` | `run` |
+| `--no-think` | `--disable-thinking` | Désactive le mode réflexion des modèles raisonnants (DeepSeek / Qwen) | Flag booléen | `False` | `DISABLE_THINKING` | `run` |
+| `--thinking` | `-tk` | Niveau de réflexion des modèles raisonnants | `null`, `low`, `medium`, `high`, ou nb tokens | Niveau standard | `THINKING` | `run` |
+| `--provider` | `-p` | Fournisseur d'accès aux données sources TCGdex | `sdk`, `rest` | `sdk` | `TCGDEX_PROVIDER` | `run`, `reason`, `code` |
+| `--hf-token` | — | Jeton Hugging Face pour accélérer les téléchargements de modèles | Chaîne texte | `None` | `HF_TOKEN` | `run`, `reason`, `code` |
+
+---
+
+### 3. Options des Outils de Suivi & Maintenance
+
+| Commande | Option / Argument | Alias court | Description | Valeurs possibles | Valeur par défaut |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`remaining`** | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser | `standard`, `test`, `all` | `standard` |
+| | `--set` | `-s` | Filtre le décompte sur une extension spécifique (ex: `sv08.5`, `sv01`, `sve`) | Chaîne texte | `None` (toutes) |
+| | `--details` | `-d` | Affiche la liste complète des identifiants (IDs) des cartes restant à compiler | Flag booléen | `False` |
+| | `--quiet` | `-q` | Affiche uniquement le chiffre entier (idéal pour intégration dans des scripts bash) | Flag booléen | `False` |
+| **`count`** | `--details` | `-d` | Affiche le tableau détaillé de chaque carte compilée (nom, catégorie, modèle, débit t/s) | Flag booléen | `False` |
+| | `--quiet` | `-q` | Affiche uniquement le nombre total entier de cartes compilées sur le disque | Flag booléen | `False` |
+| **`sync`** | `--db-path` | `-p` | Chemin personnalisé vers le fichier JSON consolidé cible | Chemin fichier | `data/cards_database.json` |
+| | `--dry-run` | `-n` | Simule la synchronisation sans écrire ni modifier le fichier sur le disque | Flag booléen | `False` |
+| | `--details` | `-d` | Affiche le tableau détaillé des cartes manquantes insérées dans la base | Flag booléen | `False` |
+| | `--update` | `-u` | Met à jour les cartes déjà présentes dans la base avec leur version disque la plus récente | Flag booléen | `False` |
+| **`inspect`** | `<card_id>` *(argument)* | — | Identifiant TCGdex de la carte à inspecter (ex: `sv08.5-001`, `sv04-125`) | Chaîne texte | *Obligatoire* |
+| **`stats`** | *(aucun argument)* | — | Parcourt et valide la conformité Pydantic V2 de 100% des fichiers JSON de `compiled_cards/` | — | — |
