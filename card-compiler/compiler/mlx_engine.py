@@ -21,10 +21,21 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from compiler import load_env_file
 from compiler.llm_engine import (
+    CODING_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
+    build_coding_prompt,
     build_user_prompt,
     enforce_ptcg_invariants,
     extract_json_payload,
+)
+from compiler.models_config import (
+    IntensityMode,
+    PipelineMode,
+    PipelinePhase,
+    normalize_intensity_mode,
+    normalize_pipeline_mode,
+    normalize_pipeline_phase,
+    resolve_model_for_configuration,
 )
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import (
@@ -35,13 +46,24 @@ from compiler.schemas import (
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
-DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/Qwen3.8-27B-4bit"
+DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
+AFK_MLX_MODEL_REPO_ID = "mlx-community/Qwen3.8-27B-4bit"
 
 
-def normalize_mlx_model_id(model_id: Optional[str]) -> str:
-    """Normalise l'identifiant du modèle MLX et corrige les fautes de frappe courantes (ex: RC0 vs RCO)."""
+def normalize_mlx_model_id(
+    model_id: Optional[str],
+    pipeline_mode: Optional[Union[PipelineMode, str]] = None,
+    intensity: Optional[Union[IntensityMode, str]] = None,
+    phase: Optional[Union[PipelinePhase, str]] = None,
+) -> str:
+    """Normalise l'identifiant du modèle MLX ou le résout via la matrice de configuration."""
     if not model_id or not str(model_id).strip():
-        return DEFAULT_MLX_MODEL_REPO_ID
+        return resolve_model_for_configuration(
+            pipeline_mode=pipeline_mode,
+            intensity=intensity,
+            phase=phase,
+            backend="mlx",
+        )
     cleaned = str(model_id).strip()
     if "Qwen3.8-27B-GSQ-RC0-MLX" in cleaned:
         return cleaned.replace("Qwen3.8-27B-GSQ-RC0-MLX", "Qwen3.8-27B-GSQ-RCO-MLX")
@@ -55,12 +77,19 @@ class MLXCardCompiler:
         self,
         model: Optional[str] = None,
         model_name: Optional[str] = None,
+        intensity: Optional[Union[IntensityMode, str]] = None,
+        phase: Optional[Union[PipelinePhase, str]] = None,
+        pipeline_mode: Optional[Union[PipelineMode, str]] = None,
         hf_token: Optional[str] = None,
         verbose: bool = False,
         disable_thinking: Optional[bool] = None,
         thinking: Optional[str] = None,
     ) -> None:
         load_env_file()
+        self.intensity = normalize_intensity_mode(intensity or os.environ.get("INTENSITY_MODE"))
+        self.phase = normalize_pipeline_phase(phase or os.environ.get("PIPELINE_PHASE"))
+        self.pipeline_mode = normalize_pipeline_mode(pipeline_mode or os.environ.get("PIPELINE_MODE"))
+
         self.hf_token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         if self.hf_token:
             os.environ["HF_TOKEN"] = self.hf_token
@@ -74,7 +103,12 @@ class MLXCardCompiler:
             or os.environ.get("MLX_MODEL")
         )
         self.model_spec: Optional[str] = str(raw_model).strip() if raw_model and str(raw_model).strip() else None
-        self.repo_id: str = normalize_mlx_model_id(self.model_spec)
+        self.repo_id: str = normalize_mlx_model_id(
+            self.model_spec,
+            pipeline_mode=self.pipeline_mode,
+            intensity=self.intensity,
+            phase=self.phase,
+        )
         self.filename: str = "model.safetensors (MLX Native)"
         self.verbose: bool = verbose
 
@@ -160,6 +194,7 @@ class MLXCardCompiler:
     def compile_card(
         self,
         bundle: FetchedCardBundle,
+        reasoning_text: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
@@ -195,11 +230,16 @@ class MLXCardCompiler:
             is_thinking_disabled = self.disable_thinking
             thinking_level = "null" if is_thinking_disabled else None
 
-        user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
-        sys_prompt = SYSTEM_PROMPT
+        if reasoning_text is not None and str(reasoning_text).strip():
+            user_prompt = build_coding_prompt(bundle, reasoning_text, disable_thinking=is_thinking_disabled)
+            sys_prompt = CODING_SYSTEM_PROMPT
+        else:
+            user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
+            sys_prompt = SYSTEM_PROMPT
+
         if is_thinking_disabled:
             sys_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
+                f"{sys_prompt}\n\n"
                 "RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
                 "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
                 "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."
@@ -448,8 +488,21 @@ class MLXCardCompiler:
 
         return sanitize_and_enrich_card(bundle, engine_card)
 
+    def compile_card_with_reasoning(
+        self,
+        bundle: FetchedCardBundle,
+        reasoning_text: str,
+        **kwargs: Any,
+    ) -> EngineCardModel:
+        """Compile une carte en s'appuyant sur l'analyse de raisonnement préalable (Passe 2)."""
+        return self.compile_card(bundle, reasoning_text=reasoning_text, **kwargs)
+
     def close(self) -> None:
-        """Libère le cache mémoire Metal MLX."""
+        """Libère le cache mémoire Metal MLX et décharge le modèle."""
+        self._model = None
+        self._tokenizer = None
+        import gc
+        gc.collect()
         try:
             import mlx.core as mx
             if hasattr(mx, "clear_cache"):

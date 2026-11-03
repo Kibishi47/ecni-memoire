@@ -52,7 +52,21 @@ from compiler.llm_engine import (
 )
 from compiler.lm_studio_compiler import LMStudioCardCompiler
 from compiler.mlx_engine import MLXCardCompiler
+from compiler.models_config import (
+    IntensityMode,
+    PipelineMode,
+    PipelinePhase,
+    normalize_intensity_mode,
+    normalize_pipeline_mode,
+    normalize_pipeline_phase,
+    resolve_model_for_configuration,
+)
 from compiler.post_processor import sanitize_and_enrich_card
+from compiler.reasoning_engine import (
+    ReasoningRecord,
+    get_reasoning_texts_dir,
+    load_reasoning_record,
+)
 from compiler.schemas import CardSubCategory, EngineCardModel
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import (
@@ -61,6 +75,7 @@ from compiler.tcgdex_fetcher import (
     FetcherProvider,
     TCGdexFetcher,
 )
+from compiler.two_pass_pipeline import run_two_pass_pipeline
 
 
 class ConditionalBarColumn(BarColumn):
@@ -433,6 +448,9 @@ def create_compiler_engine(
     thinking: Optional[str] = None,
     model: Optional[str] = None,
     local_backend: Optional[str] = None,
+    pipeline_mode: Optional[Union[PipelineMode, str]] = None,
+    intensity: Optional[Union[IntensityMode, str]] = None,
+    phase: Optional[Union[PipelinePhase, str]] = None,
 ) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler, MLXCardCompiler]:
     """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal GGUF, local MLX ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
@@ -450,7 +468,7 @@ def create_compiler_engine(
         local_backend
         or os.environ.get("LOCAL_BACKEND")
         or os.environ.get("LOCAL_OPTIMIZATION")
-        or "llama_cpp"
+        or "mlx"
     ).strip().lower()
 
     if model and (".gguf" in str(model).lower() or ":" in str(model)):
@@ -460,6 +478,9 @@ def create_compiler_engine(
     if resolved_backend == "mlx":
         return MLXCardCompiler(
             model=model,
+            intensity=intensity,
+            phase=phase,
+            pipeline_mode=pipeline_mode,
             hf_token=hf_token,
             disable_thinking=disable_thinking,
             thinking=thinking,
@@ -494,6 +515,9 @@ def _execute_run_pipeline(
     continue_on_error: bool = False,
     model: Optional[str] = None,
     local_backend: Optional[str] = None,
+    pipeline: Optional[str] = None,
+    intensity: Optional[str] = None,
+    phase: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -509,8 +533,12 @@ def _execute_run_pipeline(
         local_backend
         or os.environ.get("LOCAL_BACKEND")
         or os.environ.get("LOCAL_OPTIMIZATION")
-        or "llama_cpp"
+        or "mlx"
     ).strip().lower()
+
+    eff_pipeline = normalize_pipeline_mode(pipeline or os.environ.get("PIPELINE_MODE"))
+    eff_intensity = normalize_intensity_mode(intensity or os.environ.get("INTENSITY_MODE"))
+    eff_phase = normalize_pipeline_phase(phase or os.environ.get("PIPELINE_PHASE"))
 
     # Validation et préparation du parallélisme
     requested_parallel = max(1, parallel)
@@ -647,11 +675,24 @@ def _execute_run_pipeline(
             f"• [bold]Mode Thinking[/bold] : {thinking_display}"
         )
 
+    if eff_pipeline == PipelineMode.two_pass:
+        pipeline_info = (
+            f"• [bold]Pipeline[/bold] : [bold magenta]Two-Pass (1. Raisonnement approfondi -> 2. Codage JSON formel)[/bold magenta]\n"
+            f"• [bold]Phase Two-Pass[/bold] : [bold cyan]{eff_phase.value.upper()}[/bold cyan]\n"
+            f"• [bold]Intensité[/bold] : [bold green]{eff_intensity.value.upper()}[/bold green]"
+        )
+    else:
+        pipeline_info = (
+            f"• [bold]Pipeline[/bold] : [cyan]Single-Pass (IA générale directe -> JSON)[/cyan]\n"
+            f"• [bold]Intensité[/bold] : [bold green]{eff_intensity.value.upper()}[/bold green]"
+        )
+
     console.print(
         Panel.fit(
             f"{title_text}\n"
             f"• [bold]Mode[/bold] : {mode_label}\n"
             f"• [bold]Fournisseur TCGdex[/bold] : [bold green]{provider.value.upper()}[/bold green] (SDK Python par défaut)\n"
+            f"{pipeline_info}\n"
             f"{llm_lines}\n"
             f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non (reprise sur cache activée)'}\n"
             f"• [bold]Gestion des erreurs[/bold] : {'Ignorer et passer à la suivante (--continue-on-error)' if continue_on_error else 'Arrêt immédiat (défaut)'}",
@@ -677,6 +718,27 @@ def _execute_run_pipeline(
 
     if not bundles:
         console.print("[yellow]Aucune carte à compiler.[/yellow]")
+        return
+
+    # Routage vers le Two-Pass Pipeline si configuré
+    if eff_pipeline == PipelineMode.two_pass and llm_provider == LLMProvider.local:
+        run_two_pass_pipeline(
+            bundles=bundles,
+            data_dir=data_dir,
+            phase=eff_phase,
+            model=model,
+            intensity=eff_intensity,
+            backend=effective_backend,
+            hf_token=hf_token,
+            force=force,
+            continue_on_error=continue_on_error,
+            console=console,
+        )
+        if eff_phase in {PipelinePhase.all, PipelinePhase.code}:
+            db_path = rebuild_consolidated_database(data_dir, active_ids=None)
+            console.print(
+                f"[green]✓[/green] Base consolidée mise à jour : [bold]{db_path}[/bold]."
+            )
         return
 
     bundles_to_compile = []
@@ -1186,6 +1248,26 @@ def run_command(
         envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
         help="Backend d'optimisation locale ('mlx' ou 'llama_cpp'). Ignoré si LLM_PROVIDER=lm_studio.",
     ),
+    pipeline: Optional[str] = typer.Option(
+        None,
+        "--pipeline",
+        "-pl",
+        envvar=["PIPELINE_MODE"],
+        help="Mode de pipeline : 'single' (défaut, IA générale direct -> JSON) ou 'two_pass' (double passe : 1. raisonnement -> 2. codage JSON).",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité du modèle : 'soft' (défaut, ~7-8 Go RAM unifiée) ou 'intense' (~14-18 Go RAM unifiée, mode nuit/AFK).",
+    ),
+    phase: Optional[str] = typer.Option(
+        None,
+        "--phase",
+        envvar=["PIPELINE_PHASE"],
+        help="Phase en mode two_pass : 'all' (défaut, raisonnement puis coding), 'reason' (passe 1), 'code' (passe 2).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
@@ -1214,6 +1296,9 @@ def run_command(
         continue_on_error=continue_on_error,
         model=model,
         local_backend=local_backend,
+        pipeline=pipeline,
+        intensity=intensity,
+        phase=phase,
     )
 
 
@@ -1307,6 +1392,26 @@ def compile_alias(
         envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
         help="Backend d'optimisation locale ('mlx' ou 'llama_cpp'). Ignoré si LLM_PROVIDER=lm_studio.",
     ),
+    pipeline: Optional[str] = typer.Option(
+        None,
+        "--pipeline",
+        "-pl",
+        envvar=["PIPELINE_MODE"],
+        help="Mode de pipeline : 'single' (défaut) ou 'two_pass'.",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité : 'soft' (défaut) ou 'intense'.",
+    ),
+    phase: Optional[str] = typer.Option(
+        None,
+        "--phase",
+        envvar=["PIPELINE_PHASE"],
+        help="Phase en mode two_pass : 'all', 'reason', 'code'.",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
@@ -1335,6 +1440,129 @@ def compile_alias(
         continue_on_error=continue_on_error,
         model=model,
         local_backend=local_backend,
+        pipeline=pipeline,
+        intensity=intensity,
+        phase=phase,
+    )
+
+
+@app.command("reason")
+def reason_command(
+    mode: RunMode = typer.Option(RunMode.test, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès TCGdex.",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité du modèle de raisonnement : 'soft' (défaut, 14B 4-bit) ou 'intense' (14B 8-bit).",
+    ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp').",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["REASONING_MODEL", "LLM_MODEL"],
+        help="Modèle spécifique pour la Passe 1 de raisonnement.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Force la regénération des analyses même si déjà en cache."),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
+) -> None:
+    """Exécute la Passe 1 du pipeline Two-Pass : Génère tous les textes d'analyse de règles dans data/reasoning_texts/."""
+    _execute_run_pipeline(
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        provider=provider,
+        llm_provider=LLMProvider.local,
+        tier=ModelTier.qwen3,
+        fast=False,
+        force=force,
+        limit=limit,
+        hf_token=hf_token,
+        continue_on_error=continue_on_error,
+        model=model,
+        local_backend=local_backend,
+        pipeline="two_pass",
+        intensity=intensity,
+        phase="reason",
+    )
+
+
+@app.command("code")
+def code_command(
+    mode: RunMode = typer.Option(RunMode.test, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès TCGdex.",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité du modèle de coding : 'soft' (défaut, 7B 8-bit) ou 'intense' (14B 8-bit).",
+    ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp').",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["CODING_MODEL", "LLM_MODEL"],
+        help="Modèle spécifique pour la Passe 2 de codage JSON.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Force la recompilation JSON même si la carte existe déjà."),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
+) -> None:
+    """Exécute la Passe 2 du pipeline Two-Pass : Transforme les textes d'analyse en code JSON formel validé."""
+    _execute_run_pipeline(
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        provider=provider,
+        llm_provider=LLMProvider.local,
+        tier=ModelTier.qwen3,
+        fast=False,
+        force=force,
+        limit=limit,
+        hf_token=hf_token,
+        continue_on_error=continue_on_error,
+        model=model,
+        local_backend=local_backend,
+        pipeline="two_pass",
+        intensity=intensity,
+        phase="code",
     )
 
 

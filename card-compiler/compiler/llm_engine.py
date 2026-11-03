@@ -527,6 +527,24 @@ Réponds UNIQUEMENT avec l'objet JSON valide respectant strictement le schéma `
 """
 
 
+CODING_SYSTEM_PROMPT = """Tu es un compilateur de code et ingénieur logiciel expert en modélisation formelle pour le Jeu de Cartes à Collectionner Pokémon (Pokémon TCG - Format Standard).
+Ta mission est de transcrire l'analyse préalable des règles et les données TCGdex d'une carte Pokémon en un objet JSON rigoureusement conforme au schéma `LLMCompiledCardPart`.
+
+Tu recevras :
+1. Une analyse technique préalable des règles du jeu détaillée par un maître des règles.
+2. Les données officielles TCGdex de la carte (catégorie, types, PV, talents, attaques, effets).
+
+Consignes impératives :
+- Génère obligatoirement l'objet JSON racine conforme au schéma `LLMCompiledCardPart`.
+- Utilise les informations de l'analyse préalable pour renseigner :
+  * `reasoningAnalysis` : une synthèse fidèle et concise (100 à 250 mots).
+  * `category` et `subCategory` exactes.
+  * `playableActions` : toutes les actions jouables (Talents `ABILITY_*` et Attaques `ATTACK`, ou Dresseurs `TRAINER_PLAY`) avec leurs `actionId`, `timing`, préconditions, coûts et primitives d'effet.
+  * `strategicEvaluator` : `primaryRole`, `intrinsicBaseScore`, `discardPriorityWhenDead`, `holdForNextTurnBonus`, `decklistSynergyRequirements`, `inGameDeadCardConditions`, `turnPhaseWeights`.
+- Interdiction formelle d'inventer des talents si la carte n'en possède pas dans ses données brutes.
+- Produis UNIQUEMENT le bloc JSON commençant par '{' et se terminant par '}'."""
+
+
 def extract_json_payload(text: str) -> str:
     """Extrait et nettoie le JSON généré par le LLM en isolant l'objet `LLMCompiledCardPart` racine."""
     if not text:
@@ -650,6 +668,80 @@ def build_user_prompt(bundle: FetchedCardBundle, disable_thinking: bool = False)
         "DONNÉES TCGDEX DE LA CARTE :\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         f"Produis uniquement l'objet JSON racine `LLMCompiledCardPart`.{no_think_directive}"
+    )
+
+
+def build_coding_prompt(
+    bundle: FetchedCardBundle,
+    reasoning_text: str,
+    disable_thinking: bool = False,
+) -> str:
+    """Construit le prompt utilisateur pour l'étape de codage JSON (Passe 2)."""
+    identity = bundle.identity
+    pstats = bundle.pokemon_stats
+
+    payload: Dict[str, Any] = {
+        "cardId": identity.cardId,
+        "nameFr": identity.nameFr,
+        "nameEn": identity.nameEn,
+        "category": identity.category.value,
+        "subCategory": identity.subCategory.value,
+        "setId": identity.setId,
+        "localId": identity.localId,
+    }
+
+    if pstats:
+        payload["pokemonStats"] = {
+            "hp": pstats.hp,
+            "types": pstats.types,
+            "dexId": pstats.dexId,
+            "stage": pstats.stage,
+            "evolvesFrom": pstats.evolvesFrom,
+            "rootBasicName": pstats.rootBasicName,
+            "evolutionChain": pstats.evolutionChain,
+            "retreatCost": pstats.retreatCost,
+            "weaknesses": pstats.weaknesses,
+            "weaknessMultiplier": pstats.weaknessMultiplier,
+            "resistances": pstats.resistances,
+            "resistanceModifier": pstats.resistanceModifier,
+            "prizeCardsGiven": pstats.prizeCardsGiven,
+            "isRuleBox": pstats.isRuleBox,
+            "isTera": pstats.isTera,
+            "isAncient": pstats.isAncient,
+            "isFuture": pstats.isFuture,
+            "hasAbility": pstats.hasAbility,
+        }
+
+    if bundle.raw_fr.get("abilities"):
+        payload["abilitiesFr"] = bundle.raw_fr.get("abilities")
+    if bundle.raw_en and bundle.raw_en.get("abilities"):
+        payload["abilitiesEn"] = bundle.raw_en.get("abilities")
+    if bundle.raw_fr.get("attacks"):
+        payload["attacksFr"] = bundle.raw_fr.get("attacks")
+    if bundle.raw_en and bundle.raw_en.get("attacks"):
+        payload["attacksEn"] = bundle.raw_en.get("attacks")
+    if bundle.raw_fr.get("effect"):
+        payload["effectFr"] = bundle.raw_fr.get("effect")
+    if bundle.raw_en and bundle.raw_en.get("effect"):
+        payload["effectEn"] = bundle.raw_en.get("effect")
+
+    no_think_directive = ""
+    if disable_thinking:
+        no_think_directive = (
+            "\n\nRÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
+            "Ne génère AUCUNE balise <think> ni raisonnement textuel libre avant le JSON. "
+            "Commence immédiatement ta réponse par le caractère '{' du JSON racine `LLMCompiledCardPart`.\n"
+            "<|think_off|>\n/no_think"
+        )
+
+    return (
+        f"À partir de l'analyse préalable des règles ci-dessous et des données officielles TCGdex, "
+        f"compile la carte Pokémon '{identity.nameFr}' ({identity.cardId}) en code JSON conforme au schéma `LLMCompiledCardPart`.\n\n"
+        "### 1. ANALYSE PRÉALABLE DES RÈGLES (PASSE 1 - RAISONNEMENT) :\n"
+        f"```text\n{reasoning_text.strip()}\n```\n\n"
+        "### 2. DONNÉES TCGDEX DE LA CARTE :\n"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Génère uniquement l'objet JSON racine `LLMCompiledCardPart`.{no_think_directive}"
     )
 
 
@@ -939,6 +1031,7 @@ class LocalLLMCardCompiler:
     def compile_card(
         self,
         bundle: FetchedCardBundle,
+        reasoning_text: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
@@ -978,11 +1071,16 @@ class LocalLLMCardCompiler:
             is_thinking_disabled = self.disable_thinking
             thinking_level = "null" if is_thinking_disabled else None
 
-        user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
-        sys_prompt = SYSTEM_PROMPT
+        if reasoning_text is not None and str(reasoning_text).strip():
+            user_prompt = build_coding_prompt(bundle, reasoning_text, disable_thinking=is_thinking_disabled)
+            sys_prompt = CODING_SYSTEM_PROMPT
+        else:
+            user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
+            sys_prompt = SYSTEM_PROMPT
+
         if is_thinking_disabled:
             sys_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
+                f"{sys_prompt}\n\n"
                 "RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
                 "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
                 "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."
@@ -1288,5 +1386,7 @@ class LocalLLMCardCompiler:
         return engine_card
 
     def close(self) -> None:
-        """Libère les ressources locales si nécessaire."""
-        pass
+        """Libère les ressources locales et vide la mémoire Metal."""
+        self._llm = None
+        import gc
+        gc.collect()
