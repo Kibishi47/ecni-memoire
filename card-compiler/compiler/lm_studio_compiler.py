@@ -796,6 +796,7 @@ class LMStudioCardCompiler:
     def compile_card(
         self,
         bundle: FetchedCardBundle,
+        reasoning_text: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
@@ -805,7 +806,13 @@ class LMStudioCardCompiler:
         thinking: Optional[str] = None,
     ) -> EngineCardModel:
         """Compile une carte Pokémon TCG via LM Studio (remote SSH / local REST) avec format contraint."""
-        from compiler.llm_engine import SYSTEM_PROMPT, build_user_prompt, enforce_ptcg_invariants
+        from compiler.llm_engine import (
+            CODING_SYSTEM_PROMPT,
+            SYSTEM_PROMPT,
+            build_coding_prompt,
+            build_user_prompt,
+            enforce_ptcg_invariants,
+        )
 
         # Court-circuit déterministe pour les Énergies de Base (0 token, 0s)
         if is_basic_energy(bundle):
@@ -835,11 +842,16 @@ class LMStudioCardCompiler:
             is_thinking_disabled = self.disable_thinking
             thinking_level = "null" if is_thinking_disabled else None
 
-        user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
-        sys_prompt = SYSTEM_PROMPT
+        if reasoning_text is not None and str(reasoning_text).strip():
+            user_prompt = build_coding_prompt(bundle, reasoning_text, disable_thinking=is_thinking_disabled)
+            sys_prompt = CODING_SYSTEM_PROMPT
+        else:
+            user_prompt = build_user_prompt(bundle, disable_thinking=is_thinking_disabled)
+            sys_prompt = SYSTEM_PROMPT
+
         if is_thinking_disabled:
             sys_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
+                f"{sys_prompt}\n\n"
                 "RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ. "
                 "Tu ne dois générer AUCUNE balise <think>...</think> ni raisonnement textuel libre avant le JSON. "
                 "Génère directement et uniquement le JSON conforme au schéma `LLMCompiledCardPart`."

@@ -1,242 +1,261 @@
 # Pokémon TCG Card Compiler (`card-compiler`)
 
-Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il interroge l'API **TCGdex**, charge un LLM local en mémoire via `llama-cpp-python` (accélération GPU Apple Metal M4 + **Constrained Decoding GBNF** natif via Pydantic V2) ou se connecte à un serveur **LM Studio** distant / local via son API REST OpenAI-compatible (directe par IP ou via tunnel SSH sécurisé). Il génère des modèles JSON déterministes et validés (`EngineCardModel`) conservés 100 % localement.
+Compilateur et extracteur IA haute performance pour le Jeu de Cartes à Collectionner Pokémon (**Pokémon TCG - Format Standard**).
 
-## Architecture & Caractéristiques
+Il interroge l'API officielle **TCGdex**, charge des modèles d'IA locaux sur **Apple Silicon** (via **Apple MLX** natif ou **Metal llama.cpp** GBNF) ou se connecte à un serveur **LM Studio** distant. Il traduit chaque carte en un modèle formel déterministe, typé et validé par Pydantic V2 (`EngineCardModel`), prêt pour un moteur de simulation numérique.
 
-- **Deux Moteurs d'Inférence LLM au Choix** :
-  - **Local Apple Silicon (`local`)** :
-    - **MLX (`LOCAL_BACKEND=mlx`)** : Chargement direct ultra-rapide des modèles safetensors dans la mémoire unifiée Apple Silicon via `mlx-lm` (ex: `uqer1244/Qwen3.8-27B-GSQ-RCO-MLX`). Zéro surcoût d'émulation, streaming natif Metal.
-    - **llama.cpp (`LOCAL_BACKEND=llama_cpp`)** : Chargement direct du modèle GGUF en RAM/VRAM unifiée via `llama-cpp-python` (`n_gpu_layers=-1`, Metal M4 natif, 0 démon externe).
-  - **LM Studio (`lm_studio`)** : Connexion à un serveur LM Studio distant ou local via son API REST standard (`/v1/chat/completions`), soit en accès direct par IP/Port, soit au travers d'un tunnel SSH automatisé. Les modèles déjà chargés dans LM Studio sont auto-détectés.
-- **Débit Réel (Streaming SSE & Tokens/sec effectifs)** : Affichage dynamique du débit d'inférence en direct dans la barre de progression Rich (`t/s` et tokens générés) et récapitulatif dans le tableau final. Le débit en tokens/sec est mesuré rigoureusement à partir de l'émission du premier token (hors délai TTFT / évaluation du prompt) pour refléter la véritable vitesse de décodage du modèle.
-- **Contrôle Fin du Thinking & Raisonnement (`--thinking`, `--no-think`)** : Prise en charge universelle des modèles raisonnants (DeepSeek-R1, Qwen 2.5 / 3.8, QwQ). Permet de spécifier un niveau de réflexion (`--thinking low|medium|high|<tokens>`) ou `null` pour le désactiver. Si le modèle ne gère que les booléens (`enable_thinking`), `null` vaut `false` et tout autre niveau vaut `true`. Pour les modèles supportant `reasoning_effort`, le niveau est directement injecté avec les balises d'inhibition adaptées.
-- **Normalisation Robuste des Enums & Auto-Guérison** : Validateurs Pydantic V2 pré-évaluation (`mode="before"`) avec dictionnaire de synonymes et correspondance floue (`difflib`) pour normaliser automatiquement les primitives (`EffectPrimitive`), motifs de carte morte (`DeadCardReason`), rôles stratégiques et timings sans plantage.
-- **Court-circuit Déterministe des Énergies de Base** : Compilation instantanée (0 token, 0.00s) pour les Énergies de base.
-- **Résolution de lignée d'évolution** : Calcul automatique du Pokémon de base racine (`rootBasicName`, `evolvesFrom`, `evolutionChain`) via l'index TCGdex pour alimenter les synergies et conditions de cartes mortes (ex. *Super Bonbon*).
-- **Cache disque & Reprise sur lot** : Les réponses brutes TCGdex (`FR` + secours `EN`) sont mises en cache dans `data/raw_tcgdex/`, et les cartes compilées sont sauvegardées individuellement dans `data/compiled_cards/{id}.json` et consolidées dans `data/cards_database.json`.
+---
 
-## Structure du Projet
+## 🌟 Points Forts & Architecture
+
+- **2 Modes de Travail au Choix** :
+  - **Mode 1 (Single-Pass / Direct)** : L'IA produit directement le JSON formel à partir des données de la carte.
+  - **Mode 2 (Two-Pass Découplé)** : Une IA de raisonnement approfondi (DeepSeek-R1) analyse d'abord les règles et génère un rapport textuel complet. Puis, l'IA 1 est **déchargée à 100 % de la mémoire**, et une IA de programmation (Qwen Coder) transforme ces analyses en JSON formel sans jamais saturer la RAM.
+- **2 Paliers d'Intensité (`soft` et `intense`)** :
+  - **`soft` (Par défaut, ~7-8 Go RAM)** : Conçu pour tourner confortablement en journée pendant que votre navigateur, IDE et autres applications sont ouverts.
+  - **`intense` (~14-18 Go RAM)** : Conçu pour les sessions dédiées ou le mode nuit (AFK) avec les applications fermées.
+- **Inférence Locale Apple Silicon Ultra-Rapide** :
+  - **Apple MLX (`LOCAL_BACKEND=mlx`)** : Chargement direct en mémoire unifiée via `mlx-lm` avec streaming en temps réel (tokens/sec effectifs).
+  - **Apple Metal GGUF (`LOCAL_BACKEND=llama_cpp`)** : Exécution locale Metal avec décodage contraint GBNF.
+- **Support LM Studio Distant** : Connexion REST directe ou via tunnel SSH sécurisé avec parallélisation multi-slots.
+- **Court-circuit Déterministe des Énergies de Base** : Compilation instantanée (0 token, 0.00s).
+- **Reprise sur Cache Intelligente** : Les cartes et analyses déjà calculées ne sont jamais recalculées inutilement.
+
+---
+
+## 🔄 Comparatif des Modes de Travail
+
+```mermaid
+flowchart TD
+    subgraph Mode1["Mode 1 : Inférence Directe (Single-Pass)"]
+        A1["Données TCGdex"] --> B1["IA Générale (Qwen 2.5 Coder 14B/32B)"]
+        B1 --> C1["Validation Pydantic V2"]
+        C1 --> D1["JSON Formel (data/compiled_cards/)"]
+    end
+
+    subgraph Mode2["Mode 2 : Pipeline en 2 Étapes Découplées (Two-Pass)"]
+        A2["Données TCGdex"] --> B2["Passe 1 : IA Raisonnement (DeepSeek-R1 Distill 14B)"]
+        B2 --> C2["Analyses de Règles (data/reasoning_texts/)"]
+        C2 --> D2["⚡ Déchargement strict de l'IA 1 (Libération RAM)"]
+        D2 --> E2["Passe 2 : IA Coding (Qwen 2.5 Coder 7B/14B)"]
+        E2 --> F2["Validation Pydantic V2"]
+        F2 --> G2["JSON Formel (data/compiled_cards/)"]
+    end
+```
+
+---
+
+## 🎯 Matrice Officielle des Modèles
+
+Le compilateur résout automatiquement le bon modèle selon vos choix de **Mode**, d'**Intensité** et de **Backend** :
+
+| Mode | Étape / Phase | Intensité `soft` (Défaut - ~7-8 Go RAM) | Intensité `intense` (Mode AFK/Nuit - ~14-18 Go RAM) | Backend |
+| :--- | :--- | :--- | :--- | :--- |
+| **Mode 1** *(Direct)* | Passe Unique | `mlx-community/Qwen2.5-Coder-14B-Instruct-4bit` | `mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` | **MLX** |
+| **Mode 1** *(Direct)* | Passe Unique | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-32B-Instruct-GGUF` | **GGUF** |
+| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** | `mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit` | `mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q4_K_M)* | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q8_0)* | **GGUF** |
+| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** | `mlx-community/Qwen2.5-Coder-7B-Instruct-8bit` | `mlx-community/Qwen2.5-Coder-14B-Instruct-8bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** | `bartowski/Qwen2.5-Coder-7B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | **GGUF** |
+
+> [!TIP]
+> Tous les modèles en intensité **`soft`** consomment moins de **8 Go de mémoire unifiée**, garantissant une fluidité totale même sur un Mac avec 24 Go de RAM ayant déjà 16-17 Go utilisés par vos logiciels de travail.
+
+---
+
+## 📂 Structure du Répertoire
 
 ```text
 card-compiler/
-├── requirements.txt         # llama-cpp-python, huggingface-hub, httpx, pydantic>=2.9, typer, rich
-├── setup_mac_metal.sh       # Installation et compilation Metal (CMAKE_ARGS="-DGGML_METAL=on")
-├── .env.example             # Modèle de configuration d'environnement (LLM, hôte, SSH, provider)
-├── README.md
+├── run_reasoning.py         # Script direct : Lance la Passe 1 (Raisonnement)
+├── run_coding.py            # Script direct : Lance la Passe 2 (Codage JSON)
+├── setup_mac_metal.sh       # Script d'installation automatique Metal & dépendances
+├── requirements.txt         # Dépendances Python (mlx, llama-cpp-python, pydantic, typer, rich)
+├── .env                     # Configuration active (modèle, mode, backend, intensité)
+├── .env.example             # Modèle de configuration commenté
+├── README.md                # Documentation complète
+│
 ├── data/
-│   ├── raw_tcgdex/          # Cache JSON brut de TCGdex (.json) + _cards_index.json
-│   ├── compiled_cards/      # 1 fichier JSON compilé par carte (.json)
-│   └── cards_database.json  # Fichier consolidé regroupant toutes les cartes compilées
+│   ├── raw_tcgdex/          # Cache JSON brut des cartes téléchargées depuis TCGdex
+│   ├── reasoning_texts/     # Analyses de règles générées en Passe 1 ({card_id}.json)
+│   ├── compiled_cards/      # Modèles formels finaux compilés ({card_id}.json)
+│   └── cards_database.json  # Base de données consolidée de toutes les cartes du jeu
+│
 ├── compiler/
-│   ├── __init__.py
-│   ├── schemas.py           # Tous les Enums stricts et modèles Pydantic V2 avec normaliseurs
-│   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx) + cache disque + lignées
-│   ├── llm_engine.py        # Moteur local Metal llama.cpp + Prompt Système PTCG + CoT GBNF
-│   ├── mlx_engine.py        # Moteur local Apple Silicon MLX (mlx-lm + mémoire unifiée natif)
-│   ├── lm_studio_compiler.py# Provider LM Studio (REST direct ou tunnel SSH, streaming t/s)
-│   ├── post_processor.py    # Enrichissement déterministe et règles d'invariants PTCG
+│   ├── models_config.py     # Matrice des modèles (soft/intense, single/two-pass, mlx/gguf)
+│   ├── reasoning_engine.py  # Moteur de raisonnement expert PTCG (Passe 1)
+│   ├── two_pass_pipeline.py # Orchestrateur Two-Pass avec libération stricte de mémoire
+│   ├── mlx_engine.py        # Moteur Apple MLX natif safetensors
+│   ├── llm_engine.py        # Moteur Apple Metal llama.cpp GGUF & prompts PTCG
+│   ├── lm_studio_compiler.py# Moteur client LM Studio (REST direct ou tunnel SSH)
+│   ├── schemas.py           # Schémas stricts Pydantic V2 & normalisation d'enums
+│   ├── post_processor.py    # Enrichissement et règles d'invariants Pokémon TCG
 │   ├── static_cards.py      # Court-circuit déterministe pour Énergies de Base
-│   └── cli.py               # Interface CLI Typer (run/compile, count, remaining, sync, inspect, stats)
-└── tests/                   # Suite de tests unitaires (60 tests automatisés)
+│   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx)
+│   └── cli.py               # Interface CLI Typer unifiée
+│
+└── tests/                   # Suite complète de 96 tests unitaires automatisés
 ```
 
-## Installation (Apple Silicon M4 / Metal)
+---
+
+## 🚀 Installation Rapide (macOS Apple Silicon)
 
 ```bash
+cd card-compiler
+
+# 1. Rendre le script d'installation exécutable et le lancer
 chmod +x setup_mac_metal.sh
 ./setup_mac_metal.sh
+
+# 2. Activer l'environnement virtuel
 source .venv/bin/activate
-# Créer le fichier .env à partir de l'exemple
+
+# 3. Créer votre fichier de configuration .env
 cp .env.example .env
 ```
 
 ---
 
-## Configuration de LM Studio (`.env`)
+## ⚙️ Configuration (`.env`)
 
-Pour utiliser LM Studio sur une machine distante (ou locale) :
+Éditez le fichier `.env` selon votre façon de travailler :
 
 ```dotenv
-# 1. Fournisseur LLM
-LLM_PROVIDER=lm_studio
+# Fournisseur LLM : 'local' (recommandé) ou 'lm_studio'
+LLM_PROVIDER=local
 
-# 2. Connexion Directe par IP Publique et Port (Recommandé)
-LM_STUDIO_HOST=192.168.1.50      # Laissez vide pour localhost (127.0.0.1)
-LM_STUDIO_PORT=1234
-# Laissez VIDE pour utiliser automatiquement le modèle actuellement chargé dans LM Studio
-LM_STUDIO_MODEL=
+# Mode de pipeline :
+# - 'two_pass' : Double passe (1. Raisonnement approfondi -> 2. Codage JSON)
+# - 'single'   : Passe directe (IA générale -> JSON immédiat)
+PIPELINE_MODE=single
 
-# Niveau de thinking pour les modèles raisonnants (DeepSeek, Qwen, QwQ) :
-# 'null' (ou LM_STUDIO_DISABLE_THINKING=true) : Désactive le thinking (booléen -> false, reasoning_effort -> none)
-# 'low', 'medium', 'high' : Active le thinking avec ce niveau d'effort (booléen -> true, reasoning_effort -> niveau)
-LM_STUDIO_THINKING=
-LM_STUDIO_DISABLE_THINKING=false
+# Niveau d'intensité :
+# - 'soft'    : ~7-8 Go RAM (sécurisé en journée avec navigateur/apps ouverts)
+# - 'intense' : ~14-18 Go RAM (mode nuit / AFK avec apps fermées)
+INTENSITY_MODE=soft
 
-# 3. Tunnel SSH (Requis uniquement si le port 1234 n'est pas ouvert publiquement)
-LM_STUDIO_USE_TUNNEL=false
-SSH_HOST=
-SSH_PORT=22
-SSH_USER=
-SSH_KEY_PATH=
-SSH_PASSWORD=
-LM_STUDIO_LOCAL_PORT=12345
+# Optimisation Apple Silicon : 'mlx' (natif, ultra-rapide) ou 'llama_cpp' (GGUF Metal)
+LOCAL_BACKEND=mlx
+
+# Phase par défaut en mode two_pass : 'all', 'reason', ou 'code'
+PIPELINE_PHASE=all
+
+# Gestion des erreurs : continuer sur la carte suivante sans interrompre le lot
+CONTINUE_ON_ERROR=false
+
+# Laissez ces champs VIDES pour que le compilateur choisisse automatiquement
+# les meilleurs modèles selon PIPELINE_MODE et INTENSITY_MODE :
+LLM_MODEL=
+REASONING_MODEL=
+CODING_MODEL=
 ```
 
 ---
 
-## Guide des Commandes CLI
+## 📖 Guide d'Utilisation
 
-### 1. Compiler des Cartes (`run` / `compile`)
+### Option A : Le Mode Two-Pass (Recommandé pour une précision maximale)
+
+#### Méthode 1 : En deux scripts séparés (Le contrôle total)
+Vous pouvez lancer la génération des textes d'analyse, puis plus tard générer le JSON :
 
 ```bash
-# Compilation du jeu de 11 cartes stratégiques de référence (mode test par défaut)
-python -m compiler.cli run
+# Étape 1 : Générer les textes d'analyse de règles pour toutes les cartes cibles
+# (Charge DeepSeek-R1, génère tous les textes dans data/reasoning_texts/, puis libère la mémoire)
+python run_reasoning.py --ids sv08.5-001,sv04-125
 
-# Compilation d'une ou plusieurs cartes spécifiques par identifiant TCGdex
-python -m compiler.cli run --ids sv06.5-001,sv04-125
-
-# Compilation via LM Studio (API REST)
-python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001
-
-# Désactiver le thinking / raisonnement pour LM Studio (gain de temps et économie de tokens)
-python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --no-think
-# ou équivalent via niveau 'null' :
-python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking null
-
-# Définir un niveau d'effort de thinking ('low', 'medium', 'high' ou nombre de tokens)
-python -m compiler.cli run --llm-provider lm_studio --ids sv06.5-001 --thinking low
-
-# Compilation en parallèle sur 4 slots simultanés (multi-concurrency LM Studio)
-python -m compiler.cli run --llm-provider lm_studio -j 4 --ids sv06.5-001,sv04-125,sv03-125,sv01-001
-# ou sur tout un set :
-python -m compiler.cli run --llm-provider lm_studio --parallel 4 --standard --limit 50
-
-# Compiler un lot en ignorant les erreurs pour passer à la suite (-k / --continue-on-error)
-python -m compiler.cli run --llm-provider lm_studio -j 4 -k --standard
-# À la fin, seules les cartes échouées restent à traiter !
-
-# Compilation du format Standard complet (avec reprise sur cache)
-python -m compiler.cli run --standard --limit 50
-
-# Forcer la recompilation complète en écrasant les fichiers existants
-python -m compiler.cli run --ids sv03-125 --force
+# Étape 2 : Transformer ces analyses en JSON formel
+# (Charge Qwen Coder, lit data/reasoning_texts/, compile dans data/compiled_cards/)
+python run_coding.py --ids sv08.5-001,sv04-125
 ```
 
-**Options disponibles sur `run` (alias `compile`) :**
-- `--mode test|standard` (`-m`) : Mode d'exécution (`test` : 11 cartes de référence, `standard` : format Standard).
-- `--test` / `--standard` : Raccourcis pour forcer le mode test ou standard.
-- `--ids <ID1,ID2>` : Liste d'identifiants TCGdex séparés par des virgules (ex: `sv06.5-001,sv03-125`).
-- `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Silicon ou `lm_studio` REST).
-- `--local-backend mlx|llama_cpp` : Backend d'optimisation locale (`mlx` pour Apple MLX natif, `llama_cpp` pour Metal GGUF). Configurable via `LOCAL_BACKEND=mlx` dans `.env`.
-- `--model <NOM_OU_REPO>` : Modèle d'inférence complet (repo HF MLX comme `uqer1244/Qwen3.8-27B-GSQ-RCO-MLX`, chemin/repo GGUF, ou modèle LM Studio).
-- `--thinking <niveau>` (`-tk`) : Niveau de réflexion/thinking pour modèles raisonnants (`null` pour désactiver, ou `low`, `medium`, `high`, nombre de tokens). Si le modèle gère uniquement un booléen (`enable_thinking`), `null` vaut `false` et toute autre valeur vaut `true`.
-- `--no-think` / `--disable-thinking` : Raccourci pour désactiver le mode réflexion/thinking (équivalent à `--thinking null`).
-- `--parallel <N>` / `-j <N>` / `--concurrency <N>` : Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement). Permet de configurer le nombre de workers simultanés (défaut : 1). Également configurable via le fichier `.env` ou variable d'environnement (`LM_STUDIO_PARALLEL=4`, `PARALLEL=4`). L'affichage Rich gère les X flux de cartes en temps réel avec une barre globale et des lignes de streaming dédiées par slot.
-- `--continue-on-error` / `-k` / `--ignore-errors` / `--skip-errors` : Ignore les erreurs survenant sur une carte et passe immédiatement à la suivante au lieu d'interrompre le programme (défaut : faux). Idéal pour compiler des centaines de cartes d'un coup et récapituler les cartes récalcitrantes à la fin dans un tableau dédié. Configurable via `CONTINUE_ON_ERROR=true` dans `.env`.
-- `--tier qwen3|max|fast` (`-t`) : Palier de modèle en mode local (`qwen3` 14B Q6_K, `max` 30B/32B, `fast` 7B).
-- `--fast` : Raccourci pour `--tier fast`.
-- `--provider sdk|rest` (`-p`) : Fournisseur d'accès TCGdex (`sdk` : tcgdex-sdk officiel, `rest` : API HTTP directe).
-- `--force` : Recompile même si la carte est déjà présente dans `data/compiled_cards/`.
-- `--limit <N>` : Limite le nombre de cartes à traiter en mode standard.
-- `--hf-token <TOKEN>` : Jeton Hugging Face pour accélérer les téléchargements de modèles GGUF.
-- `--ssh-password <PWD>` : Mot de passe SSH (si connexion sans clé publique).
-- `--prompt-ssh-password` : Demande le mot de passe SSH de façon masquée dans le terminal.
+#### Méthode 2 : Via la CLI unifiée Typer
+```bash
+# Exécuter uniquement la Passe 1 (Raisonnement)
+python -m compiler.cli reason --ids sv08.5-001
+
+# Exécuter uniquement la Passe 2 (Codage JSON)
+python -m compiler.cli code --ids sv08.5-001
+
+# Enchaîner les 2 passes automatiquement avec libération mémoire intermédiaire garantie
+python -m compiler.cli run --pipeline two_pass --phase all --ids sv08.5-001,sv04-125
+```
 
 ---
 
-### 2. Connaître le Nombre de Cartes Restant à Compiler (`remaining`)
-
-Affiche le statut global et le nombre de cartes restantes à compiler, avec la progression et la ventilation détaillée par extension :
+### Option B : Le Mode Single-Pass (IA directe / Rapide)
 
 ```bash
-# Vue synthétique globale
+# Compilation du lot test de référence (11 cartes stratégiques)
+python -m compiler.cli run --pipeline single
+
+# Compilation de cartes précises par identifiant TCGdex
+python -m compiler.cli run --pipeline single --ids sv08.5-001,sv04-125,sv03-125
+
+# Mode intense (pour les sessions de nuit / AFK)
+python -m compiler.cli run --pipeline single --intensity intense --ids sv08.5-001
+```
+
+---
+
+### Option C : Utilisation avec LM Studio (Machine Distante ou Déportée)
+
+```bash
+# Compilation via le serveur LM Studio actif
+python -m compiler.cli run --llm-provider lm_studio --ids sv08.5-001
+
+# Compilation multi-slots en parallèle (4 cartes traitées simultanément)
+python -m compiler.cli run --llm-provider lm_studio -j 4 --standard --limit 50
+```
+
+---
+
+## 🛠️ Outils de Maintenance & Suivi
+
+La CLI intègre tous les outils nécessaires pour piloter l'avancement de votre base de données :
+
+```bash
+# 1. Connaître le nombre de cartes restantes à compiler
 python -m compiler.cli remaining
+python -m compiler.cli remaining --set sv08.5 --details
 
-# Filtrer sur une extension précise (ex: Mascarade Crépusculaire sv06, Fable Nébuleuse sv06.5)
-python -m compiler.cli remaining --set sv06.5
-
-# Afficher la liste complète des identifiants manquants
-python -m compiler.cli remaining --set sv06.5 --details
-
-# Mode discret pour scripts bash (affiche uniquement l'entier restant)
-python -m compiler.cli remaining -q
-```
-
-**Options disponibles sur `remaining` (alias `todo`, `left`, `pending`, `a-compiler`) :**
-- `--set <CODE>` (`-s`) : Filtre sur une extension (ex: `sv01`, `sv06.5`, `sve`).
-- `--details` (`-d`) : Affiche la liste des identifiants manquants.
-- `--quiet` (`-q`) : Affiche uniquement le nombre entier restant.
-- `--mode standard|test|all` (`-m`) : Périmètre de calcul (défaut : `standard`).
-
----
-
-### 3. Synchroniser la Base Globale Consolidée (`sync`)
-
-Vérifie que toutes les cartes compilées présentes dans `data/compiled_cards/` figurent bien dans `data/cards_database.json`, et y ajoute automatiquement les cartes manquantes :
-
-```bash
-# Vérification et synchronisation automatique
-python -m compiler.cli sync
-
-# Afficher le détail des cartes ajoutées ou mises à jour
-python -m compiler.cli sync --details
-
-# Simuler la synchronisation sans écrire sur le disque
-python -m compiler.cli sync --dry-run
-
-# Forcer la réécriture des cartes déjà présentes si leur version disque a changé
-python -m compiler.cli sync --update
-```
-
-**Options disponibles sur `sync` (alias `sync-database`, `sync-db`, `check-database`) :**
-- `--details` (`-d`) : Affiche le tableau détaillé des cartes traitées.
-- `--dry-run` (`-n`) : Simulation en lecture seule.
-- `--update` (`-u`) : Met à jour les cartes existantes en cas de modification.
-- `--db-path` (`-p`) : Chemin personnalisé vers un fichier JSON consolidé.
-
----
-
-### 4. Compter les Cartes Compilées (`count`)
-
-```bash
-# Compteur global et ventilation par catégorie (Pokémon, Dresseurs, Énergies)
+# 2. Compter les cartes déjà compilées sur le disque
 python -m compiler.cli count
-
-# Afficher la liste de toutes les cartes compilées
 python -m compiler.cli count --details
 
-# Nombre seul pour scripts bash
-python -m compiler.cli count --quiet
-```
+# 3. Synchroniser la base de données consolidée data/cards_database.json
+python -m compiler.cli sync
+python -m compiler.cli sync --update
 
----
+# 4. Inspecter visuellement le modèle JSON compilé d'une carte
+python -m compiler.cli inspect sv08.5-001
 
-### 5. Inspecter le Modèle Compilé d'une Carte (`inspect`)
-
-Affiche avec coloration syntaxique le JSON généré (`EngineCardModel`) pour une carte :
-
-```bash
-python -m compiler.cli inspect sv06.5-001
-python -m compiler.cli inspect sv04-125
-```
-
----
-
-### 6. Statistiques & Validation d'Intégrité (`stats` / `validate`)
-
-Valide l'ensemble des fichiers compilés contre les schémas Pydantic V2 et affiche la distribution des rôles stratégiques, des primitives d'effets et des métriques de temps :
-
-```bash
+# 5. Vérifier la conformité Pydantic V2 de toutes les cartes compilées
 python -m compiler.cli stats
 ```
 
 ---
 
-## Exécution des Tests Unitaires
+## 🧪 Tests Unitaires Automatisés
 
-Le projet inclut une suite complète de 60 tests automatisés couvrant les validateurs de schémas, les normalisations d'enums, le streaming de débit, LM Studio (REST et tunnel SSH), les replis défensifs et le pipeline CLI :
+Le projet intègre une suite de **96 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
 ```
+
+---
+
+## 💡 Résumé des Commandes Utiles
+
+| Commande | Action |
+| :--- | :--- |
+| `python run_reasoning.py` | Exécute la Passe 1 (Raisonnement) et stocke dans `data/reasoning_texts/` |
+| `python run_coding.py` | Exécute la Passe 2 (Codage JSON) et met à jour `cards_database.json` |
+| `python -m compiler.cli reason` | Alias CLI pour la Passe 1 |
+| `python -m compiler.cli code` | Alias CLI pour la Passe 2 |
+| `python -m compiler.cli run` | Exécute le pipeline selon la configuration de votre `.env` |
+| `python -m compiler.cli remaining` | Affiche les cartes restant à compiler |
+| `python -m compiler.cli sync` | Synchronise `data/cards_database.json` |
+| `python -m compiler.cli inspect <ID>` | Affiche le JSON d'une carte avec coloration syntaxique |
