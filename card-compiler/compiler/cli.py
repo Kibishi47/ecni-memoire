@@ -51,6 +51,7 @@ from compiler.llm_engine import (
     ModelTier,
 )
 from compiler.lm_studio_compiler import LMStudioCardCompiler
+from compiler.mlx_engine import MLXCardCompiler
 from compiler.post_processor import sanitize_and_enrich_card
 from compiler.schemas import CardSubCategory, EngineCardModel
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
@@ -431,8 +432,9 @@ def create_compiler_engine(
     disable_thinking: bool = False,
     thinking: Optional[str] = None,
     model: Optional[str] = None,
-) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler]:
-    """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal ou LM Studio SSH/REST)."""
+    local_backend: Optional[str] = None,
+) -> Union[LocalLLMCardCompiler, LMStudioCardCompiler, MLXCardCompiler]:
+    """Instancie le compilateur LLM selon le fournisseur sélectionné (local Metal GGUF, local MLX ou LM Studio SSH/REST)."""
     if provider == LLMProvider.lm_studio:
         return LMStudioCardCompiler(
             tier=tier,
@@ -441,6 +443,28 @@ def create_compiler_engine(
             disable_thinking=disable_thinking,
             thinking=thinking,
         )
+
+    import os
+
+    resolved_backend = (
+        local_backend
+        or os.environ.get("LOCAL_BACKEND")
+        or os.environ.get("LOCAL_OPTIMIZATION")
+        or "llama_cpp"
+    ).strip().lower()
+
+    if model and (".gguf" in str(model).lower() or ":" in str(model)):
+        if not local_backend or local_backend != "mlx":
+            resolved_backend = "llama_cpp"
+
+    if resolved_backend == "mlx":
+        return MLXCardCompiler(
+            model=model,
+            hf_token=hf_token,
+            disable_thinking=disable_thinking,
+            thinking=thinking,
+        )
+
     return LocalLLMCardCompiler(
         tier=tier,
         fast=fast,
@@ -469,6 +493,7 @@ def _execute_run_pipeline(
     parallel: int = 1,
     continue_on_error: bool = False,
     model: Optional[str] = None,
+    local_backend: Optional[str] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -479,13 +504,21 @@ def _execute_run_pipeline(
 
     effective_tier = ModelTier.fast if (fast and tier == ModelTier.qwen3) else tier
 
+    import os
+    effective_backend = (
+        local_backend
+        or os.environ.get("LOCAL_BACKEND")
+        or os.environ.get("LOCAL_OPTIMIZATION")
+        or "llama_cpp"
+    ).strip().lower()
+
     # Validation et préparation du parallélisme
     requested_parallel = max(1, parallel)
     effective_parallel = requested_parallel
     if requested_parallel > 1 and llm_provider == LLMProvider.local:
         console.print(
             "[yellow]⚠️ La parallélisation (--parallel > 1) n'est pas supportée avec le moteur 'local' "
-            "(Apple Metal in-memory KV-cache partagé). L'exécution se poursuit en mode séquentiel (parallel=1). "
+            "(Apple Metal / MLX in-memory KV-cache partagé). L'exécution se poursuit en mode séquentiel (parallel=1). "
             "Utilisez '--llm-provider lm_studio' pour la parallélisation multi-slots.[/yellow]"
         )
         effective_parallel = 1
@@ -550,6 +583,34 @@ def _execute_run_pipeline(
                 f"• [bold]Mode Thinking[/bold] : {thinking_display}\n"
                 f"• [bold]Slots parallèles[/bold] : [bold cyan]{parallel_display}[/bold cyan]"
             )
+    elif effective_backend == "mlx":
+        engine_preview = MLXCardCompiler(
+            model=model,
+            hf_token=hf_token,
+            disable_thinking=disable_thinking,
+            thinking=thinking,
+        )
+        title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple MLX Native (CoT)[/bold cyan]"
+        token_status = (
+            "[green]Configuré ✓ (téléchargement accéléré)[/green]"
+            if engine_preview.hf_token
+            else "[yellow]Non renseigné (anonyme)[/yellow]"
+        )
+        if engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
+            thinking_display = "[yellow]Désactivé (null / --no-think)[/yellow]"
+        elif getattr(engine_preview, "thinking", None) is not None:
+            thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
+        else:
+            thinking_display = "[green]Activé / Standard[/green]"
+
+        model_disp = f"[bold green]{engine_preview.repo_id}[/bold green]"
+        llm_lines = (
+            f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Silicon MLX Native)[/bold magenta]\n"
+            f"• [bold]Optimisation locale[/bold] : [cyan]mlx (Apple Silicon Unified Memory Safetensors)[/cyan]\n"
+            f"• [bold]Modèle[/bold] : {model_disp}\n"
+            f"• [bold]HF Token[/bold] : {token_status}\n"
+            f"• [bold]Mode Thinking[/bold] : {thinking_display}"
+        )
     else:
         engine_preview = LocalLLMCardCompiler(
             tier=effective_tier,
@@ -579,6 +640,7 @@ def _execute_run_pipeline(
 
         llm_lines = (
             f"• [bold]Fournisseur LLM[/bold] : [bold magenta]LOCAL (Apple Metal in-memory)[/bold magenta]\n"
+            f"• [bold]Optimisation locale[/bold] : [cyan]llama_cpp (GGUF Metal)[/cyan]\n"
             f"• [bold]Modèle[/bold] : {local_model_display}\n"
             f"• [bold]HF Token[/bold] : {token_status}\n"
             f"• [bold]Offload GPU[/bold] : [magenta]n_gpu_layers=-1 (100% Metal)[/magenta]\n"
@@ -665,6 +727,7 @@ def _execute_run_pipeline(
             disable_thinking=disable_thinking,
             thinking=thinking,
             model=model,
+            local_backend=effective_backend,
         )
         try:
             try:
@@ -1116,6 +1179,13 @@ def run_command(
         envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
         help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution (idéal pour les grands lots).",
     ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp'). Ignoré si LLM_PROVIDER=lm_studio.",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     if prompt_ssh_password and not ssh_password:
@@ -1143,6 +1213,7 @@ def run_command(
         parallel=parallel,
         continue_on_error=continue_on_error,
         model=model,
+        local_backend=local_backend,
     )
 
 
@@ -1229,6 +1300,13 @@ def compile_alias(
         envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
         help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution (idéal pour les grands lots).",
     ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp'). Ignoré si LLM_PROVIDER=lm_studio.",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     if prompt_ssh_password and not ssh_password:
@@ -1256,6 +1334,7 @@ def compile_alias(
         parallel=parallel,
         continue_on_error=continue_on_error,
         model=model,
+        local_backend=local_backend,
     )
 
 

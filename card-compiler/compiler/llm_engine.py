@@ -745,13 +745,16 @@ class LocalLLMCardCompiler:
             for k in ("LM_STUDIO_DISABLE_THINKING", "LM_STUDIO_NO_THINK", "NO_THINK", "DISABLE_THINKING")
         )
 
-        resolved_thinking = thinking
-        if resolved_thinking is None and env_thinking:
+        if thinking is not None:
+            resolved_thinking = str(thinking).strip()
+        elif env_thinking:
             resolved_thinking = env_thinking.strip()
+        else:
+            resolved_thinking = None
 
-        if disable_thinking is True or (resolved_thinking is None and is_env_disabled):
+        if disable_thinking is True or is_env_disabled:
             resolved_thinking = "null"
-        elif disable_thinking is False and resolved_thinking is None:
+        elif disable_thinking is False and thinking is None:
             resolved_thinking = None
 
         if resolved_thinking is not None:
