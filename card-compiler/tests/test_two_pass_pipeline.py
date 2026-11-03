@@ -403,6 +403,61 @@ class TestCliTwoPassCommands(unittest.TestCase):
         self.assertEqual(kwargs["pipeline"], "two_pass")
         self.assertEqual(kwargs["phase"], "all")
 
+    def test_coding_output_auto_healing_resilience(self) -> None:
+        """Vérifie que les variations de format générées par l'IA de coding (ex: Rare Candy sv04-125) sont auto-corrigées."""
+        from compiler.schemas import LLMCompiledCardPart, StrategicRole, ActionSourceType
+
+        raw_llm_dict = {
+            "reasoningAnalysis": "Super Bonbon permet d'évoluer directement un Pokémon de base en Niveau 2.",
+            "category": "TRAINER",
+            "subCategory": "ITEM",
+            "playableActions": [
+                {
+                    "actionId": "play_rare_candy",
+                    "preconditions": [
+                        "NOT_FIRST_TURN",
+                        "BASIC_POKEMON_IN_PLAY",
+                        "STAGE_2_CARD_IN_HAND"
+                    ],
+                    "primitives": ["EVOLVE_POKEMON", "USE_STAGE_2_CARD"]
+                }
+            ],
+            "strategicEvaluator": {
+                "primaryRole": "EVOLUTION_ACCELERATOR",
+                "turnPhaseWeights": {
+                    "PREPARATION": 0.0,
+                    "MAIN_PHASE_1": 0.0,
+                    "MAIN_PHASE_2": 1.5,
+                    "END_PHASE": 2.0
+                },
+                "decklistSynergyRequirements": [
+                    "BASIC_POKEMON",
+                    "STAGE_2_EVOLUTION"
+                ],
+                "inGameDeadCardConditions": [
+                    "NO_STAGE_2_EVOLUTION_IN_HAND",
+                    "ALL_BASIC_POKEMON_EVOLVED_OR_NO_STAGE_2"
+                ]
+            }
+        }
+
+        part = LLMCompiledCardPart.model_validate(raw_llm_dict)
+        self.assertEqual(part.category.value, "TRAINER")
+        self.assertEqual(part.subCategory.value, "ITEM")
+        self.assertEqual(len(part.playableActions), 1)
+        action = part.playableActions[0]
+        self.assertEqual(action.label, "play_rare_candy")
+        self.assertEqual(action.sourceType, ActionSourceType.TRAINER_PLAY)
+        self.assertFalse(action.canUseTurn1GoingFirst)
+        self.assertFalse(action.canUseTurn1GoingSecond)
+        self.assertEqual(len(action.effects), 2)
+        self.assertEqual(len(action.preconditions), 3)
+        self.assertEqual(part.strategicEvaluator.primaryRole, StrategicRole.EVOLUTION_ACCELERATOR)
+        self.assertEqual(part.strategicEvaluator.turnPhaseWeights.turn1, 0.0)
+        self.assertEqual(part.strategicEvaluator.turnPhaseWeights.turn4Plus, 2.0)
+        self.assertEqual(len(part.strategicEvaluator.decklistSynergyRequirements), 2)
+        self.assertEqual(len(part.strategicEvaluator.inGameDeadCardConditions), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

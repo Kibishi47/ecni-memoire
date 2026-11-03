@@ -94,7 +94,7 @@ card-compiler/
 │   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx)
 │   └── cli.py               # Interface CLI Typer unifiée
 │
-└── tests/                   # Suite complète de 91 tests unitaires automatisés
+└── tests/                   # Suite complète de 92 tests unitaires automatisés
 ```
 
 ---
@@ -239,7 +239,7 @@ python -m compiler.cli stats
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **91 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **92 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"

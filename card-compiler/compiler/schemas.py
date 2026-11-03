@@ -287,7 +287,7 @@ class CardFilter(BaseModel):
 class ActionPrecondition(BaseModel):
     """Précondition formelle devant être vérifiée dans l'état du jeu avant d'exécuter une action."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     type: PreconditionType = Field(
         ...,
@@ -306,6 +306,19 @@ class ActionPrecondition(BaseModel):
         default=None,
         description="Filtre identifiant les cartes requises dans la zone vérifiée, ou null.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_precondition_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            raw = data.strip().upper()
+            return {
+                "type": raw,
+                "zone": "IN_PLAY_ALL" if "PLAY" in raw else ("HAND" if "HAND" in raw else "DECK"),
+                "minCount": 1,
+                "targetFilter": None,
+            }
+        return data
 
     @field_validator("type", mode="before")
     @classmethod
@@ -365,7 +378,7 @@ class ActionPrecondition(BaseModel):
 class ActionCost(BaseModel):
     """Coût additionnel à payer pour jouer ou activer l'action."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     type: CostType = Field(
         ...,
@@ -425,7 +438,7 @@ class ActionCost(BaseModel):
 class AtomicEffect(BaseModel):
     """Effet élémentaire atomique modifiant l'état de la partie Pokémon TCG."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     primitive: EffectPrimitive = Field(
         ...,
@@ -708,7 +721,7 @@ class AtomicEffect(BaseModel):
 class PlayableAction(BaseModel):
     """Action jouable complète (effet de carte Dresseur, Talent ou Attaque de Pokémon)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     actionId: str = Field(
         ...,
@@ -818,76 +831,181 @@ class PlayableAction(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def filter_or_migrate_attack_costs(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            # Si le LLM a placé un coût en énergie dans `costs` au lieu de `energyCost`
-            raw_costs = data.get("costs")
-            if isinstance(raw_costs, list):
-                valid_costs = []
-                for c in raw_costs:
-                    if isinstance(c, dict):
-                        if ("energyType" in c or "energy" in c) and "type" not in c:
-                            e_val = c.get("energyType") or c.get("energy")
-                            if e_val and isinstance(e_val, str):
-                                if "energyCost" not in data or not isinstance(data["energyCost"], list):
-                                    data["energyCost"] = []
-                                count = c.get("count", 1)
-                                try:
-                                    cnt = int(count)
-                                except Exception:
-                                    cnt = 1
-                                for _ in range(max(1, cnt)):
-                                    data["energyCost"].append(e_val)
-                            continue
-                    valid_costs.append(c)
-                data["costs"] = valid_costs
+    def sanitize_playable_action_dict(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        # 1. Remplissage ou déduction de `label`
+        if not data.get("label"):
+            data["label"] = data.get("name") or data.get("actionId") or "Action"
+
+        # 2. Déduction de `sourceType`
+        if not data.get("sourceType"):
+            act_id = str(data.get("actionId", "")).lower()
+            if "attack" in act_id:
+                data["sourceType"] = ActionSourceType.ATTACK
+            elif "ability" in act_id or "talent" in act_id:
+                data["sourceType"] = ActionSourceType.ABILITY_ACTIVATED
+            elif "stadium" in act_id:
+                data["sourceType"] = ActionSourceType.STADIUM_EFFECT
+            elif "tool" in act_id:
+                data["sourceType"] = ActionSourceType.TOOL_EFFECT
+            else:
+                data["sourceType"] = ActionSourceType.TRAINER_PLAY
+
+        # 3. Déduction de `timing`
+        if not data.get("timing"):
+            src = str(data.get("sourceType", "")).upper()
+            if "ATTACK" in src:
+                data["timing"] = ActionTiming.END_OF_TURN_ATTACK
+            elif "ABILITY" in src:
+                data["timing"] = ActionTiming.ONCE_PER_TURN_ABILITY
+            elif "SUPPORTER" in src:
+                data["timing"] = ActionTiming.ONCE_PER_TURN_SUPPORTER
+            else:
+                data["timing"] = ActionTiming.ONCE_PER_CARD
+
+        # 4. Déduction de `canUseTurn1GoingFirst` et `canUseTurn1GoingSecond`
+        src = str(data.get("sourceType", "")).upper()
+        act_id = str(data.get("actionId", "")).lower()
+        is_attack = "ATTACK" in src or "attack" in act_id
+        is_supporter = "SUPPORTER" in src or "supporter" in act_id
+        is_rare_candy = "candy" in act_id or "bonbon" in act_id
+
+        if "canUseTurn1GoingFirst" not in data or data["canUseTurn1GoingFirst"] is None:
+            if is_attack or is_supporter or is_rare_candy or "evolve" in act_id:
+                data["canUseTurn1GoingFirst"] = False
+            else:
+                data["canUseTurn1GoingFirst"] = True
+
+        if "canUseTurn1GoingSecond" not in data or data["canUseTurn1GoingSecond"] is None:
+            if is_rare_candy or "evolve" in act_id:
+                data["canUseTurn1GoingSecond"] = False
+            else:
+                data["canUseTurn1GoingSecond"] = True
+
+        # 5. Migration de `primitives` -> `effects` si le LLM a mis `primitives: [...]`
+        if "primitives" in data and ("effects" not in data or not data["effects"]):
+            raw_prims = data.pop("primitives")
+            effects = []
+            if isinstance(raw_prims, list):
+                for p in raw_prims:
+                    if isinstance(p, str):
+                        effects.append({"primitive": p, "count": 1})
+                    else:
+                        effects.append(p)
+            data["effects"] = effects
+
+        # 6. Normalisation de `preconditions` si ce sont des chaînes au lieu d'objets
+        raw_preconds = data.get("preconditions")
+        if isinstance(raw_preconds, list):
+            clean_preconds = []
+            for pc in raw_preconds:
+                if isinstance(pc, str):
+                    clean_preconds.append({
+                        "type": pc,
+                        "zone": "IN_PLAY_ALL" if "PLAY" in pc.upper() else ("HAND" if "HAND" in pc.upper() else "DECK"),
+                        "minCount": 1,
+                        "targetFilter": None,
+                    })
+                else:
+                    clean_preconds.append(pc)
+            data["preconditions"] = clean_preconds
+
+        # 7. Si le LLM a placé un coût en énergie dans `costs` au lieu de `energyCost`
+        raw_costs = data.get("costs")
+        if isinstance(raw_costs, list):
+            valid_costs = []
+            for c in raw_costs:
+                if isinstance(c, dict):
+                    if ("energyType" in c or "energy" in c) and "type" not in c:
+                        e_val = c.get("energyType") or c.get("energy")
+                        if e_val and isinstance(e_val, str):
+                            if "energyCost" not in data or not isinstance(data["energyCost"], list):
+                                data["energyCost"] = []
+                            count = c.get("count", 1)
+                            try:
+                                cnt = int(count)
+                            except Exception:
+                                cnt = 1
+                            for _ in range(max(1, cnt)):
+                                data["energyCost"].append(e_val)
+                        continue
+                valid_costs.append(c)
+            data["costs"] = valid_costs
+
         return data
 
 
 class TurnPhaseWeights(BaseModel):
     """Pondérations de l'impact stratégique de la carte selon le tour de jeu."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     turn1: float = Field(
-        ...,
+        default=1.0,
         ge=0.0,
         le=2.0,
         description="Coefficient d'utilité au Tour 1 (0.0 à 2.0).",
     )
     turn2: float = Field(
-        ...,
+        default=1.0,
         ge=0.0,
         le=2.0,
         description="Coefficient d'utilité au Tour 2 (0.0 à 2.0).",
     )
     turn3: float = Field(
-        ...,
+        default=1.0,
         ge=0.0,
         le=2.0,
         description="Coefficient d'utilité au Tour 3 (0.0 à 2.0).",
     )
     turn4Plus: float = Field(
-        ...,
+        default=1.0,
         ge=0.0,
         le=2.0,
         description="Coefficient d'utilité aux Tours 4 et suivants (0.0 à 2.0).",
     )
 
-    @field_validator("turn1", "turn2", "turn3", "turn4Plus", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def clamp_phase_weight(cls, v: Any) -> float:
-        try:
-            val = float(v)
-            return max(0.0, min(2.0, round(val, 2)))
-        except (ValueError, TypeError):
-            return 1.0
+    def normalize_turn_phase_weights(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0}
+
+        cleaned = {}
+        for k, v in data.items():
+            try:
+                val = float(v)
+            except Exception:
+                continue
+            k_norm = str(k).lower().replace("_", "").replace("-", "")
+            if "turn1" in k_norm or "t1" in k_norm or "prep" in k_norm or "first" in k_norm:
+                cleaned["turn1"] = val
+            elif "turn2" in k_norm or "t2" in k_norm or "main1" in k_norm or "second" in k_norm:
+                cleaned["turn2"] = val
+            elif "turn3" in k_norm or "t3" in k_norm or "main2" in k_norm or "mid" in k_norm:
+                cleaned["turn3"] = val
+            elif "turn4" in k_norm or "t4" in k_norm or "end" in k_norm or "late" in k_norm or "plus" in k_norm:
+                cleaned["turn4Plus"] = val
+
+        t1 = cleaned.get("turn1", data.get("turn1", 1.0))
+        t2 = cleaned.get("turn2", data.get("turn2", 1.0))
+        t3 = cleaned.get("turn3", data.get("turn3", 1.0))
+        t4 = cleaned.get("turn4Plus", data.get("turn4Plus", data.get("turn4", 1.0)))
+
+        return {
+            "turn1": max(0.0, min(2.0, float(t1))),
+            "turn2": max(0.0, min(2.0, float(t2))),
+            "turn3": max(0.0, min(2.0, float(t3))),
+            "turn4Plus": max(0.0, min(2.0, float(t4))),
+        }
 
 
 class SynergyRequirement(BaseModel):
     """Condition de synergie de decklist pour l'évaluation statique et dynamique de la carte."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     requiredFilter: CardFilter = Field(
         ...,
@@ -907,6 +1025,52 @@ class SynergyRequirement(BaseModel):
         ge=0.0,
         description="Bonus de score attribué par exemplaire compatible présent dans le deck.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_synergy_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            subcat = None
+            cat = "POKEMON"
+            item_upper = data.strip().upper()
+            if "STAGE_2" in item_upper or "STAGE2" in item_upper:
+                subcat = "STAGE_2"
+            elif "STAGE_1" in item_upper or "STAGE1" in item_upper:
+                subcat = "STAGE_1"
+            elif "BASIC" in item_upper or "BASE" in item_upper:
+                subcat = "BASIC"
+            elif "ENERGY" in item_upper:
+                cat = "ENERGY"
+            elif "TRAINER" in item_upper or "ITEM" in item_upper:
+                cat = "TRAINER"
+                subcat = "ITEM"
+            return {
+                "requiredFilter": {
+                    "category": cat,
+                    "subCategory": subcat,
+                    "maxHp": None,
+                    "energyType": None,
+                    "specificCardName": None,
+                },
+                "minCountInDeck": 1,
+                "ifMissingSetValueToZero": False,
+                "bonusWeightPerCopy": 10.0,
+            }
+        if isinstance(data, dict):
+            if "requiredFilter" not in data and ("category" in data or "subCategory" in data):
+                return {
+                    "requiredFilter": {
+                        "category": data.get("category", "POKEMON"),
+                        "subCategory": data.get("subCategory"),
+                        "maxHp": data.get("maxHp"),
+                        "energyType": data.get("energyType"),
+                        "specificCardName": data.get("specificCardName"),
+                    },
+                    "minCountInDeck": data.get("minCountInDeck", 1),
+                    "ifMissingSetValueToZero": data.get("ifMissingSetValueToZero", False),
+                    "bonusWeightPerCopy": data.get("bonusWeightPerCopy", 10.0),
+                }
+        return data
 
     @field_validator("minCountInDeck", mode="before")
     @classmethod
@@ -928,7 +1092,7 @@ class SynergyRequirement(BaseModel):
 class DeadCardCondition(BaseModel):
     """Condition dynamique en cours de partie rendant la carte injouable ou inutile (carte morte)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reason: DeadCardReason = Field(
         ...,
@@ -942,6 +1106,17 @@ class DeadCardCondition(BaseModel):
         default=None,
         description="Filtre des cartes cibles dont l'absence dans zonesToCheck déclenche l'état de carte morte, ou null.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_dead_condition_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {
+                "reason": data.strip().upper(),
+                "zonesToCheck": [ZoneType.DECK, ZoneType.HAND],
+                "targetFilter": None,
+            }
+        return data
 
     @field_validator("reason", mode="before")
     @classmethod
@@ -1038,7 +1213,7 @@ class DeadCardCondition(BaseModel):
 class StrategicEvaluator(BaseModel):
     """Évaluateur stratégique heuristique pour le moteur de décision Pokémon TCG."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     primaryRole: StrategicRole = Field(
         ...,
@@ -1074,6 +1249,77 @@ class StrategicEvaluator(BaseModel):
         le=50,
         description="Bonus (0 à 50) récompensant la conservation de la carte en main pour le tour suivant (T+1).",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_strategic_evaluator_dict(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        # 1. Normalisation de decklistSynergyRequirements si ce sont des strings
+        raw_synergies = data.get("decklistSynergyRequirements")
+        if isinstance(raw_synergies, list):
+            clean_synergies = []
+            for item in raw_synergies:
+                if isinstance(item, str):
+                    subcat = None
+                    cat = "POKEMON"
+                    item_upper = item.strip().upper()
+                    if "STAGE_2" in item_upper or "STAGE2" in item_upper:
+                        subcat = "STAGE_2"
+                    elif "STAGE_1" in item_upper or "STAGE1" in item_upper:
+                        subcat = "STAGE_1"
+                    elif "BASIC" in item_upper or "BASE" in item_upper:
+                        subcat = "BASIC"
+                    elif "ENERGY" in item_upper:
+                        cat = "ENERGY"
+                    elif "TRAINER" in item_upper or "ITEM" in item_upper:
+                        cat = "TRAINER"
+                        subcat = "ITEM"
+                    clean_synergies.append({
+                        "requiredFilter": {
+                            "category": cat,
+                            "subCategory": subcat,
+                            "maxHp": None,
+                            "energyType": None,
+                            "specificCardName": None,
+                        },
+                        "minCountInDeck": 1,
+                        "ifMissingSetValueToZero": False,
+                        "bonusWeightPerCopy": 10.0,
+                    })
+                else:
+                    clean_synergies.append(item)
+            data["decklistSynergyRequirements"] = clean_synergies
+
+        # 2. Normalisation de inGameDeadCardConditions si ce sont des strings
+        raw_dead = data.get("inGameDeadCardConditions")
+        if isinstance(raw_dead, list):
+            clean_dead = []
+            for item in raw_dead:
+                if isinstance(item, str):
+                    clean_dead.append({
+                        "reason": item.strip().upper(),
+                        "zonesToCheck": [ZoneType.DECK, ZoneType.HAND],
+                        "targetFilter": None,
+                    })
+                else:
+                    clean_dead.append(item)
+            data["inGameDeadCardConditions"] = clean_dead
+
+        # 3. Valeurs par défaut si scores manquants
+        if "intrinsicBaseScore" not in data or data["intrinsicBaseScore"] is None:
+            data["intrinsicBaseScore"] = 50
+        if "discardPriorityWhenDead" not in data or data["discardPriorityWhenDead"] is None:
+            data["discardPriorityWhenDead"] = 50
+        if "holdForNextTurnBonus" not in data or data["holdForNextTurnBonus"] is None:
+            data["holdForNextTurnBonus"] = 0
+
+        # 4. turnPhaseWeights si manquant
+        if "turnPhaseWeights" not in data or not isinstance(data["turnPhaseWeights"], dict):
+            data["turnPhaseWeights"] = {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0}
+
+        return data
 
     @field_validator("inGameDeadCardConditions", mode="before")
     @classmethod
@@ -1176,7 +1422,7 @@ class StrategicEvaluator(BaseModel):
 class LLMCompiledCardPart(BaseModel):
     """Schéma strict utilisé directement dans `response_format` de `llama-cpp-python` (Constrained Decoding GBNF)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reasoningAnalysis: str = Field(
         ...,
