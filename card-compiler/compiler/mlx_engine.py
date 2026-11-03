@@ -35,7 +35,7 @@ from compiler.schemas import (
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
-DEFAULT_MLX_MODEL_REPO_ID = "uqer1244/Qwen3.8-27B-GSQ-RCO-MLX"
+DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/Qwen3.8-27B-4bit"
 
 
 def normalize_mlx_model_id(model_id: Optional[str]) -> str:
@@ -140,6 +140,14 @@ class MLXCardCompiler:
             )
         except Exception as load_err:
             err_str = str(load_err)
+            if "Invalid axis 2" in err_str or "moveaxis" in err_str or "mlx-gsq" in err_str.lower():
+                raise RuntimeError(
+                    f"Le modèle '{self.repo_id}' n'est pas un modèle MLX standard compatible `mlx-lm` "
+                    "(il s'agit d'un format expérimental GSQ-RCO 'mlx-gsq-packed-v1' contenant des tenseurs bruts GGUF non supportés).\n"
+                    "👉 Pour exécuter Qwen 3.8 27B nativement avec Apple MLX, utilisez le modèle officiel 100% compatible :\n"
+                    "   LLM_MODEL=mlx-community/Qwen3.8-27B-4bit\n"
+                    "   (ou 'lmstudio-community/Qwen3.8-27B-MLX-4bit')"
+                ) from load_err
             if "out of memory" in err_str.lower() or "kIOGPUCommandBufferCallbackErrorOutOfMemory" in err_str:
                 raise RuntimeError(
                     f"Mémoire unifiée saturée lors du chargement de '{self.repo_id}' via Apple MLX ({load_err}). "
@@ -444,6 +452,9 @@ class MLXCardCompiler:
         """Libère le cache mémoire Metal MLX."""
         try:
             import mlx.core as mx
-            mx.metal.clear_cache()
+            if hasattr(mx, "clear_cache"):
+                mx.clear_cache()
+            elif hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                mx.metal.clear_cache()
         except Exception:
             pass
