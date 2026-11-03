@@ -152,8 +152,9 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(compiler.api_base_url, "http://127.0.0.1:1234/v1")
 
     def test_factory_create_compiler_engine(self):
-        local_eng = create_compiler_engine(LLMProvider.local)
-        self.assertEqual(local_eng.repo_id, "Qwen/Qwen3-14B-GGUF")
+        with patch.dict("os.environ", {"LOCAL_BACKEND": "llama_cpp"}):
+            local_eng = create_compiler_engine(LLMProvider.local)
+            self.assertEqual(local_eng.repo_id, "Qwen/Qwen3-14B-GGUF")
 
         lms_eng = create_compiler_engine(LLMProvider.lm_studio)
         self.assertIsInstance(lms_eng, LMStudioCardCompiler)

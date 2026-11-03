@@ -1,4 +1,4 @@
-"""Pokémon TCG Card Compiler — Extraction TCGdex & Compilation IA Locale (llama.cpp + GBNF)."""
+"""Pokémon TCG Card Compiler — Extraction TCGdex & Compilation IA Locale (llama.cpp GBNF & Apple MLX)."""
 
 from __future__ import annotations
 

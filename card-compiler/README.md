@@ -5,7 +5,9 @@ Outil CLI autonome d'extraction et de compilation de cartes Pokémon TCG. Il int
 ## Architecture & Caractéristiques
 
 - **Deux Moteurs d'Inférence LLM au Choix** :
-  - **Local Apple Metal (`local`)** : Chargement direct du modèle GGUF en RAM/VRAM unifiée via `llama-cpp-python` (`n_gpu_layers=-1`, Metal M4 natif, 0 démon externe).
+  - **Local Apple Silicon (`local`)** :
+    - **MLX (`LOCAL_BACKEND=mlx`)** : Chargement direct ultra-rapide des modèles safetensors dans la mémoire unifiée Apple Silicon via `mlx-lm` (ex: `uqer1244/Qwen3.8-27B-GSQ-RCO-MLX`). Zéro surcoût d'émulation, streaming natif Metal.
+    - **llama.cpp (`LOCAL_BACKEND=llama_cpp`)** : Chargement direct du modèle GGUF en RAM/VRAM unifiée via `llama-cpp-python` (`n_gpu_layers=-1`, Metal M4 natif, 0 démon externe).
   - **LM Studio (`lm_studio`)** : Connexion à un serveur LM Studio distant ou local via son API REST standard (`/v1/chat/completions`), soit en accès direct par IP/Port, soit au travers d'un tunnel SSH automatisé. Les modèles déjà chargés dans LM Studio sont auto-détectés.
 - **Débit Réel (Streaming SSE & Tokens/sec effectifs)** : Affichage dynamique du débit d'inférence en direct dans la barre de progression Rich (`t/s` et tokens générés) et récapitulatif dans le tableau final. Le débit en tokens/sec est mesuré rigoureusement à partir de l'émission du premier token (hors délai TTFT / évaluation du prompt) pour refléter la véritable vitesse de décodage du modèle.
 - **Contrôle Fin du Thinking & Raisonnement (`--thinking`, `--no-think`)** : Prise en charge universelle des modèles raisonnants (DeepSeek-R1, Qwen 2.5 / 3.8, QwQ). Permet de spécifier un niveau de réflexion (`--thinking low|medium|high|<tokens>`) ou `null` pour le désactiver. Si le modèle ne gère que les booléens (`enable_thinking`), `null` vaut `false` et tout autre niveau vaut `true`. Pour les modèles supportant `reasoning_effort`, le niveau est directement injecté avec les balises d'inhibition adaptées.
@@ -31,6 +33,7 @@ card-compiler/
 │   ├── schemas.py           # Tous les Enums stricts et modèles Pydantic V2 avec normaliseurs
 │   ├── tcgdex_fetcher.py    # Client TCGdex (SDK officiel ou REST httpx) + cache disque + lignées
 │   ├── llm_engine.py        # Moteur local Metal llama.cpp + Prompt Système PTCG + CoT GBNF
+│   ├── mlx_engine.py        # Moteur local Apple Silicon MLX (mlx-lm + mémoire unifiée natif)
 │   ├── lm_studio_compiler.py# Provider LM Studio (REST direct ou tunnel SSH, streaming t/s)
 │   ├── post_processor.py    # Enrichissement déterministe et règles d'invariants PTCG
 │   ├── static_cards.py      # Court-circuit déterministe pour Énergies de Base
@@ -124,7 +127,9 @@ python -m compiler.cli run --ids sv03-125 --force
 - `--mode test|standard` (`-m`) : Mode d'exécution (`test` : 11 cartes de référence, `standard` : format Standard).
 - `--test` / `--standard` : Raccourcis pour forcer le mode test ou standard.
 - `--ids <ID1,ID2>` : Liste d'identifiants TCGdex séparés par des virgules (ex: `sv06.5-001,sv03-125`).
-- `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Metal ou `lm_studio` REST).
+- `--llm-provider local|lm_studio` (`-lp`) : Moteur LLM (`local` Apple Silicon ou `lm_studio` REST).
+- `--local-backend mlx|llama_cpp` : Backend d'optimisation locale (`mlx` pour Apple MLX natif, `llama_cpp` pour Metal GGUF). Configurable via `LOCAL_BACKEND=mlx` dans `.env`.
+- `--model <NOM_OU_REPO>` : Modèle d'inférence complet (repo HF MLX comme `uqer1244/Qwen3.8-27B-GSQ-RCO-MLX`, chemin/repo GGUF, ou modèle LM Studio).
 - `--thinking <niveau>` (`-tk`) : Niveau de réflexion/thinking pour modèles raisonnants (`null` pour désactiver, ou `low`, `medium`, `high`, nombre de tokens). Si le modèle gère uniquement un booléen (`enable_thinking`), `null` vaut `false` et toute autre valeur vaut `true`.
 - `--no-think` / `--disable-thinking` : Raccourci pour désactiver le mode réflexion/thinking (équivalent à `--thinking null`).
 - `--parallel <N>` / `-j <N>` / `--concurrency <N>` : Nombre de cartes à compiler en parallèle (concurrence LLM multi-slots, LM Studio uniquement). Permet de configurer le nombre de workers simultanés (défaut : 1). Également configurable via le fichier `.env` ou variable d'environnement (`LM_STUDIO_PARALLEL=4`, `PARALLEL=4`). L'affichage Rich gère les X flux de cartes en temps réel avec une barre globale et des lignes de streaming dédiées par slot.
