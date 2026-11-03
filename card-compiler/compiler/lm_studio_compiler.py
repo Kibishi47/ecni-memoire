@@ -1,23 +1,17 @@
-"""Fournisseur LLM pour LM Studio (local ou distant via tunnel SSH).
+"""Fournisseur LLM pour LM Studio (local ou distant via API REST).
 
 Ce module permet d'exécuter l'inférence du compilateur de cartes Pokémon TCG
-sur une machine distante équipée de LM Studio et pilotée via `lms` (LM Studio CLI),
+sur une instance LM Studio (locale ou sur le réseau local via IP/Port),
 tout en conservant l'intégralité des données, caches et fichiers générés
 (`data/compiled_cards/`, `data/cards_database.json`) sur la machine locale.
 """
 
 from __future__ import annotations
 
-import atexit
 import json
 import os
 import re
-import shutil
-import signal
-import socket
-import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,30 +29,6 @@ from compiler.schemas import (
 )
 from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
-
-
-def find_available_port(start_port: int = 12345, max_attempts: int = 50) -> int:
-    """Trouve un port TCP local disponible pour le tunnel SSH."""
-    for port in range(start_port, start_port + max_attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-    return start_port
-
-
-def _find_sshpass() -> Optional[str]:
-    """Recherche l'exécutable `sshpass` dans le PATH ou les répertoires standards macOS / Linux."""
-    found = shutil.which("sshpass")
-    if found:
-        return found
-    for fallback in [
-        "/opt/homebrew/bin/sshpass",
-        "/usr/local/bin/sshpass",
-        "/usr/bin/sshpass",
-    ]:
-        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
-            return fallback
-    return None
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -267,24 +237,15 @@ def find_best_model_candidate(candidates: List[str], target: Optional[str]) -> O
 
 
 class LMStudioCardCompiler:
-    """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (directe par IP/port ou via tunnel SSH)."""
+    """Compilateur de cartes s'appuyant sur l'API OpenAI-compatible de LM Studio (REST direct)."""
 
     def __init__(
         self,
         api_base_url: Optional[str] = None,
         remote_host: Optional[str] = None,
         remote_port: Optional[int] = None,
-        ssh_host: Optional[str] = None,
-        ssh_port: Optional[int] = None,
-        ssh_user: Optional[str] = None,
-        ssh_key_path: Optional[str] = None,
-        ssh_password: Optional[str] = None,
-        local_port: Optional[int] = None,
-        use_tunnel: Optional[bool] = None,
         model: Optional[str] = None,
         model_name: Optional[str] = None,
-        cli_path: Optional[str] = None,
-        auto_start: Optional[bool] = None,
         timeout_seconds: float = 180.0,
         tier: ModelTier = ModelTier.qwen3,
         disable_thinking: Optional[bool] = None,
@@ -342,34 +303,16 @@ class LMStudioCardCompiler:
             self.api_base_url = cleaned_url
             self.remote_host = None
             self.remote_port = 1234
-            self.ssh_host = None
-            self.use_tunnel = False
         else:
-            env_host = os.environ.get("LM_STUDIO_HOST") or os.environ.get("SSH_HOST") or None
+            env_host = os.environ.get("LM_STUDIO_HOST") or None
             self.remote_host = remote_host or env_host
             self.remote_port = int(remote_port or os.environ.get("LM_STUDIO_PORT") or 1234)
-
-            env_tunnel = os.environ.get("LM_STUDIO_USE_TUNNEL", "false").lower() in {"1", "true", "yes"}
-            self.ssh_host = ssh_host or os.environ.get("SSH_HOST") or None
-            self.use_tunnel = use_tunnel if use_tunnel is not None else (env_tunnel if self.ssh_host else False)
-
-            if self.ssh_host and self.use_tunnel:
-                configured_local_port = int(local_port or os.environ.get("LM_STUDIO_LOCAL_PORT") or 12345)
-                self.local_port = find_available_port(configured_local_port)
-                self.api_base_url = f"http://127.0.0.1:{self.local_port}/v1"
-            elif self.remote_host:
+            if self.remote_host:
                 self.api_base_url = f"http://{self.remote_host}:{self.remote_port}/v1"
             else:
                 self.api_base_url = f"http://127.0.0.1:{self.remote_port}/v1"
 
-        self.ssh_port = int(ssh_port or os.environ.get("SSH_PORT") or 22)
-        self.ssh_user = ssh_user or os.environ.get("SSH_USER") or None
-        self.ssh_key_path = ssh_key_path or os.environ.get("SSH_KEY_PATH") or None
-        self.ssh_password = ssh_password or os.environ.get("SSH_PASSWORD") or None
-        self._askpass_file: Optional[str] = None
-        self.local_port = getattr(self, "local_port", 12345)
-
-        # 3. Modèle d'inférence
+        # Modèle d'inférence
         env_model = os.environ.get("LLM_MODEL") or os.environ.get("MODEL") or os.environ.get("LM_STUDIO_MODEL")
         chosen_model = model_name or model or env_model
         if chosen_model and str(chosen_model).strip():
@@ -377,51 +320,15 @@ class LMStudioCardCompiler:
         else:
             self.model_name = None  # Auto-détecté depuis le modèle actuellement chargé sur le serveur
 
-        self.cli_path = cli_path or os.environ.get("LM_STUDIO_CLI_PATH") or "lms"
-        self.auto_start = False
         self.timeout_seconds = timeout_seconds
-        self._tunnel_proc: Optional[subprocess.Popen] = None
         self._json_schema: Dict[str, Any] = LLMCompiledCardPart.model_json_schema()
         self._use_json_schema_format: bool = True
         self._ready: bool = False
-
         self.hf_token: Optional[str] = None
-        atexit.register(self.close)
-        self._register_signal_handlers()
-
-    def _register_signal_handlers(self) -> None:
-        """Enregistre des handlers de signaux (SIGINT, SIGTERM) pour fermer proprement le tunnel en cas d'interruption."""
-        try:
-            prev_sigint = signal.getsignal(signal.SIGINT)
-            prev_sigterm = signal.getsignal(signal.SIGTERM)
-
-            def _handler(sig, frame):
-                self.close()
-                if sig == signal.SIGINT and callable(prev_sigint) and prev_sigint not in {signal.SIG_DFL, signal.SIG_IGN}:
-                    prev_sigint(sig, frame)
-                elif sig == signal.SIGTERM and callable(prev_sigterm) and prev_sigterm not in {signal.SIG_DFL, signal.SIG_IGN}:
-                    prev_sigterm(sig, frame)
-                sys.exit(130 if sig == signal.SIGINT else 143)
-
-            signal.signal(signal.SIGINT, _handler)
-            signal.signal(signal.SIGTERM, _handler)
-        except Exception:
-            pass
-
-    @property
-    def ssh_target(self) -> str:
-        """Cible SSH au format user@host:port."""
-        if not self.ssh_host:
-            return "localhost"
-        user_prefix = f"{self.ssh_user}@" if self.ssh_user else ""
-        port_suffix = f":{self.ssh_port}" if self.ssh_port != 22 else ""
-        return f"{user_prefix}{self.ssh_host}{port_suffix}"
 
     @property
     def repo_id(self) -> str:
-        if self.ssh_host and self.use_tunnel:
-            return "LM_STUDIO_SSH_TUNNEL"
-        elif self.remote_host and self.remote_host not in {"127.0.0.1", "localhost"}:
+        if self.remote_host and self.remote_host not in {"127.0.0.1", "localhost"}:
             return "LM_STUDIO_REMOTE"
         return "LM_STUDIO"
 
@@ -430,155 +337,10 @@ class LMStudioCardCompiler:
         model_label = self.model_name or "active_server_model"
         return f"{model_label} ({self.api_base_url})"
 
-    def _ensure_askpass_script(self) -> Optional[str]:
-        """Crée un script temporaire compatible SSH_ASKPASS pour transmettre le mot de passe sans TTY."""
-        if not self.ssh_password:
-            return None
-        if self._askpass_file and os.path.exists(self._askpass_file):
-            return self._askpass_file
-        fd, path = tempfile.mkstemp(prefix="ssh_askpass_", suffix=".py")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("#!/usr/bin/env python3\n")
-            f.write("import os, sys\n")
-            f.write("sys.stdout.write(os.environ.get('SSHPASS', ''))\n")
-            f.write("sys.stdout.flush()\n")
-        os.chmod(path, 0o700)
-        self._askpass_file = path
-        return path
-
-    def _get_ssh_env(self) -> Dict[str, str]:
-        """Prépare l'environnement pour les commandes SSH et tunnels."""
-        env = os.environ.copy()
-        if self.ssh_password:
-            env["SSHPASS"] = self.ssh_password
-            if not _find_sshpass():
-                askpass = self._ensure_askpass_script()
-                if askpass:
-                    env["SSH_ASKPASS"] = askpass
-                    env["SSH_ASKPASS_REQUIRE"] = "force"
-                    env["DISPLAY"] = env.get("DISPLAY", ":0")
-        return env
-
-    def _build_ssh_base_command(self) -> List[str]:
-        """Construit la liste des arguments standard pour exécuter une commande SSH."""
-        cmd: List[str] = []
-        sshpass_bin = _find_sshpass() if self.ssh_password else None
-        if self.ssh_password and sshpass_bin:
-            cmd.extend([sshpass_bin, "-e"])
-
-        cmd.extend([
-            "ssh",
-            "-o", "BatchMode=no" if self.ssh_password else "BatchMode=yes",
-            "-o", "ConnectTimeout=8",
-            "-o", "StrictHostKeyChecking=accept-new",
-        ])
-        if self.ssh_password:
-            cmd.extend(["-o", "PreferredAuthentications=password,keyboard-interactive,publickey"])
-            if not self.ssh_key_path:
-                cmd.extend(["-o", "PubkeyAuthentication=no"])
-
-        if self.ssh_port != 22:
-            cmd.extend(["-p", str(self.ssh_port)])
-        if self.ssh_key_path:
-            cmd.extend(["-i", os.path.expanduser(self.ssh_key_path)])
-
-        target = f"{self.ssh_user}@{self.ssh_host}" if self.ssh_user else self.ssh_host
-        cmd.append(target)
-        return cmd
-
-    def _run_ssh_command(self, remote_command: str) -> Tuple[int, str, str]:
-        """Exécute une commande distante via SSH et retourne (code_retour, stdout, stderr)."""
-        cmd = self._build_ssh_base_command()
-        # Export PATH pour garantir que `lms` est trouvé même en session SSH non interactive
-        full_remote_cmd = (
-            'export PATH="$HOME/.cache/lm-studio/bin:$HOME/.lmstudio/bin:$HOME/.local/bin:/usr/local/bin:$PATH"; '
-            f"{remote_command}"
-        )
-        cmd.append(full_remote_cmd)
-        env = self._get_ssh_env()
-        proc = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=60.0,
-        )
-        return proc.returncode, proc.stdout, proc.stderr
-
-    def _start_ssh_tunnel(self) -> None:
-        """Établit un tunnel SSH sécurisé transférant `127.0.0.1:{local_port}` vers `127.0.0.1:{remote_port}`."""
-        if self._tunnel_proc is not None and self._tunnel_proc.poll() is None:
-            return
-
-        cmd: List[str] = []
-        sshpass_bin = _find_sshpass() if self.ssh_password else None
-        if self.ssh_password and sshpass_bin:
-            cmd.extend([sshpass_bin, "-e"])
-
-        cmd.extend([
-            "ssh",
-            "-N",
-            "-L", f"{self.local_port}:127.0.0.1:{self.remote_port}",
-            "-o", "ExitOnForwardFailure=yes",
-            "-o", "ServerAliveInterval=30",
-            "-o", "ServerAliveCountMax=3",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=10",
-            "-o", "BatchMode=no" if self.ssh_password else "BatchMode=yes",
-        ])
-        if self.ssh_password:
-            cmd.extend(["-o", "PreferredAuthentications=password,keyboard-interactive,publickey"])
-            if not self.ssh_key_path:
-                cmd.extend(["-o", "PubkeyAuthentication=no"])
-
-        if self.ssh_port != 22:
-            cmd.extend(["-p", str(self.ssh_port)])
-        if self.ssh_key_path:
-            cmd.extend(["-i", os.path.expanduser(self.ssh_key_path)])
-
-        target = f"{self.ssh_user}@{self.ssh_host}" if self.ssh_user else self.ssh_host
-        cmd.append(target)
-
-        env = self._get_ssh_env()
-        self._tunnel_proc = subprocess.Popen(
-            cmd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-
-        # Attente active de la disponibilité du port local
-        t0 = time.perf_counter()
-        tunnel_ok = False
-        while time.perf_counter() - t0 < 8.0:
-            if self._tunnel_proc.poll() is not None:
-                _, err = self._tunnel_proc.communicate()
-                err_msg = err.decode(errors="replace") if isinstance(err, bytes) else str(err)
-                raise ConnectionError(
-                    f"Impossible d'établir le tunnel SSH vers {self.ssh_target} : {err_msg.strip()}"
-                )
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.4)
-                if s.connect_ex(("127.0.0.1", self.local_port)) == 0:
-                    tunnel_ok = True
-                    break
-            time.sleep(0.3)
-
-        if not tunnel_ok:
-            self.close()
-            raise TimeoutError(
-                f"Le tunnel SSH vers {self.ssh_target} n'a pas répondu sur le port local {self.local_port}."
-            )
-
     def load_model_in_memory(self) -> None:
-        """Établit le tunnel SSH si nécessaire et vérifie le modèle actuellement chargé sur le serveur LM Studio."""
+        """Vérifie le modèle actuellement chargé sur le serveur LM Studio."""
         if self._ready:
             return
-
-        if self.use_tunnel and self.ssh_host:
-            self._start_ssh_tunnel()
 
         models_url = f"{self.api_base_url}/models"
         try:
@@ -613,7 +375,7 @@ class LMStudioCardCompiler:
 
         except Exception as exc:
             self.close()
-            target_desc = f"{self.ssh_target} (via tunnel {self.api_base_url})" if self.ssh_host else self.api_base_url
+            target_desc = self.remote_host if self.remote_host else self.api_base_url
             if isinstance(exc, RuntimeError):
                 raise
             raise ConnectionError(
@@ -805,7 +567,7 @@ class LMStudioCardCompiler:
         disable_thinking: Optional[bool] = None,
         thinking: Optional[str] = None,
     ) -> EngineCardModel:
-        """Compile une carte Pokémon TCG via LM Studio (remote SSH / local REST) avec format contraint."""
+        """Compile une carte Pokémon TCG via LM Studio (REST direct) avec format contraint."""
         from compiler.llm_engine import (
             CODING_SYSTEM_PROMPT,
             SYSTEM_PROMPT,
@@ -1203,25 +965,5 @@ class LMStudioCardCompiler:
         pass
 
     def close(self) -> None:
-        """Ferme proprement le compilateur : ferme le tunnel SSH et nettoie les fichiers temporaires."""
-        # 1. Fermeture du tunnel SSH
-        if self._tunnel_proc is not None:
-            try:
-                self._tunnel_proc.terminate()
-                self._tunnel_proc.wait(timeout=1.5)
-            except Exception:
-                try:
-                    self._tunnel_proc.kill()
-                except Exception:
-                    pass
-            finally:
-                self._tunnel_proc = None
-
-        if self._askpass_file and os.path.exists(self._askpass_file):
-            try:
-                os.unlink(self._askpass_file)
-            except Exception:
-                pass
-            self._askpass_file = None
-
+        """Ferme proprement le compilateur."""
         self._ready = False
