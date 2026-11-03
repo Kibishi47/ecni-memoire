@@ -1425,7 +1425,15 @@ def reason_command(
     ),
     force: bool = typer.Option(False, "--force", help="Force la regénération des analyses même si déjà en cache."),
     limit: Optional[int] = typer.Option(None, "--limit"),
-    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution.",
+    ),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
 ) -> None:
     """Exécute la Passe 1 du pipeline Two-Pass : Génère tous les textes d'analyse de règles dans data/reasoning_texts/."""
@@ -1485,7 +1493,15 @@ def code_command(
     ),
     force: bool = typer.Option(False, "--force", help="Force la recompilation JSON même si la carte existe déjà."),
     limit: Optional[int] = typer.Option(None, "--limit"),
-    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution.",
+    ),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
 ) -> None:
     """Exécute la Passe 2 du pipeline Two-Pass : Transforme les textes d'analyse en code JSON formel validé."""

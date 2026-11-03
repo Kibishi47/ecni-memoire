@@ -225,7 +225,7 @@ class SpecialConditionType(str, Enum):
 class CardFilter(BaseModel):
     """Filtre générique de ciblage de cartes utilisable dans les préconditions, coûts, effets et synergies."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     category: Optional[CardCategory] = Field(
         default=None,
@@ -283,6 +283,113 @@ class CardFilter(BaseModel):
         description="Coût de retraite maximum autorisé ou null.",
     )
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_filter_category(cls, v: Any) -> Optional[CardCategory]:
+        if v is None:
+            return None
+        if isinstance(v, CardCategory):
+            return v
+        if not isinstance(v, str):
+            return None
+        raw = v.strip().upper()
+        if not raw or raw in {"NONE", "NULL", "N/A", "ANY"}:
+            return None
+        if "POK" in raw:
+            return CardCategory.POKEMON
+        if "TRAIN" in raw or "DRESS" in raw:
+            return CardCategory.TRAINER
+        if "ENERG" in raw:
+            return CardCategory.ENERGY
+        try:
+            return CardCategory(raw)
+        except ValueError:
+            return None
+
+    @field_validator("subCategory", mode="before")
+    @classmethod
+    def normalize_filter_sub_category(cls, v: Any) -> Optional[CardSubCategory]:
+        if v is None:
+            return None
+        if isinstance(v, CardSubCategory):
+            return v
+        if not isinstance(v, str):
+            return None
+        raw = v.strip().upper()
+        if not raw or raw in {"NONE", "NULL", "N/A", "ANY"}:
+            return None
+        SUB_MAP: Dict[str, CardSubCategory] = {
+            "BASE": CardSubCategory.BASIC,
+            "BASIC": CardSubCategory.BASIC,
+            "STAGE_1": CardSubCategory.STAGE_1,
+            "STAGE1": CardSubCategory.STAGE_1,
+            "NIVEAU_1": CardSubCategory.STAGE_1,
+            "NIVEAU1": CardSubCategory.STAGE_1,
+            "STAGE_2": CardSubCategory.STAGE_2,
+            "STAGE2": CardSubCategory.STAGE_2,
+            "NIVEAU_2": CardSubCategory.STAGE_2,
+            "NIVEAU2": CardSubCategory.STAGE_2,
+            "ITEM": CardSubCategory.ITEM,
+            "OBJET": CardSubCategory.ITEM,
+            "SUPPORTER": CardSubCategory.SUPPORTER,
+            "TOOL": CardSubCategory.TOOL,
+            "OUTIL": CardSubCategory.TOOL,
+            "STADIUM": CardSubCategory.STADIUM,
+            "STADE": CardSubCategory.STADIUM,
+            "BASIC_ENERGY": CardSubCategory.BASIC_ENERGY,
+            "SPECIAL_ENERGY": CardSubCategory.SPECIAL_ENERGY,
+        }
+        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
+        if clean in SUB_MAP:
+            return SUB_MAP[clean]
+        try:
+            return CardSubCategory(clean)
+        except ValueError:
+            return None
+
+    @field_validator("maxHp", "minHp", "maxRetreatCost", mode="before")
+    @classmethod
+    def normalize_int_optional(cls, v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        s = str(v).strip().lower()
+        if s in ("", "none", "null", "n/a", "na", "undefined"):
+            return None
+        m = re.search(r"\d+", s)
+        if m:
+            return int(m.group())
+        return None
+
+    @field_validator("isRuleBox", "isEvolution", "isTera", "isAncient", "isFuture", "hasAbility", mode="before")
+    @classmethod
+    def normalize_bool_optional(cls, v: Any) -> Optional[bool]:
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        if s in ("", "none", "null", "n/a", "undefined"):
+            return None
+        if s in ("true", "1", "yes", "oui"):
+            return True
+        if s in ("false", "0", "no", "non"):
+            return False
+        return None
+
+    @field_validator("energyType", "specificCardName", mode="before")
+    @classmethod
+    def normalize_str_optional(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s or s.lower() in ("none", "null", "n/a", "undefined"):
+            return None
+        return s
+
 
 class ActionPrecondition(BaseModel):
     """Précondition formelle devant être vérifiée dans l'état du jeu avant d'exécuter une action."""
@@ -320,14 +427,43 @@ class ActionPrecondition(BaseModel):
             }
         return data
 
+    @field_validator("minCount", mode="before")
+    @classmethod
+    def normalize_min_count(cls, v: Any) -> int:
+        if v is None:
+            return 1
+        if isinstance(v, (int, float)):
+            return max(0, int(round(v)))
+        s = str(v).strip()
+        m = re.search(r"\d+", s)
+        if m:
+            return max(0, int(m.group()))
+        return 1
+
+    @field_validator("targetFilter", mode="before")
+    @classmethod
+    def normalize_target_filter(cls, v: Any) -> Optional[Any]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.lower() in ("none", "null", "n/a"):
+                return None
+            return {"specificCardName": s}
+        return v
+
     @field_validator("type", mode="before")
     @classmethod
     def normalize_precondition_type(cls, v: Any) -> PreconditionType:
+        if not v:
+            return PreconditionType.ZONE_HAS_MATCHING_CARD
         if isinstance(v, PreconditionType):
             return v
         if not isinstance(v, str):
             return PreconditionType.ZONE_HAS_MATCHING_CARD
         raw = v.strip().upper()
+        if not raw or raw in {"NONE", "NULL", "N/A"}:
+            return PreconditionType.ZONE_HAS_MATCHING_CARD
         for p in PreconditionType:
             if p.value == raw:
                 return p
@@ -394,14 +530,30 @@ class ActionCost(BaseModel):
         description="Filtre éventuel sur les cartes autorisées pour payer ce coût, ou null.",
     )
 
+    @field_validator("targetFilter", mode="before")
+    @classmethod
+    def normalize_cost_target_filter(cls, v: Any) -> Optional[Any]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.lower() in ("none", "null", "n/a"):
+                return None
+            return {"specificCardName": s}
+        return v
+
     @field_validator("type", mode="before")
     @classmethod
     def normalize_cost_type(cls, v: Any) -> CostType:
+        if not v:
+            return CostType.DISCARD_FROM_HAND
         if isinstance(v, CostType):
             return v
         if not isinstance(v, str):
             return CostType.DISCARD_FROM_HAND
         raw = v.strip().upper()
+        if not raw or raw in {"NONE", "NULL", "N/A"}:
+            return CostType.DISCARD_FROM_HAND
         for c in CostType:
             if c.value == raw:
                 return c
@@ -429,10 +581,15 @@ class ActionCost(BaseModel):
     @field_validator("count", mode="before")
     @classmethod
     def clamp_cost_count(cls, v: Any) -> int:
-        try:
-            return max(0, int(round(float(v))))
-        except (ValueError, TypeError):
+        if v is None:
             return 1
+        if isinstance(v, (int, float)):
+            return max(0, int(round(v)))
+        s = str(v).strip()
+        m = re.search(r"\d+", s)
+        if m:
+            return max(0, int(m.group()))
+        return 1
 
 
 class AtomicEffect(BaseModel):
@@ -699,23 +856,59 @@ class AtomicEffect(BaseModel):
                 return None
         return None
 
+    @field_validator("upTo", mode="before")
+    @classmethod
+    def normalize_up_to(cls, v: Any) -> bool:
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        if s in ("true", "1", "yes", "oui"):
+            return True
+        return False
+
+    @field_validator("targetFilter", mode="before")
+    @classmethod
+    def normalize_effect_target_filter(cls, v: Any) -> Optional[Any]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.lower() in ("none", "null", "n/a"):
+                return None
+            return {"specificCardName": s}
+        return v
+
     @field_validator("count", mode="before")
     @classmethod
     def clamp_effect_count(cls, v: Any) -> int:
-        try:
-            return max(0, int(round(float(v))))
-        except (ValueError, TypeError):
+        if v is None:
             return 1
+        if isinstance(v, (int, float)):
+            return max(0, int(round(v)))
+        s = str(v).strip()
+        m = re.search(r"\d+", s)
+        if m:
+            return max(0, int(m.group()))
+        return 1
 
     @field_validator("baseDamage", "damageScalingPerOpponentPrizeTaken", "damageScalingValue", mode="before")
     @classmethod
     def clamp_damage_vals(cls, v: Any) -> Optional[int]:
         if v is None:
             return None
-        try:
-            return max(0, int(round(float(v))))
-        except (ValueError, TypeError):
-            return 0
+        if isinstance(v, (int, float)):
+            return max(0, int(round(v)))
+        s = str(v).strip().lower()
+        if s in ("", "none", "null", "n/a", "na", "false", "undefined"):
+            return None
+        m = re.search(r"\d+", s)
+        if m:
+            return max(0, int(m.group()))
+        return None
 
 
 class PlayableAction(BaseModel):
@@ -820,9 +1013,62 @@ class PlayableAction(BaseModel):
             return ActionTiming.PASSIVE_CONTINUOUS
         return ActionTiming.ONCE_PER_CARD
 
+    @field_validator("actionId", mode="before")
+    @classmethod
+    def normalize_action_id(cls, v: Any) -> str:
+        if v is None:
+            return "action_1"
+        s = str(v).strip()
+        return s if s else "action_1"
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_action_label(cls, v: Any) -> str:
+        if v is None:
+            return "Action"
+        s = str(v).strip()
+        return s if s else "Action"
+
+    @field_validator("canUseTurn1GoingFirst", "canUseTurn1GoingSecond", mode="before")
+    @classmethod
+    def normalize_turn1_bool(cls, v: Any) -> bool:
+        if v is None or v == "":
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        return s in ("true", "1", "yes", "oui")
+
+    @field_validator("energyCost", mode="before")
+    @classmethod
+    def ensure_energy_cost_list(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip()
+            return [s] if s else []
+        if isinstance(v, list):
+            return [str(x) for x in v if x is not None and str(x).strip()]
+        return []
+
+    @field_validator("preconditions", "costs", mode="before")
+    @classmethod
+    def ensure_action_component_list(cls, v: Any) -> List[Any]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, dict):
+            return [v]
+        return []
+
     @field_validator("effects", mode="before")
     @classmethod
     def ensure_effects_list(cls, v: Any) -> List[Any]:
+        if v is None:
+            return []
         if isinstance(v, dict):
             return [v]
         if isinstance(v, list):
@@ -967,6 +1213,16 @@ class TurnPhaseWeights(BaseModel):
         description="Coefficient d'utilité aux Tours 4 et suivants (0.0 à 2.0).",
     )
 
+    @field_validator("turn1", "turn2", "turn3", "turn4Plus", mode="before")
+    @classmethod
+    def clamp_phase_weight(cls, v: Any) -> float:
+        if v is None:
+            return 1.0
+        try:
+            return max(0.0, min(2.0, float(v)))
+        except (ValueError, TypeError):
+            return 1.0
+
     @model_validator(mode="before")
     @classmethod
     def normalize_turn_phase_weights(cls, data: Any) -> Any:
@@ -989,16 +1245,24 @@ class TurnPhaseWeights(BaseModel):
             elif "turn4" in k_norm or "t4" in k_norm or "end" in k_norm or "late" in k_norm or "plus" in k_norm:
                 cleaned["turn4Plus"] = val
 
-        t1 = cleaned.get("turn1", data.get("turn1", 1.0))
-        t2 = cleaned.get("turn2", data.get("turn2", 1.0))
-        t3 = cleaned.get("turn3", data.get("turn3", 1.0))
-        t4 = cleaned.get("turn4Plus", data.get("turn4Plus", data.get("turn4", 1.0)))
+        def _safe_float(val: Any, default: float = 1.0) -> float:
+            if val is None:
+                return default
+            try:
+                return max(0.0, min(2.0, float(val)))
+            except (ValueError, TypeError):
+                return default
+
+        t1 = cleaned.get("turn1") if cleaned.get("turn1") is not None else data.get("turn1")
+        t2 = cleaned.get("turn2") if cleaned.get("turn2") is not None else data.get("turn2")
+        t3 = cleaned.get("turn3") if cleaned.get("turn3") is not None else data.get("turn3")
+        t4 = cleaned.get("turn4Plus") if cleaned.get("turn4Plus") is not None else data.get("turn4Plus", data.get("turn4"))
 
         return {
-            "turn1": max(0.0, min(2.0, float(t1))),
-            "turn2": max(0.0, min(2.0, float(t2))),
-            "turn3": max(0.0, min(2.0, float(t3))),
-            "turn4Plus": max(0.0, min(2.0, float(t4))),
+            "turn1": _safe_float(t1, 1.0),
+            "turn2": _safe_float(t2, 1.0),
+            "turn3": _safe_float(t3, 1.0),
+            "turn4Plus": _safe_float(t4, 1.0),
         }
 
 
@@ -1075,14 +1339,33 @@ class SynergyRequirement(BaseModel):
     @field_validator("minCountInDeck", mode="before")
     @classmethod
     def clamp_min_count(cls, v: Any) -> int:
-        try:
-            return max(1, int(round(float(v))))
-        except (ValueError, TypeError):
+        if v is None:
             return 1
+        if isinstance(v, (int, float)):
+            return max(1, int(round(v)))
+        s = str(v).strip()
+        m = re.search(r"\d+", s)
+        if m:
+            return max(1, int(m.group()))
+        return 1
+
+    @field_validator("ifMissingSetValueToZero", mode="before")
+    @classmethod
+    def normalize_missing_zero(cls, v: Any) -> bool:
+        if v is None or v == "":
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        return s in ("true", "1", "yes", "oui")
 
     @field_validator("bonusWeightPerCopy", mode="before")
     @classmethod
     def clamp_bonus_weight(cls, v: Any) -> float:
+        if v is None:
+            return 0.0
         try:
             return max(0.0, float(v))
         except (ValueError, TypeError):
@@ -1321,10 +1604,21 @@ class StrategicEvaluator(BaseModel):
 
         return data
 
+    @field_validator("decklistSynergyRequirements", mode="before")
+    @classmethod
+    def ensure_synergies_list(cls, v: Any) -> List[Any]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, (dict, str)):
+            return [v]
+        return []
+
     @field_validator("inGameDeadCardConditions", mode="before")
     @classmethod
     def sanitize_dead_card_conditions(cls, v: Any) -> List[Any]:
-        if not isinstance(v, list):
+        if v is None or not isinstance(v, list):
             return []
         filtered: List[Any] = []
         for item in v:
@@ -1451,6 +1745,40 @@ class LLMCompiledCardPart(BaseModel):
         description="Profil d'évaluation stratégique dynamique de la carte.",
     )
 
+    @field_validator("reasoningAnalysis", mode="before")
+    @classmethod
+    def normalize_reasoning_analysis(cls, v: Any) -> str:
+        if v is None:
+            return "Analyse déterministe générée par compilateur."
+        s = str(v).strip()
+        return s if s else "Analyse déterministe générée par compilateur."
+
+    @field_validator("playableActions", mode="before")
+    @classmethod
+    def ensure_playable_actions_list(cls, v: Any) -> List[Any]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, dict):
+            return [v]
+        return []
+
+    @field_validator("strategicEvaluator", mode="before")
+    @classmethod
+    def ensure_strategic_evaluator(cls, v: Any) -> Any:
+        if v is None or not isinstance(v, dict):
+            return {
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 0,
+            }
+        return v
+
     @field_validator("category", mode="before")
     @classmethod
     def normalize_category(cls, v: Any) -> CardCategory:
@@ -1506,6 +1834,118 @@ class LLMCompiledCardPart(BaseModel):
             return CardSubCategory(clean)
         except ValueError:
             return CardSubCategory.BASIC
+
+
+def build_fallback_compiled_part(
+    bundle: Any,
+    reasoning_text: Optional[str] = None,
+) -> LLMCompiledCardPart:
+    """Construit un modèle `LLMCompiledCardPart` valide et déterministe en cas de défaillance totale du LLM."""
+    identity = getattr(bundle, "identity", None)
+    if identity:
+        cat = identity.category
+        subcat = identity.subCategory
+        name = identity.nameFr or "Carte"
+        card_id = getattr(bundle, "card_id", "inconnue")
+    else:
+        cat = CardCategory.POKEMON
+        subcat = CardSubCategory.BASIC
+        name = "Carte"
+        card_id = "inconnue"
+
+    txt = (reasoning_text or "").strip()
+    if not txt:
+        txt = f"Modélisation de secours déterministe pour {name} ({card_id})."
+
+    raw_fr = getattr(bundle, "raw_fr", {}) or {}
+    raw_en = getattr(bundle, "raw_en", {}) or {}
+
+    actions: List[PlayableAction] = []
+    if cat == CardCategory.POKEMON:
+        attacks = raw_fr.get("attacks") or raw_en.get("attacks") or []
+        for idx, atk in enumerate(attacks, start=1):
+            atk_name = atk.get("name") or f"Attaque {idx}"
+            dmg_str = str(atk.get("damage") or "")
+            dmg_match = re.search(r"\d+", dmg_str)
+            dmg_val = int(dmg_match.group()) if dmg_match else None
+            cost_raw = atk.get("cost") or []
+            actions.append(
+                PlayableAction(
+                    actionId=f"attack_{idx}",
+                    label=atk_name,
+                    sourceType=ActionSourceType.ATTACK,
+                    timing=ActionTiming.END_OF_TURN_ATTACK,
+                    canUseTurn1GoingFirst=False,
+                    canUseTurn1GoingSecond=True,
+                    energyCost=[str(c) for c in cost_raw],
+                    effects=[
+                        AtomicEffect(
+                            primitive=EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+                            baseDamage=dmg_val,
+                            count=1,
+                            upTo=False,
+                        )
+                    ],
+                )
+            )
+        if not actions:
+            actions.append(
+                PlayableAction(
+                    actionId="attack_1",
+                    label="Attaque",
+                    sourceType=ActionSourceType.ATTACK,
+                    timing=ActionTiming.END_OF_TURN_ATTACK,
+                    canUseTurn1GoingFirst=False,
+                    canUseTurn1GoingSecond=True,
+                    energyCost=[],
+                    effects=[
+                        AtomicEffect(
+                            primitive=EffectPrimitive.DEAL_DAMAGE_ACTIVE,
+                            baseDamage=10,
+                            count=1,
+                            upTo=False,
+                        )
+                    ],
+                )
+            )
+    else:
+        is_supp = (subcat == CardSubCategory.SUPPORTER)
+        actions.append(
+            PlayableAction(
+                actionId="play_trainer",
+                label=name,
+                sourceType=ActionSourceType.TRAINER_PLAY,
+                timing=ActionTiming.ONCE_PER_TURN_SUPPORTER if is_supp else ActionTiming.ONCE_PER_CARD,
+                canUseTurn1GoingFirst=False if is_supp else True,
+                canUseTurn1GoingSecond=True,
+                effects=[
+                    AtomicEffect(
+                        primitive=EffectPrimitive.SEARCH_DECK_TO_HAND,
+                        count=1,
+                        upTo=False,
+                    )
+                ],
+            )
+        )
+
+    role = StrategicRole.MAIN_ATTACKER if cat == CardCategory.POKEMON else StrategicRole.CONSISTENCY_TUTOR
+    evaluator = StrategicEvaluator(
+        primaryRole=role,
+        intrinsicBaseScore=60,
+        turnPhaseWeights=TurnPhaseWeights(turn1=1.0, turn2=1.0, turn3=1.0, turn4Plus=1.0),
+        decklistSynergyRequirements=[],
+        inGameDeadCardConditions=[],
+        discardPriorityWhenDead=50,
+        holdForNextTurnBonus=10,
+    )
+
+    return LLMCompiledCardPart(
+        reasoningAnalysis=txt,
+        category=cat,
+        subCategory=subcat,
+        playableActions=actions,
+        strategicEvaluator=evaluator,
+    )
 
 
 class CardIdentity(BaseModel):
