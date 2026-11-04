@@ -15,11 +15,12 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import urllib.parse
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -969,3 +970,107 @@ class TCGdexFetcher:
                     bundles.append(res)
 
             return bundles
+
+    async def download_raw_cards(
+        self,
+        card_ids: List[str],
+        client: Optional[httpx.AsyncClient] = None,
+        force: bool = False,
+        concurrency: int = 5,
+        progress_callback: Optional[Callable[[str, str, bool, Optional[str]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Télécharge et enregistre chaque carte dans le cache individuel `data/raw_tcgdex/{card_id}.json`.
+
+        Args:
+            card_ids: Liste d'identifiants de cartes à télécharger dans le cache.
+            client: Instance httpx.AsyncClient optionnelle (créée automatiquement si None).
+            force: Si True, force le re-téléchargement et écrase data/raw_tcgdex/{card_id}.json.
+                   Si False, les cartes déjà présentes sur le disque sont préservées (cache hit).
+            concurrency: Nombre de téléchargements simultanés (requêtes réseau parallèles).
+            progress_callback: Callback optionnel appelé après le traitement de chaque carte:
+                               callback(card_id, card_name, newly_downloaded, error_msg)
+
+        Returns:
+            Dictionnaire récapitulatif {
+                "total": int,
+                "cached": int,
+                "downloaded": int,
+                "failed": int,
+                "failed_cards": Dict[str, str],
+                "elapsed_seconds": float,
+            }
+        """
+        if client is not None:
+            return await self._download_raw_cards_impl(
+                card_ids=card_ids,
+                client=client,
+                force=force,
+                concurrency=concurrency,
+                progress_callback=progress_callback,
+            )
+
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "pokemon-tcg-card-compiler/0.1.0",
+        }
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers, follow_redirects=True) as local_client:
+            return await self._download_raw_cards_impl(
+                card_ids=card_ids,
+                client=local_client,
+                force=force,
+                concurrency=concurrency,
+                progress_callback=progress_callback,
+            )
+
+    async def _download_raw_cards_impl(
+        self,
+        card_ids: List[str],
+        client: httpx.AsyncClient,
+        force: bool = False,
+        concurrency: int = 5,
+        progress_callback: Optional[Callable[[str, str, bool, Optional[str]], None]] = None,
+    ) -> Dict[str, Any]:
+        start_time = time.perf_counter()
+        unique_ids = list(dict.fromkeys(cid.strip() for cid in card_ids if cid.strip()))
+        total = len(unique_ids)
+
+        cached_count = 0
+        downloaded_count = 0
+        failed_cards: Dict[str, str] = {}
+        lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def _worker(cid: str) -> None:
+            nonlocal cached_count, downloaded_count
+            cache_file = self.raw_dir / f"{cid}.json"
+            was_cached = cache_file.exists() and not force
+
+            async with semaphore:
+                try:
+                    bundle = await self.fetch_card_by_id(client, cid, force=force)
+                    cname = bundle.identity.nameFr or cid
+                    async with lock:
+                        if was_cached:
+                            cached_count += 1
+                        else:
+                            downloaded_count += 1
+                    if progress_callback:
+                        progress_callback(cid, cname, not was_cached, None)
+                except Exception as exc:
+                    async with lock:
+                        failed_cards[cid] = str(exc)
+                    if progress_callback:
+                        progress_callback(cid, cid, False, str(exc))
+
+        await asyncio.gather(*[_worker(cid) for cid in unique_ids])
+        elapsed = time.perf_counter() - start_time
+
+        return {
+            "total": total,
+            "cached": cached_count,
+            "downloaded": downloaded_count,
+            "failed": len(failed_cards),
+            "failed_cards": failed_cards,
+            "elapsed_seconds": elapsed,
+        }
+
