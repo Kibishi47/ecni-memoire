@@ -50,6 +50,51 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
     expect(summary1.globalWinRate).toBe(summary2.globalWinRate)
     expect(summary1.avgPlayerPrizesWon).toBe(summary2.avgPlayerPrizesWon)
     expect(summary1.avgOpponentPrizesWon).toBe(summary2.avgOpponentPrizesWon)
+
+    // Vérification des 6 nouvelles familles d'analyses tactiques compétitives
+    expect(Object.keys(summary1.cardTelemetry).length).toBeGreaterThan(0)
+    const ragingBoltTelemetry = summary1.cardTelemetry['sv05-123']
+    expect(ragingBoltTelemetry).toBeDefined()
+    expect(ragingBoltTelemetry!.gamesInDeck).toBe(8)
+    expect(ragingBoltTelemetry!.quantityInDeck).toBe(4)
+
+    expect(summary1.averageSetupTurn).toBeGreaterThanOrEqual(0)
+    expect(summary1.setupTurnHistogram.T1).toBeGreaterThanOrEqual(0)
+    expect(summary1.attackerStreamingRate).toBeGreaterThanOrEqual(0)
+    expect(summary1.attackerStreamingRate).toBeLessThanOrEqual(100)
+
+    expect(summary1.postDisruptionResilience).toBeDefined()
+    expect(summary1.bossFlexibility).toBeDefined()
+    expect(summary1.bossFlexibilityRate).toBeGreaterThanOrEqual(0)
+    expect(summary1.conditionalComboStats.length).toBeGreaterThan(0)
+    expect(summary1.averageDamagePerTurn).toBeGreaterThanOrEqual(0)
+
+    expect(summary1.turnOrderSplitStats.gamesGoingFirst).toBe(4)
+    expect(summary1.turnOrderSplitStats.gamesGoingSecond).toBe(4)
+  })
+
+  it('tracks OHKO attacker streaming under stressTestOhkoEachTurn and post-Iono resilience', async () => {
+    const playerDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const pool = new SimulationWorkerPool()
+
+    const config = {
+      iterations: 6,
+      maxTurns: 12,
+      maxBranches: 8 as const,
+      selectedOpponentIds: [META_OPPONENT_DECKS[0]!.id],
+      firstPlayerMode: 'RANDOM' as const,
+      debugMode: false,
+      workerCount: 1,
+      fixedSeed: 987654,
+      perturbationType: 'FORCE_OPPONENT_IONO' as const,
+      perturbationTurn: 3,
+      stressTestOhkoEachTurn: true,
+    }
+
+    const summary = await pool.runSimulation(playerDeck, config)
+    expect(summary.totalGamesSimulated).toBe(6)
+    expect(summary.totalActiveKOsSuffered).toBeGreaterThan(0)
+    expect(summary.postDisruptionResilience.disruptionsSufferedCount).toBeGreaterThan(0)
   })
 
   it('cancels simulation immediately and sets status to CANCELLED', async () => {

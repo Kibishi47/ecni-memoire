@@ -1059,13 +1059,14 @@ export function applyDebugPerturbationIfConfigured(
         fisherYatesShuffle(handCards, rng)
         board.deck.push(...handCards)
       }
-      const drawCount = Math.min(board.deck.length, board.prizes.length)
+      const maxResetCards = board === state.player ? Math.min(4, board.prizes.length) : board.prizes.length
+      const drawCount = Math.min(board.deck.length, maxResetCards)
       for (let i = 0; i < drawCount; i++) {
         board.hand.push(board.deck.shift()!)
       }
     }
     state.rngState = rng.getState()
-    return `Perturbation Debug (Tour ${state.turnNumber}) : Mashynn / Iono forcée (mains mélangées sous le deck, pioche selon les Récompenses restantes).`
+    return `Perturbation Debug (Tour ${state.turnNumber}) : Mashynn / Iono forcée (mains mélangées sous le deck, pioche réduite <= 4 cartes).`
   }
 
   if (perturbationType === 'FORCE_KO_ACTIVE' && state.player.activePokemon) {
@@ -2630,9 +2631,17 @@ function resolveAtomicEffect(
         }
 
         const oppHand = passiveBoard.hand.splice(0, passiveBoard.hand.length)
-        passiveBoard.deck.push(...passiveBoard.hand, ...oppHand)
+        passiveBoard.deck.push(...oppHand)
         fisherYatesShuffle(passiveBoard.deck, rng)
         for (let i = 0; i < 2 && passiveBoard.deck.length > 0; i++) {
+          passiveBoard.hand.push(passiveBoard.deck.shift()!)
+        }
+      } else if (eff.targetZone === 'OPPONENT_HAND') {
+        const oppHand = passiveBoard.hand.splice(0, passiveBoard.hand.length)
+        passiveBoard.deck.push(...oppHand)
+        fisherYatesShuffle(passiveBoard.deck, rng)
+        const drawCount = eff.count || 2
+        for (let i = 0; i < drawCount && passiveBoard.deck.length > 0; i++) {
           passiveBoard.hand.push(passiveBoard.deck.shift()!)
         }
       } else {

@@ -14,6 +14,78 @@ export interface SimulationConfig {
   fixedSeed: number | null
   perturbationType: DebugPerturbationType
   perturbationTurn: number
+  stressTestOhkoEachTurn?: boolean
+}
+
+export interface CardUsageMetrics {
+  cardId: string
+  nameFr: string
+  category: string
+  subCategory: string
+  quantityInDeck: number
+  gamesInDeck: number
+  gamesDrawn: number
+  gamesPlayed: number
+  gamesDiscardedUnused: number
+  turnsStuckDeadInHand: number
+  gamesAllCopiesPrized: number
+  winsWhenAllPrized: number
+  winRateWhenAllPrized: number
+  winRateImpactWhenAllPrized: number
+  effectivePlayRate: number
+  drawnRate: number
+  discardedUnusedRate: number
+  deadHandTurnRate: number
+  allCopiesPrizedRate: number
+}
+
+export interface SetupTurnHistogram {
+  T1: number
+  T2: number
+  T3: number
+  T4Plus: number
+  failed: number
+}
+
+export interface PostDisruptionResilienceStats {
+  disruptionsSufferedCount: number
+  postDisruptionAttackCount: number
+  postDisruptionAttackRate: number
+  postDisruptionBrickRate: number
+}
+
+export interface BossFlexibilityStats {
+  totalAttackTurnsCount: number
+  supporterFreeAttackCount: number
+  supporterFreeAttackRate: number
+  gamesWithBossPlusAttackCount: number
+  bossPlusAttackComboRate: number
+}
+
+export interface ConditionalComboStatRecord {
+  comboId: string
+  label: string
+  cardId: string
+  cardNameFr: string
+  conditionSummary: string
+  gamesTriggered: number
+  totalTriggersCount: number
+  triggerRate: number
+  avgTriggerTurn: number
+  avgDamageWhenTriggered: number
+}
+
+export interface TurnOrderSplitStats {
+  gamesGoingFirst: number
+  winsGoingFirst: number
+  winRateGoingFirst: number
+  gamesGoingSecond: number
+  winsGoingSecond: number
+  winRateGoingSecond: number
+  turn1AttackOrItemLockCountJ2: number
+  turn1AttackOrItemLockRateJ2: number
+  turn1ItemLockCountJ2: number
+  turn1ItemLockRateJ2: number
 }
 
 export interface TracedPokemonSnapshot {
@@ -119,6 +191,21 @@ export interface SimulationMetricsSummary {
     DECK_OUT: number
     MAX_TURNS_REACHED: number
   }
+
+  // Les 6 familles d'analyses tactiques compétitives
+  cardTelemetry: Record<string, CardUsageMetrics>
+  averageSetupTurn: number
+  setupTurnHistogram: SetupTurnHistogram
+  attackerStreamingRate: number
+  totalActiveKOsSuffered: number
+  revengeAttackSuccessCount: number
+  postDisruptionResilience: PostDisruptionResilienceStats
+  bossFlexibility: BossFlexibilityStats
+  bossFlexibilityRate: number
+  conditionalComboStats: ConditionalComboStatRecord[]
+  averageDamagePerTurn: number
+  turnOrderSplitStats: TurnOrderSplitStats
+
   configUsed: SimulationConfig
   baseSeedUsed: number
   tracedGames: TracedGameRecord[]
