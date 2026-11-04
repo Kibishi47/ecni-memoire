@@ -165,21 +165,31 @@ Vous pouvez lancer la génération des textes d'analyse, puis plus tard génére
 # (Charge DeepSeek-R1, génère tous les textes dans data/reasoning_texts/, puis libère la mémoire)
 python run_reasoning.py --ids sv08.5-001,sv04-125
 
+# Cibler une liste de cartes depuis un fichier texte (avec déduplication automatique) :
+python run_reasoning.py --ids-file data/target_ids.txt
+
 # Étape 2 : Transformer ces analyses en JSON formel
 # (Charge Qwen Coder, lit data/reasoning_texts/, compile dans data/compiled_cards/)
 python run_coding.py --ids sv08.5-001,sv04-125
+
+# Ou avec la liste de cartes depuis le fichier :
+python run_coding.py --ids-file data/target_ids.txt
 ```
 
 #### Méthode 2 : Via la CLI unifiée Typer
 ```bash
 # Exécuter uniquement la Passe 1 (Raisonnement)
 python -m compiler.cli reason --ids sv08.5-001
+# Avec un fichier d'identifiants (ex: le fichier test inclus data/target_ids.txt) :
+python -m compiler.cli reason -f data/target_ids.txt
 
 # Exécuter uniquement la Passe 2 (Codage JSON)
 python -m compiler.cli code --ids sv08.5-001
+# Avec le fichier d'identifiants :
+python -m compiler.cli code -f data/target_ids.txt
 
 # Enchaîner les 2 passes automatiquement avec libération mémoire intermédiaire garantie
-python -m compiler.cli run --pipeline two_pass --phase all --ids sv08.5-001,sv04-125
+python -m compiler.cli run --pipeline two_pass --phase all -f data/target_ids.txt
 ```
 
 ---
@@ -219,35 +229,48 @@ La CLI intègre tous les outils nécessaires pour piloter l'avancement de votre 
 # 1. Connaître le nombre de cartes restantes à compiler (JSON Passe 2)
 python -m compiler.cli remaining
 python -m compiler.cli remaining --set sv08.5 --details
+# Suivre l'avancement spécifique d'une liste de cartes (fichier texte avec déduplication auto) :
+python -m compiler.cli remaining --ids-file data/target_ids.txt
 
 # 1.bis Connaître le nombre de cartes restantes à analyser/raisonner (Passe 1)
 python -m compiler.cli remaining --reasoned
-python -m compiler.cli remaining -r --details
+python -m compiler.cli remaining -r --ids-file data/target_ids.txt
 
 # 2. Compter les cartes déjà compilées sur le disque (data/compiled_cards/)
 python -m compiler.cli count
 python -m compiler.cli count --details
+# Compter parmi une sélection de cartes cibles :
+python -m compiler.cli count --ids-file data/target_ids.txt
 
 # 2.bis Compter les fiches de raisonnement générées (data/reasoning_texts/)
 python -m compiler.cli count --reasoned
-python -m compiler.cli count -r --details
+python -m compiler.cli count -r -f data/target_ids.txt
 
 # 3. Synchroniser la base de données consolidée data/cards_database.json
 python -m compiler.cli sync
 python -m compiler.cli sync --update
+# Synchroniser uniquement les cartes ciblées par un fichier :
+python -m compiler.cli sync --ids-file data/target_ids.txt
 
-# 4. Inspecter visuellement le modèle JSON compilé d'une carte
+# 4. Inspecter visuellement le modèle JSON compilé d'une carte (ou d'un lot)
 python -m compiler.cli inspect sv08.5-001
+python -m compiler.cli inspect --ids-file data/target_ids.txt
 
-# 5. Vérifier la conformité Pydantic V2 de toutes les cartes compilées
+# 5. Vérifier la conformité Pydantic V2 de toutes les cartes compilées (ou ciblées)
 python -m compiler.cli stats
+python -m compiler.cli stats --ids-file data/target_ids.txt
 ```
+
+> [!TIP]
+> **Fichier d'identifiants (`target_ids.txt`) & Déduplication automatique** :
+> Vous pouvez renseigner n'importe quel fichier texte contenant des IDs ligne par ligne ou séparés par des virgules (les commentaires `#` et lignes vides sont ignorés).
+> Le compilateur déduplique automatiquement les cartes dès la lecture (`list(dict.fromkeys)`), garantissant qu'aucune carte n'est analysée ou compilée deux fois, même si votre fichier d'entrée contient des doublons (ex: `data/target_ids.txt` avec 74 lignes brutes dédupliquées en 55 cartes uniques).
 
 ---
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **108 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **119 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
@@ -281,7 +304,8 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | `--mode` | `-m` | Mode de sélection des cartes cibles | `test`, `standard` | `test` | `RUN_MODE` | `run`, `reason`, `code` |
 | `--test` | — | Raccourci pour forcer le lot test (11 cartes stratégiques de référence) | Flag booléen | `False` | — | `run`, `reason`, `code` |
 | `--standard` | — | Raccourci pour forcer toutes les cartes légales au format Standard | Flag booléen | `False` | — | `run`, `reason`, `code` |
-| `--ids` | — | Liste d'identifiants précis séparés par des virgules (ex: `sv08.5-001,sv04-125`) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code` |
+| `--ids` | — | Liste d'identifiants précis (virgules `id1,id2`, syntaxe `@fichier.txt` ou chemin de fichier) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code` |
+| `--ids-file` | `-f` | Chemin vers un fichier texte contenant des IDs ligne par ligne (déduplication automatique des doublons) | Chemin fichier | `None` | — | `run`, `reason`, `code` |
 | `--pipeline` | `-pl` | Architecture du pipeline de traitement | `single`, `two_pass` | `single` | `PIPELINE_MODE` | `run` |
 | `--intensity` | `-it` | Niveau de puissance et consommation mémoire de l'IA | `soft`, `intense` | `soft` | `INTENSITY_MODE` | `run`, `reason`, `code` |
 | `--phase` | — | Phase à exécuter lorsque `--pipeline two_pass` est sélectionné | `all`, `reason`, `code` | `all` | `PIPELINE_PHASE` | `run` |
@@ -303,17 +327,26 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 
 | Commande | Option / Argument | Alias court | Description | Valeurs possibles | Valeur par défaut |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`remaining`** | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser | `standard`, `test`, `all` | `standard` |
+| **`remaining`** | `--ids-file` | `-f` | Filtre les cartes restantes selon un fichier texte d'IDs (déduplication auto) | Chemin fichier | `None` |
+| | `--ids` | — | Filtre les cartes restantes sur une liste précise séparée par des virgules | Chaîne texte | `None` |
+| | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser (si aucun `--ids`/`--ids-file`) | `standard`, `test`, `all` | `standard` |
 | | `--set` | `-s` | Filtre le décompte sur une extension spécifique (ex: `sv08.5`, `sv01`, `sve`) | Chaîne texte | `None` (toutes) |
 | | `--reasoned` | `-r`, `--reason` | Prend en compte les cartes analysées en Passe 1 (`data/reasoning_texts/`) plutôt que compilées (`data/compiled_cards/`) | Flag booléen | `False` |
 | | `--details` | `-d` | Affiche la liste complète des identifiants (IDs) des cartes restant à compiler/analyser | Flag booléen | `False` |
 | | `--quiet` | `-q` | Affiche uniquement le chiffre entier (idéal pour intégration dans des scripts bash) | Flag booléen | `False` |
-| **`count`** | `--reasoned` | `-r`, `--reason` | Compte les fiches de raisonnement générées (Passe 1 dans `data/reasoning_texts/`) au lieu des cartes compilées | Flag booléen | `False` |
+| **`count`** | `--ids-file` | `-f` | Compte uniquement les cartes ciblées par un fichier texte d'IDs (déduplication auto) | Chemin fichier | `None` |
+| | `--ids` | — | Compte uniquement les cartes ciblées par une liste d'IDs séparés par virgules | Chaîne texte | `None` |
+| | `--reasoned` | `-r`, `--reason` | Compte les fiches de raisonnement générées (Passe 1 dans `data/reasoning_texts/`) au lieu des cartes compilées | Flag booléen | `False` |
 | | `--details` | `-d` | Affiche le tableau détaillé de chaque carte (nom, catégorie/backend, modèle, débit t/s) | Flag booléen | `False` |
 | | `--quiet` | `-q` | Affiche uniquement le nombre total entier de cartes sur le disque | Flag booléen | `False` |
-| **`sync`** | `--db-path` | `-p` | Chemin personnalisé vers le fichier JSON consolidé cible | Chemin fichier | `data/cards_database.json` |
+| **`sync`** | `--ids-file` | `-f` | Filtre la synchronisation de la base uniquement sur les cartes d'un fichier texte | Chemin fichier | `None` |
+| | `--ids` | — | Filtre la synchronisation de la base sur une liste d'IDs séparés par des virgules | Chaîne texte | `None` |
+| | `--db-path` | `-p` | Chemin personnalisé vers le fichier JSON consolidé cible | Chemin fichier | `data/cards_database.json` |
 | | `--dry-run` | `-n` | Simule la synchronisation sans écrire ni modifier le fichier sur le disque | Flag booléen | `False` |
 | | `--details` | `-d` | Affiche le tableau détaillé des cartes manquantes insérées dans la base | Flag booléen | `False` |
 | | `--update` | `-u` | Met à jour les cartes déjà présentes dans la base avec leur version disque la plus récente | Flag booléen | `False` |
-| **`inspect`** | `<card_id>` *(argument)* | — | Identifiant TCGdex de la carte à inspecter (ex: `sv08.5-001`, `sv04-125`) | Chaîne texte | *Obligatoire* |
-| **`stats`** | *(aucun argument)* | — | Parcourt et valide la conformité Pydantic V2 de 100% des fichiers JSON de `compiled_cards/` | — | — |
+| **`inspect`** | `<card_id>` *(argument)* | — | Identifiant TCGdex de la carte à inspecter (optionnel si `--ids` ou `--ids-file`) | Chaîne texte | `None` |
+| | `--ids-file` | `-f` | Inspecte toutes les cartes d'un fichier texte (avec déduplication auto) | Chemin fichier | `None` |
+| | `--ids` | — | Inspecte toutes les cartes d'une liste séparée par des virgules | Chaîne texte | `None` |
+| **`stats`** | `--ids-file` | `-f` | Valide l'intégrité Pydantic V2 uniquement des cartes d'un fichier texte | Chemin fichier | `None` |
+| | `--ids` | — | Valide l'intégrité Pydantic V2 d'une liste de cartes séparées par des virgules | Chaîne texte | `None` |

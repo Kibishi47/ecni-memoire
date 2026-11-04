@@ -31,7 +31,7 @@ if str(PROJECT_DIR) not in sys.path:
 from rich.console import Console
 
 from compiler import load_env_file
-from compiler.cli import get_data_dir, rebuild_consolidated_database
+from compiler.cli import get_data_dir, rebuild_consolidated_database, resolve_card_ids
 from compiler.models_config import IntensityMode, normalize_intensity_mode
 from compiler.tcgdex_fetcher import FetcherProvider, TCGdexFetcher
 from compiler.two_pass_pipeline import run_coding_phase
@@ -66,6 +66,13 @@ def main() -> None:
         type=str,
         default=None,
         help="Identifiants spécifiques de cartes séparés par des virgules (ex: sv08.5-001,sv04-125).",
+    )
+    parser.add_argument(
+        "-f",
+        "--ids-file",
+        type=str,
+        default=None,
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes ligne par ligne (déduplication automatique).",
     )
     parser.add_argument(
         "--intensity",
@@ -107,7 +114,7 @@ def main() -> None:
     args = parser.parse_args()
 
     effective_mode = "standard" if args.standard else ("test" if args.test else args.mode)
-    custom_ids = [cid.strip() for cid in args.ids.split(",") if cid.strip()] if args.ids else None
+    custom_ids = resolve_card_ids(ids=args.ids, ids_file=args.ids_file)
     data_dir = get_data_dir()
 
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=FetcherProvider.sdk)

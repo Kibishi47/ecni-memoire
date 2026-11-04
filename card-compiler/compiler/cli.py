@@ -139,17 +139,93 @@ SV_SET_NAMES: Dict[str, str] = {
 }
 
 
+def load_ids_from_file(file_path: Union[str, Path]) -> List[str]:
+    """Charge une liste d'identifiants depuis un fichier texte (un ID par ligne ou séparés par des virgules).
+
+    - Ignore les lignes vides et les commentaires (#).
+    - Préserve l'ordre sans dédupliquer à ce niveau.
+    - Cherche le fichier au chemin fourni, puis relativement à la racine du projet ou à `data/`.
+    - Lève une FileNotFoundError claire si le fichier est introuvable.
+    """
+    raw_path = Path(file_path)
+    candidate_paths = [
+        raw_path,
+        get_project_root() / raw_path,
+        get_data_dir() / raw_path,
+        Path.cwd() / raw_path,
+    ]
+    target_file: Optional[Path] = None
+    for cp in candidate_paths:
+        if cp.is_file():
+            target_file = cp
+            break
+
+    if target_file is None:
+        raise FileNotFoundError(f"Le fichier d'identifiants de cartes n'existe pas : {file_path}")
+
+    raw_text = target_file.read_text(encoding="utf-8")
+    ids: List[str] = []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.replace(",", " ").split() if p.strip()]
+        ids.extend(parts)
+    return ids
+
+
+def resolve_card_ids(
+    ids: Optional[str] = None,
+    ids_file: Optional[Union[str, Path]] = None,
+) -> Optional[List[str]]:
+    """Résout et déduplique automatiquement les identifiants de cartes fournis via chaîne ou fichier.
+
+    - Supporte --ids "id1,id2,id3"
+    - Supporte --ids-file path/to/file.txt (ou -f)
+    - Supporte --ids "@path/to/file.txt" ou un chemin de fichier passé directement dans --ids
+    - Déduplique automatiquement en conservant le premier ordre d'apparition (`dict.fromkeys`).
+    - Retourne None si aucun identifiant n'est spécifié.
+    """
+    collected: List[str] = []
+
+    if ids_file:
+        collected.extend(load_ids_from_file(ids_file))
+
+    if ids:
+        ids_clean = ids.strip()
+        if ids_clean.startswith("@"):
+            collected.extend(load_ids_from_file(ids_clean[1:]))
+        else:
+            is_file = False
+            for test_p in [Path(ids_clean), get_project_root() / ids_clean, get_data_dir() / ids_clean]:
+                if test_p.is_file():
+                    is_file = True
+                    collected.extend(load_ids_from_file(test_p))
+                    break
+            if not is_file:
+                for part in ids_clean.split(","):
+                    p = part.strip()
+                    if p:
+                        collected.append(p)
+
+    if not collected:
+        return None
+
+    return list(dict.fromkeys(collected))
+
+
 def get_remaining_cards_summary(
     data_dir: Path,
     mode: str = "standard",
     set_filter: Optional[str] = None,
     provider: FetcherProvider = FetcherProvider.sdk,
     reasoned: bool = False,
+    custom_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Calcule le statut et le nombre de cartes restant à compiler ou à raisonner.
 
     Retourne un dictionnaire contenant les statistiques globales et par extension :
-    - mode : 'standard', 'test', ou 'all'
+    - mode : 'standard', 'test', 'all', ou 'custom'
     - set_filter : préfixe de set filtré (si spécifié)
     - reasoned : True si l'on inspecte data/reasoning_texts/ (Passe 1), False pour data/compiled_cards/ (Passe 2)
     - total_target : nombre total de cartes visées
@@ -174,7 +250,10 @@ def get_remaining_cards_summary(
     effective_mode = mode.lower().strip()
     target_ids: List[str] = []
 
-    if effective_mode == "test":
+    if custom_ids is not None:
+        target_ids = list(dict.fromkeys(cid.strip() for cid in custom_ids if cid.strip()))
+        effective_mode = "custom"
+    elif effective_mode == "test":
         target_ids = list(TEST_CARD_IDS)
     elif effective_mode == "all":
         index_path = data_dir / "raw_tcgdex" / "_cards_index.json"
@@ -266,6 +345,7 @@ def sync_cards_database(
     db_path: Optional[Path] = None,
     dry_run: bool = False,
     force_update: bool = False,
+    target_card_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Vérifie que tous les fichiers valides de `data/compiled_cards/*.json` sont inclus dans le fichier JSON global (`cards_database.json`).
 
@@ -301,6 +381,10 @@ def sync_cards_database(
             disk_cards[card_id] = card_json
         except Exception as e:
             corrupted_files.append((fpath.name, str(e)))
+
+    if target_card_ids is not None:
+        target_set = set(target_card_ids)
+        disk_cards = {k: v for k, v in disk_cards.items() if k in target_set}
 
     db_data: Any = None
     db_format = "list"
@@ -353,7 +437,10 @@ def sync_cards_database(
         elif force_update:
             updated_ids.append(card_id)
 
-    missing_on_disk_ids = sorted(list(existing_ids - set(disk_cards.keys())))
+    if target_card_ids is not None:
+        missing_on_disk_ids = sorted(list((existing_ids & set(target_card_ids)) - set(disk_cards.keys())))
+    else:
+        missing_on_disk_ids = sorted(list(existing_ids - set(disk_cards.keys())))
 
     if not dry_run and (added_ids or updated_ids or not target_db.exists()):
         if db_format == "list":
@@ -527,6 +614,7 @@ def _execute_run_pipeline(
     pipeline: Optional[str] = None,
     intensity: Optional[str] = None,
     phase: Optional[str] = None,
+    ids_file: Optional[Path] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
     effective_mode = mode.value
@@ -566,15 +654,13 @@ def _execute_run_pipeline(
         else "1 (séquentiel)"
     )
 
-    custom_ids: Optional[List[str]] = None
-    if ids:
-        custom_ids = [cid.strip() for cid in ids.split(",") if cid.strip()]
+    custom_ids: Optional[List[str]] = resolve_card_ids(ids=ids, ids_file=ids_file)
 
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
 
     mode_label = (
-        f"IDs personnalisés ({len(custom_ids)})"
+        f"IDs personnalisés ({len(custom_ids)} carte(s) unique(s))"
         if custom_ids
         else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
     )
@@ -1146,6 +1232,12 @@ def run_command(
         "--ids",
         help="Liste d'identifiants TCGdex séparés par des virgules (ex: 'sv04-125,sv03-125').",
     ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes ligne par ligne (déduplication automatique).",
+    ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
         "--provider",
@@ -1272,6 +1364,7 @@ def run_command(
         pipeline=pipeline,
         intensity=intensity,
         phase=phase,
+        ids_file=ids_file,
     )
 
 
@@ -1281,6 +1374,12 @@ def compile_alias(
     test_flag: bool = typer.Option(False, "--test"),
     standard_flag: bool = typer.Option(False, "--standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
         "--provider",
@@ -1399,6 +1498,7 @@ def compile_alias(
         pipeline=pipeline,
         intensity=intensity,
         phase=phase,
+        ids_file=ids_file,
     )
 
 
@@ -1408,6 +1508,12 @@ def reason_command(
     test_flag: bool = typer.Option(False, "--test"),
     standard_flag: bool = typer.Option(False, "--standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
         "--provider",
@@ -1467,6 +1573,7 @@ def reason_command(
         pipeline="two_pass",
         intensity=intensity,
         phase="reason",
+        ids_file=ids_file,
     )
 
 
@@ -1476,6 +1583,12 @@ def code_command(
     test_flag: bool = typer.Option(False, "--test"),
     standard_flag: bool = typer.Option(False, "--standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
         "--provider",
@@ -1535,77 +1648,118 @@ def code_command(
         pipeline="two_pass",
         intensity=intensity,
         phase="code",
+        ids_file=ids_file,
     )
 
 
 @app.command("inspect")
 def inspect_command(
-    card_id: str = typer.Argument(..., help="Identifiant de la carte à inspecter (ex: sv04-125, sv03-125)."),
+    card_id: Optional[str] = typer.Argument(
+        None,
+        help="Identifiant de la carte à inspecter (ex: sv04-125, sv03-125).",
+    ),
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants à inspecter séparés par des virgules.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes à inspecter (déduplication automatique).",
+    ),
 ) -> None:
     """Affiche avec coloration syntaxique JSON le modèle complet généré dans `data/compiled_cards/<card_id>.json`."""
-    data_dir = get_data_dir()
-    file_path = data_dir / "compiled_cards" / f"{card_id.strip()}.json"
+    target_ids: List[str] = []
+    if card_id:
+        target_ids.append(card_id.strip())
+    resolved = resolve_card_ids(ids=ids, ids_file=ids_file)
+    if resolved:
+        target_ids.extend(resolved)
 
-    if not file_path.exists():
+    target_ids = list(dict.fromkeys(target_ids))
+
+    if not target_ids:
         console.print(
-            f"[bold red]Erreur :[/bold red] Le fichier [bold]{file_path}[/bold] n'existe pas.\n"
-            f"Lancez d'abord : [cyan]python -m compiler.cli run --ids {card_id}[/cyan]"
+            "[bold red]Erreur :[/bold red] Veuillez spécifier un identifiant de carte en argument "
+            "(ex: [cyan]python -m compiler.cli inspect sv04-125[/cyan]) ou utiliser l'option [cyan]--ids[/cyan] / [cyan]--ids-file[/cyan]."
         )
         raise typer.Exit(code=1)
 
-    raw_json_str = file_path.read_text(encoding="utf-8")
-    try:
-        model = EngineCardModel.model_validate_json(raw_json_str)
-    except ValidationError as exc:
-        console.print(f"[bold red]Validation Pydantic échouée pour {file_path} :[/bold red]\n{exc}")
-        raise typer.Exit(code=1)
+    data_dir = get_data_dir()
+    for cid in target_ids:
+        file_path = data_dir / "compiled_cards" / f"{cid}.json"
 
-    evo_line = ""
-    if model.pokemonStats:
-        chain_str = " ➔ ".join(model.pokemonStats.evolutionChain)
-        evo_line = (
-            f"\n• [bold]PV / Types[/bold] : {model.pokemonStats.hp} PV | {', '.join(model.pokemonStats.types)}"
-            f"\n• [bold]Lignée d'évolution[/bold] : {chain_str} (Base racine : [green]{model.pokemonStats.rootBasicName}[/green])"
+        if not file_path.exists():
+            console.print(
+                f"[bold red]Erreur :[/bold red] Le fichier [bold]{file_path}[/bold] n'existe pas.\n"
+                f"Lancez d'abord : [cyan]python -m compiler.cli run --ids {cid}[/cyan]"
+            )
+            if len(target_ids) == 1:
+                raise typer.Exit(code=1)
+            continue
+
+        raw_json_str = file_path.read_text(encoding="utf-8")
+        try:
+            model = EngineCardModel.model_validate_json(raw_json_str)
+        except ValidationError as exc:
+            console.print(f"[bold red]Validation Pydantic échouée pour {file_path} :[/bold red]\n{exc}")
+            if len(target_ids) == 1:
+                raise typer.Exit(code=1)
+            continue
+
+        evo_line = ""
+        if model.pokemonStats:
+            chain_str = " ➔ ".join(model.pokemonStats.evolutionChain)
+            evo_line = (
+                f"\n• [bold]PV / Types[/bold] : {model.pokemonStats.hp} PV | {', '.join(model.pokemonStats.types)}"
+                f"\n• [bold]Lignée d'évolution[/bold] : {chain_str} (Base racine : [green]{model.pokemonStats.rootBasicName}[/green])"
+            )
+
+        meta_line = ""
+        if model.compilationMetadata:
+            meta = model.compilationMetadata
+            tps_part = f" | Débit : [bold green]{meta.tokensPerSecond:.1f} t/s[/bold green]" if meta.tokensPerSecond is not None else ""
+            tok_part = f" ({meta.completionTokens} tokens)" if meta.completionTokens is not None else ""
+            meta_line = (
+                f"\n• [bold]Métadonnées LLM[/bold] : Modèle [cyan]{meta.modelFilename}[/cyan] | "
+                f"Temps : [yellow]{meta.compilationTimeSeconds:.2f}s[/yellow]{tok_part}{tps_part}"
+            )
+
+        console.print(
+            Panel.fit(
+                f"[bold yellow]{model.cardId}[/bold yellow] — [bold white]{model.identity.nameFr}[/bold white] "
+                f"({model.identity.nameEn or 'N/A'})\n"
+                f"• [bold]Catégorie[/bold] : {model.category.value} / {model.subCategory.value}\n"
+                f"• [bold]Rôle Stratégique[/bold] : [magenta]{model.strategicEvaluator.primaryRole.value}[/magenta] "
+                f"(Score intrinsèque : {model.strategicEvaluator.intrinsicBaseScore}/100)"
+                f"{evo_line}"
+                f"{meta_line}",
+                title=f"Inspection du Modèle de Carte — {model.cardId}",
+                border_style="green",
+            )
         )
 
-    meta_line = ""
-    if model.compilationMetadata:
-        meta = model.compilationMetadata
-        tps_part = f" | Débit : [bold green]{meta.tokensPerSecond:.1f} t/s[/bold green]" if meta.tokensPerSecond is not None else ""
-        tok_part = f" ({meta.completionTokens} tokens)" if meta.completionTokens is not None else ""
-        meta_line = (
-            f"\n• [bold]Métadonnées LLM[/bold] : Modèle [cyan]{meta.modelFilename}[/cyan] | "
-            f"Temps : [yellow]{meta.compilationTimeSeconds:.2f}s[/yellow]{tok_part}{tps_part}"
-        )
-
-    console.print(
-        Panel.fit(
-            f"[bold yellow]{model.cardId}[/bold yellow] — [bold white]{model.identity.nameFr}[/bold white] "
-            f"({model.identity.nameEn or 'N/A'})\n"
-            f"• [bold]Catégorie[/bold] : {model.category.value} / {model.subCategory.value}\n"
-            f"• [bold]Rôle Stratégique[/bold] : [magenta]{model.strategicEvaluator.primaryRole.value}[/magenta] "
-            f"(Score intrinsèque : {model.strategicEvaluator.intrinsicBaseScore}/100)"
-            f"{evo_line}"
-            f"{meta_line}",
-            title="Inspection du Modèle de Carte",
-            border_style="green",
-        )
-    )
-
-    formatted_json = json.dumps(model.model_dump(mode="json"), ensure_ascii=False, indent=2)
-    syntax = Syntax(formatted_json, "json", theme="monokai", line_numbers=True, word_wrap=True)
-    console.print(syntax)
+        formatted_json = json.dumps(model.model_dump(mode="json"), ensure_ascii=False, indent=2)
+        syntax = Syntax(formatted_json, "json", theme="monokai", line_numbers=True, word_wrap=True)
+        console.print(syntax)
 
 
-def _execute_stats_validation() -> None:
+def _execute_stats_validation(target_ids: Optional[List[str]] = None) -> None:
     """Vérifie l'intégrité Pydantic de tous les fichiers JSON dans `data/compiled_cards/`."""
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
     json_files = sorted(compiled_dir.glob("*.json"))
 
+    if target_ids is not None:
+        target_set = set(target_ids)
+        json_files = [f for f in json_files if f.stem in target_set]
+
     if not json_files:
+        filter_hint = f" pour les {len(target_ids)} carte(s) ciblée(s)" if target_ids else ""
         console.print(
-            f"[yellow]Aucun fichier JSON trouvé dans {compiled_dir}.[/yellow]\n"
+            f"[yellow]Aucun fichier JSON trouvé dans {compiled_dir}{filter_hint}.[/yellow]\n"
             "Lancez [cyan]python -m compiler.cli run --mode test[/cyan] pour générer les modèles."
         )
         raise typer.Exit(code=0)
@@ -1681,6 +1835,17 @@ def _execute_stats_validation() -> None:
 
 @app.command("count")
 def count_command(
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants TCGdex séparés par des virgules pour restreindre le comptage.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes pour restreindre le comptage (déduplication automatique).",
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -1703,12 +1868,18 @@ def count_command(
 ) -> None:
     """Compte et résume le nombre de cartes Pokémon TCG compilées (`data/compiled_cards/`) ou raisonnées (`data/reasoning_texts/`)."""
     data_dir = get_data_dir()
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
     if reasoned:
         target_dir = get_reasoning_texts_dir(data_dir)
     else:
         target_dir = data_dir / "compiled_cards"
     target_dir.mkdir(parents=True, exist_ok=True)
     json_files = sorted(target_dir.glob("*.json"))
+
+    if custom_ids is not None:
+        custom_ids_set = set(custom_ids)
+        json_files = [f for f in json_files if f.stem in custom_ids_set]
+
     total_count = len(json_files)
 
     if quiet:
@@ -1717,8 +1888,9 @@ def count_command(
 
     if reasoned:
         if total_count == 0:
+            filter_hint = f" pour les {len(custom_ids)} carte(s) ciblée(s)" if custom_ids else ""
             console.print(
-                f"[yellow]Aucune analyse de raisonnement trouvée dans [bold]{target_dir}[/bold] (0 carte).[/yellow]\n"
+                f"[yellow]Aucune analyse de raisonnement trouvée dans [bold]{target_dir}[/bold]{filter_hint} (0 carte).[/yellow]\n"
                 "Pour lancer l'analyse de raisonnement (Passe 1), exécutez : [cyan]python -m compiler.cli reason[/cyan]"
             )
             return
@@ -1759,17 +1931,21 @@ def count_command(
         models_str = ", ".join(f"[bold cyan]{cnt}[/bold cyan] via {m}" for m, cnt in models_counter.items())
         rem_hint = ""
         try:
-            rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=True)
+            rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=True, custom_ids=custom_ids)
             rem_std = rem_summary["total_remaining"]
             tot_std = rem_summary["total_target"]
             prog_std = rem_summary["progress_pct"]
-            rem_hint = f"\n• [bold]Restant à raisonner (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% analysé — commande 'remaining -r')"
+            if custom_ids is not None:
+                rem_hint = f"\n• [bold]Restant à raisonner (sur {tot_std} ciblées)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% analysé)"
+            else:
+                rem_hint = f"\n• [bold]Restant à raisonner (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% analysé — commande 'remaining -r')"
         except Exception:
             pass
 
+        target_display = f" / {len(custom_ids)}" if custom_ids else ""
         console.print(
             Panel.fit(
-                f"• [bold]Cartes analysées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
+                f"• [bold]Cartes analysées sur le disque[/bold] : [bold green]{total_count}[/bold green]{target_display}\n"
                 f"• [bold]Dossier de stockage[/bold] : [cyan]{target_dir}[/cyan]\n"
                 f"• [bold]Modèles utilisés[/bold] : {models_str}"
                 f"{rem_hint}",
@@ -1798,8 +1974,9 @@ def count_command(
         return
 
     if total_count == 0:
+        filter_hint = f" pour les {len(custom_ids)} carte(s) ciblée(s)" if custom_ids else ""
         console.print(
-            f"[yellow]Aucune carte compilée trouvée dans [bold]{target_dir}[/bold] (0 carte).[/yellow]\n"
+            f"[yellow]Aucune carte compilée trouvée dans [bold]{target_dir}[/bold]{filter_hint} (0 carte).[/yellow]\n"
             "Pour lancer la compilation, exécutez : [cyan]python -m compiler.cli run --mode test[/cyan]"
         )
         return
@@ -1860,17 +2037,21 @@ def count_command(
 
     rem_hint = ""
     try:
-        rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=False)
+        rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=False, custom_ids=custom_ids)
         rem_std = rem_summary["total_remaining"]
         tot_std = rem_summary["total_target"]
         prog_std = rem_summary["progress_pct"]
-        rem_hint = f"\n• [bold]Restant à compiler (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% compilé — commande 'remaining')"
+        if custom_ids is not None:
+            rem_hint = f"\n• [bold]Restant à compiler (sur {tot_std} ciblées)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% compilé)"
+        else:
+            rem_hint = f"\n• [bold]Restant à compiler (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% compilé — commande 'remaining')"
     except Exception:
         pass
 
+    target_display = f" / {len(custom_ids)}" if custom_ids else ""
     console.print(
         Panel.fit(
-            f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
+            f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_count}[/bold green]{target_display}\n"
             f"• [bold]Dossier de stockage[/bold] : [cyan]{target_dir}[/cyan]\n"
             f"• [bold]Répartition par catégorie[/bold] : {repartition_str}"
             f"{db_line}"
@@ -1899,15 +2080,31 @@ def count_command(
 
 
 @app.command("stats")
-def stats_command() -> None:
+def stats_command(
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants séparés par des virgules pour restreindre la validation Pydantic.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (déduplication automatique).",
+    ),
+) -> None:
     """Vérifie l'intégrité Pydantic de tous les fichiers JSON générés dans `data/compiled_cards/`."""
-    _execute_stats_validation()
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+    _execute_stats_validation(target_ids=custom_ids)
 
 
 @app.command("validate", hidden=True)
-def validate_alias() -> None:
+def validate_alias(
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+) -> None:
     """Alias de la commande `stats`."""
-    _execute_stats_validation()
+    stats_command(ids=ids, ids_file=ids_file)
 
 
 @app.command("sync")
@@ -1917,6 +2114,17 @@ def sync_command(
         "--db-path",
         "-p",
         help="Chemin vers le fichier JSON consolidé (défaut : data/cards_database.json).",
+    ),
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants séparés par des virgules pour restreindre la synchronisation.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants pour restreindre la synchronisation (déduplication automatique).",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -1940,6 +2148,7 @@ def sync_command(
     """Vérifie que toutes les cartes compilées dans `data/compiled_cards/` sont présentes dans le fichier JSON global (`data/cards_database.json`) et ajoute automatiquement celles manquantes."""
     data_dir = get_data_dir()
     target_db = db_path or (data_dir / "cards_database.json")
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
 
     try:
         res = sync_cards_database(
@@ -1947,6 +2156,7 @@ def sync_command(
             db_path=target_db,
             dry_run=dry_run,
             force_update=force_update,
+            target_card_ids=custom_ids,
         )
     except Exception as e:
         console.print(f"[bold red]✗ Erreur lors de la synchronisation de la base :[/bold red] {e}")
@@ -1972,9 +2182,10 @@ def sync_command(
     status_color = "yellow" if added_ids else "green"
     sim_suffix = " (simulation non enregistrée)" if dry_run and added_ids else ""
 
+    target_info = f" (sur {len(custom_ids)} ciblées)" if custom_ids else ""
     console.print(
         Panel.fit(
-            f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_disk}[/bold green]\n"
+            f"• [bold]Cartes compilées sur le disque{target_info}[/bold] : [bold green]{total_disk}[/bold green]\n"
             f"• [bold]Fichier global cible[/bold] : [cyan]{target_db}[/cyan]\n"
             f"• [bold]Cartes déjà présentes dans la base[/bold] : [bold cyan]{initial_db}[/bold cyan]\n"
             f"• [bold]Cartes manquantes détectées[/bold] : [bold {status_color}]{len(added_ids)}[/bold {status_color}]{sim_suffix}\n"
@@ -2038,34 +2249,40 @@ def sync_command(
 @app.command("sync-database", hidden=True)
 def sync_database_alias(
     db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     details: bool = typer.Option(False, "--details", "-d"),
     force_update: bool = typer.Option(False, "--update", "-u"),
 ) -> None:
     """Alias de la commande `sync`."""
-    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+    sync_command(db_path=db_path, ids=ids, ids_file=ids_file, dry_run=dry_run, details=details, force_update=force_update)
 
 
 @app.command("check-database", hidden=True)
 def check_database_alias(
     db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     details: bool = typer.Option(False, "--details", "-d"),
     force_update: bool = typer.Option(False, "--update", "-u"),
 ) -> None:
     """Alias de la commande `sync`."""
-    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+    sync_command(db_path=db_path, ids=ids, ids_file=ids_file, dry_run=dry_run, details=details, force_update=force_update)
 
 
 @app.command("sync-db", hidden=True)
 def sync_db_alias(
     db_path: Optional[Path] = typer.Option(None, "--db-path", "-p"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     details: bool = typer.Option(False, "--details", "-d"),
     force_update: bool = typer.Option(False, "--update", "-u"),
 ) -> None:
     """Alias de la commande `sync`."""
-    sync_command(db_path=db_path, dry_run=dry_run, details=details, force_update=force_update)
+    sync_command(db_path=db_path, ids=ids, ids_file=ids_file, dry_run=dry_run, details=details, force_update=force_update)
 
 
 @app.command("remaining")
@@ -2081,6 +2298,17 @@ def remaining_command(
         "--set",
         "-s",
         help="Filtre sur une extension spécifique (ex: 'sv01', 'sv05', 'sve').",
+    ),
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants spécifiques séparés par des virgules pour restreindre le périmètre.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
     ),
     reasoned: bool = typer.Option(
         False,
@@ -2104,12 +2332,14 @@ def remaining_command(
 ) -> None:
     """Calcule et affiche le nombre de cartes Pokémon TCG restant à compiler ou à raisonner (globalement ou par extension)."""
     data_dir = get_data_dir()
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
     try:
         summary = get_remaining_cards_summary(
             data_dir=data_dir,
             mode=mode,
             set_filter=set_name,
             reasoned=reasoned,
+            custom_ids=custom_ids,
         )
     except Exception as e:
         console.print(f"[bold red]✗ Erreur lors du calcul des cartes restantes :[/bold red] {e}")
@@ -2126,11 +2356,16 @@ def remaining_command(
     by_set = summary["by_set"]
     remaining_ids = summary["remaining_ids"]
 
-    mode_label = (
-        f"Extension spécifique ({set_name.upper()})"
-        if set_name
-        else (f"Standard (bloc Écarlate & Violet)" if mode == "standard" else (f"Test ({len(TEST_CARD_IDS)} cartes)" if mode == "test" else "Total TCGdex global"))
-    )
+    if custom_ids is not None:
+        mode_label = f"Liste personnalisée ({total_target} carte(s) unique(s))"
+    elif set_name:
+        mode_label = f"Extension spécifique ({set_name.upper()})"
+    elif mode == "standard":
+        mode_label = "Standard (bloc Écarlate & Violet)"
+    elif mode == "test":
+        mode_label = f"Test ({len(TEST_CARD_IDS)} cartes)"
+    else:
+        mode_label = "Total TCGdex global"
 
     rem_color = "bold green" if total_remaining == 0 else "bold yellow"
     prog_color = "bold green" if progress_pct >= 100.0 else ("bold cyan" if progress_pct >= 50.0 else "bold yellow")
@@ -2206,14 +2441,14 @@ def remaining_command(
             cmd_hint = (
                 f"python -m compiler.cli reason --ids {','.join(remaining_ids[:3])}"
                 if len(remaining_ids) <= 3
-                else (f"python -m compiler.cli reason" if mode == "standard" and not set_name else f"python -m compiler.cli reason --mode {mode}")
+                else ("python -m compiler.cli reason -f <fichier>" if custom_ids else ("python -m compiler.cli reason" if mode == "standard" and not set_name else f"python -m compiler.cli reason --mode {mode}"))
             )
             console.print(f"\n[dim]💡 Pour analyser les cartes restantes en Passe 1 :[/dim] [cyan]{cmd_hint}[/cyan]")
         else:
             cmd_hint = (
                 f"python -m compiler.cli run --ids {','.join(remaining_ids[:3])}"
                 if len(remaining_ids) <= 3
-                else (f"python -m compiler.cli run --mode standard" if mode == "standard" and not set_name else f"python -m compiler.cli run --mode {mode}")
+                else ("python -m compiler.cli run -f <fichier>" if custom_ids else ("python -m compiler.cli run --mode standard" if mode == "standard" and not set_name else f"python -m compiler.cli run --mode {mode}"))
             )
             console.print(f"\n[dim]💡 Pour compiler les cartes restantes :[/dim] [cyan]{cmd_hint}[/cyan]")
 
@@ -2222,48 +2457,56 @@ def remaining_command(
 def todo_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("left", hidden=True)
 def left_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("pending", hidden=True)
 def pending_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("a-compiler", hidden=True)
 def a_compiler_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 if __name__ == "__main__":
