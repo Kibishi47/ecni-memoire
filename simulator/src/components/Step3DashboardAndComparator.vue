@@ -2,7 +2,16 @@
 import { computed, ref } from 'vue'
 import type { EngineCardModel } from '../types/cardModel'
 import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
-import type { DeckCardContributionItem, SimulationMetricsSummary } from '../types/simulator'
+import type {
+  CardUsageMetrics,
+  DeckCardContributionItem,
+  SimulationMetricsSummary,
+} from '../types/simulator'
+import {
+  extractAttackerComparisonRow,
+  findAlternativesForCard,
+  type SmartAlternativeSuggestion,
+} from '../core/alternativesFinder'
 import { getAllCatalogModels, normalizeCardNameForMatch } from '../data/cardCatalog'
 import { exportDeckToPtcgl } from '../utils/ptcglExporter'
 import DebugInspectorPanel from './DebugInspectorPanel.vue'
@@ -17,12 +26,15 @@ const props = defineProps<{
   progressTotal: number
   progressElapsedMs: number
   isDebugMode: boolean
+  stressTestOhko?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'adjust-card-qty', cardId: string, delta: number): void
   (e: 'remove-card', cardId: string): void
   (e: 'add-catalog-card', model: EngineCardModel): void
+  (e: 'replace-card-in-deck', oldCardId: string, newModel: EngineCardModel): void
+  (e: 'toggle-stress-ohko', enabled: boolean): void
   (e: 'rerun-and-compare'): void
   (e: 'promote-current-as-baseline'): void
   (e: 'reset-to-baseline'): void
@@ -228,6 +240,61 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
   if (!props.baselineSummary) return null
   const m = props.baselineSummary.matchupBreakdown.find((x) => x.opponentId === opponentId)
   return m ? m.winRate : null
+}
+
+const expandedAlternativeCardId = ref<string | null>(null)
+const replacedCardFeedback = ref<string | null>(null)
+
+function toggleCardAlternatives(cardId: string) {
+  expandedAlternativeCardId.value =
+    expandedAlternativeCardId.value === cardId ? null : cardId
+}
+
+const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
+  if (!props.currentSummary || !props.currentSummary.cardTelemetry) return []
+  const orderMap: Record<string, number> = {
+    POKEMON: 1,
+    TRAINER: 2,
+    ENERGY: 3,
+  }
+  return Object.values(props.currentSummary.cardTelemetry).sort((a, b) => {
+    const catDiff = (orderMap[a.category] ?? 9) - (orderMap[b.category] ?? 9)
+    if (catDiff !== 0) return catDiff
+    return b.effectivePlayRate - a.effectivePlayRate
+  })
+})
+
+const alternativesByCardId = computed<Record<string, SmartAlternativeSuggestion[]>>(() => {
+  const result: Record<string, SmartAlternativeSuggestion[]> = {}
+  const modelByCardId = new Map<string, EngineCardModel>()
+  for (const entry of props.editableDeck.cards) {
+    modelByCardId.set(entry.cardId, entry.model)
+  }
+  for (const entry of props.baselineDeck.cards) {
+    if (!modelByCardId.has(entry.cardId)) {
+      modelByCardId.set(entry.cardId, entry.model)
+    }
+  }
+  for (const [cardId, model] of modelByCardId.entries()) {
+    result[cardId] = findAlternativesForCard(model, allCatalogModels)
+  }
+  return result
+})
+
+function getTargetAttackerRow(cardId: string) {
+  const entry =
+    props.editableDeck.cards.find((c) => c.cardId === cardId) ??
+    props.baselineDeck.cards.find((c) => c.cardId === cardId)
+  if (!entry) return null
+  return extractAttackerComparisonRow(entry.model)
+}
+
+function handleReplaceWithAlternative(oldCardId: string, alt: SmartAlternativeSuggestion) {
+  emit('replace-card-in-deck', oldCardId, alt.alternativeModel)
+  replacedCardFeedback.value = `${alt.targetCardNameFr} remplacé par ${alt.alternativeNameFr} dans l'Atelier A/B.`
+  setTimeout(() => {
+    replacedCardFeedback.value = null
+  }, 4000)
 }
 </script>
 
@@ -654,6 +721,552 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
           </table>
         </div>
       </div>
+
+      <!-- =================================================================== -->
+      <!-- BLOC 1 : CONTINUITÉ, RÉSILIENCE & FLEXIBILITÉ TACTIQUE (4 CARTES)   -->
+      <!-- =================================================================== -->
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <span class="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-white">
+              ANALYSE TACTIQUE AVANCÉE
+            </span>
+            <h3 class="mt-1.5 text-sm font-bold text-slate-900">
+              Continuité, Résilience &amp; Flexibilité Tactique
+            </h3>
+            <p class="text-xs text-slate-500">
+              Vitesse d'installation, continuité d'attaque sous One-Shot (Streaming), reprise post-Mashynn/Tampon et indépendance du Supporter
+            </p>
+          </div>
+
+          <label class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+            <input
+              type="checkbox"
+              :checked="Boolean(stressTestOhko)"
+              @change="emit('toggle-stress-ohko', ($event.target as HTMLInputElement).checked)"
+              class="h-3.5 w-3.5 rounded border-slate-300 text-slate-900"
+            />
+            <span>Stress-Test « One-Shot par tour »</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <!-- Carte 1 : Vitesse de Setup -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-600">
+                Vitesse de Setup
+              </span>
+              <span class="rounded bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-800">
+                TEMPO
+              </span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="font-mono text-2xl font-bold text-slate-900">
+                Tour moyen : T{{ currentSummary.averageSetupTurn.toFixed(1) }}
+              </span>
+            </div>
+            <div class="mt-2 font-mono text-[11px] text-slate-600">
+              T1: <strong>{{ currentSummary.setupTurnHistogram.T1 }}%</strong> |
+              T2: <strong>{{ currentSummary.setupTurnHistogram.T2 }}%</strong> |
+              T3+: <strong>{{ (currentSummary.setupTurnHistogram.T3 + currentSummary.setupTurnHistogram.T4Plus).toFixed(1) }}%</strong>
+            </div>
+            <div class="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-slate-200">
+              <div
+                class="bg-emerald-500"
+                :style="{ width: `${currentSummary.setupTurnHistogram.T1}%` }"
+                title="Setup T1"
+              ></div>
+              <div
+                class="bg-indigo-500"
+                :style="{ width: `${currentSummary.setupTurnHistogram.T2}%` }"
+                title="Setup T2"
+              ></div>
+              <div
+                class="bg-amber-500"
+                :style="{ width: `${currentSummary.setupTurnHistogram.T3 + currentSummary.setupTurnHistogram.T4Plus}%` }"
+                title="Setup T3+"
+              ></div>
+            </div>
+          </div>
+
+          <!-- Carte 2 : Continuité d'Attaque sous One-Shot (Streaming) -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-600">
+                Continuité sous One-Shot
+              </span>
+              <span
+                v-if="hasComparisonRun && baselineSummary"
+                class="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                :class="
+                  currentSummary.attackerStreamingRate - baselineSummary.attackerStreamingRate >= 0
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-red-100 text-red-800'
+                "
+              >
+                Δ {{ formatSignedDelta(currentSummary.attackerStreamingRate - baselineSummary.attackerStreamingRate, '%') }}
+              </span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="font-mono text-2xl font-bold text-emerald-700">
+                {{ currentSummary.attackerStreamingRate.toFixed(1) }}%
+              </span>
+              <span class="font-mono text-[11px] text-slate-500">
+                ({{ currentSummary.revengeAttackSuccessCount }}/{{ currentSummary.totalActiveKOsSuffered }} KOs)
+              </span>
+            </div>
+            <p class="mt-1.5 text-xs text-slate-600">
+              {{ currentSummary.attackerStreamingRate.toFixed(1) }} % de contre-attaques immédiates après un KO subi
+            </p>
+          </div>
+
+          <!-- Carte 3 : Résilience Post-Tampon / Juge / Mashynn -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-600">
+                Résilience Post-Mashynn
+              </span>
+              <span
+                v-if="hasComparisonRun && baselineSummary"
+                class="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                :class="
+                  currentSummary.postDisruptionResilience.postDisruptionAttackRate -
+                    baselineSummary.postDisruptionResilience.postDisruptionAttackRate >=
+                  0
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-red-100 text-red-800'
+                "
+              >
+                Δ {{
+                  formatSignedDelta(
+                    currentSummary.postDisruptionResilience.postDisruptionAttackRate -
+                      baselineSummary.postDisruptionResilience.postDisruptionAttackRate,
+                    '%',
+                  )
+                }}
+              </span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="font-mono text-2xl font-bold text-indigo-700">
+                {{ currentSummary.postDisruptionResilience.postDisruptionAttackRate.toFixed(1) }}%
+              </span>
+              <span class="font-mono text-[11px] text-slate-500">
+                ({{ currentSummary.postDisruptionResilience.disruptionsSufferedCount }} cas)
+              </span>
+            </div>
+            <p class="mt-1.5 text-xs text-slate-600">
+              {{ currentSummary.postDisruptionResilience.postDisruptionAttackRate.toFixed(1) }} % de tours sauvés après reset de main (Brique : {{ currentSummary.postDisruptionResilience.postDisruptionBrickRate.toFixed(1) }} %)
+            </p>
+          </div>
+
+          <!-- Carte 4 : Flexibilité "Ordres du Boss" -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-600">
+                Flexibilité « Ordres du Boss »
+              </span>
+              <span
+                v-if="hasComparisonRun && baselineSummary"
+                class="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                :class="
+                  currentSummary.bossFlexibilityRate - baselineSummary.bossFlexibilityRate >= 0
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-red-100 text-red-800'
+                "
+              >
+                Δ {{ formatSignedDelta(currentSummary.bossFlexibilityRate - baselineSummary.bossFlexibilityRate, '%') }}
+              </span>
+            </div>
+            <div class="mt-2 flex items-baseline gap-2">
+              <span class="font-mono text-2xl font-bold text-slate-900">
+                {{ currentSummary.bossFlexibility.supporterFreeAttackRate.toFixed(1) }}%
+              </span>
+              <span class="font-mono text-[11px] text-emerald-700 font-semibold">
+                Combo Gust+Atk: {{ currentSummary.bossFlexibility.bossPlusAttackComboRate.toFixed(1) }}%
+              </span>
+            </div>
+            <p class="mt-1.5 text-xs text-slate-600">
+              {{ currentSummary.bossFlexibility.supporterFreeAttackRate.toFixed(1) }} % d'attaques réalisées sans consommer le Supporter de pioche
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- =================================================================== -->
+      <!-- BLOC 2 : SPLIT J1 vs J2, IMPACT T1 (ITEM-LOCK) & COMBOS STRICTES    -->
+      <!-- =================================================================== -->
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <!-- Comparatif Joueur 1 (1er) vs Joueur 2 (2d) & Impact Tour 1 (5 cols) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs lg:col-span-5 flex flex-col justify-between">
+          <div>
+            <span class="rounded bg-slate-100 border border-slate-200 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-slate-700">
+              ORDRE DU TOUR &amp; PRESSION T1
+            </span>
+            <h3 class="mt-1.5 text-sm font-bold text-slate-900">
+              Comparatif Joueur 1 (1er) vs Joueur 2 (2d) &amp; Impact Tour 1
+            </h3>
+            <p class="mt-0.5 text-xs text-slate-500">
+              Performance selon l'initiative et capacité d'Item-Lock (type Rozbouton) ou d'attaque dès le T1 en J2
+            </p>
+
+            <div class="mt-4 grid grid-cols-2 gap-3">
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                <div class="text-[11px] font-bold uppercase text-slate-500">
+                  Win Rate en J1 (1er)
+                </div>
+                <div class="mt-1 font-mono text-2xl font-bold text-slate-900">
+                  {{ currentSummary.turnOrderSplitStats.winRateGoingFirst.toFixed(1) }}%
+                </div>
+                <div class="mt-0.5 font-mono text-[11px] text-slate-500">
+                  {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}V / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} parties
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                <div class="text-[11px] font-bold uppercase text-slate-500">
+                  Win Rate en J2 (2d)
+                </div>
+                <div class="mt-1 font-mono text-2xl font-bold text-indigo-700">
+                  {{ currentSummary.turnOrderSplitStats.winRateGoingSecond.toFixed(1) }}%
+                </div>
+                <div class="mt-0.5 font-mono text-[11px] text-slate-500">
+                  {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}V / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} parties
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-indigo-950">
+                Taux d'Attaque / Item-Lock dès le Tour 1 en J2
+              </span>
+              <span class="font-mono text-sm font-bold text-indigo-800">
+                {{ currentSummary.turnOrderSplitStats.turn1AttackOrItemLockRateJ2.toFixed(1) }}%
+              </span>
+            </div>
+            <div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-indigo-200">
+              <div
+                class="h-full rounded-full bg-indigo-600"
+                :style="{ width: `${Math.min(100, currentSummary.turnOrderSplitStats.turn1AttackOrItemLockRateJ2)}%` }"
+              ></div>
+            </div>
+            <div class="mt-1.5 flex items-center justify-between font-mono text-[11px] text-indigo-900">
+              <span>Verrouillage d'Objets T1 J2 (Pollen Démangeant) : <strong>{{ currentSummary.turnOrderSplitStats.turn1ItemLockRateJ2.toFixed(1) }}%</strong></span>
+              <span>Dégâts Moy./Tour : <strong>{{ currentSummary.averageDamagePerTurn }}</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Combos à Conditions Strictes & Dégâts Moyens par Tour (7 cols) -->
+        <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs lg:col-span-7">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <span class="rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-emerald-800">
+                COMBOS CONDITIONNELS &amp; PUISSANCE OFFENSIVE
+              </span>
+              <h3 class="mt-1.5 text-sm font-bold text-slate-900">
+                Statistiques des Attaques &amp; Combos à Conditions Strictes
+              </h3>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-800">
+              Dégâts Moyens / Tour : <strong>{{ currentSummary.averageDamagePerTurn }} dégâts</strong>
+            </div>
+          </div>
+
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[10px] uppercase text-slate-500">
+                  <th class="px-3 py-2">Carte &amp; Action</th>
+                  <th class="px-3 py-2">Condition Requise</th>
+                  <th class="px-3 py-2">Taux Déclenchement</th>
+                  <th class="px-3 py-2">1er Tour Moyen</th>
+                  <th class="px-3 py-2">Dégâts Moyens</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr
+                  v-for="combo in currentSummary.conditionalComboStats"
+                  :key="combo.comboId"
+                  class="hover:bg-slate-50/80"
+                >
+                  <td class="px-3 py-2.5 font-semibold text-slate-900">
+                    {{ combo.label }}
+                  </td>
+                  <td class="px-3 py-2.5">
+                    <span class="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
+                      {{ combo.conditionSummary }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2.5 font-mono font-bold text-emerald-700">
+                    {{ combo.triggerRate.toFixed(1) }}%
+                  </td>
+                  <td class="px-3 py-2.5 font-mono text-slate-700">
+                    {{ combo.avgTriggerTurn > 0 ? `T${combo.avgTriggerTurn.toFixed(1)}` : '—' }}
+                  </td>
+                  <td class="px-3 py-2.5 font-mono font-bold text-slate-900">
+                    {{ combo.avgDamageWhenTriggered > 0 ? `${combo.avgDamageWhenTriggered} dég.` : 'Effet' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- =================================================================== -->
+      <!-- BLOC 3 : AUDIT D'UTILITÉ CARTE PAR CARTE & ALTERNATIVES             -->
+      <!-- =================================================================== -->
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <span class="rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-indigo-800">
+              AUDIT INDIVIDUEL &amp; RECOMMANDATIONS
+            </span>
+            <h3 class="mt-1.5 text-sm font-bold text-slate-900">
+              Audit d'Utilité Carte par Carte &amp; Suggestions d'Alternatives (Supporter → Objet / Attaquant)
+            </h3>
+            <p class="text-xs text-slate-500">
+              Repérez les cartes mortes ou défaussées sans effet, mesurez le risque de Prize Lock et remplacez un Supporter par un Objet/Talent équivalent en 1 clic.
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-if="replacedCardFeedback"
+          class="flex items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-900"
+        >
+          <span>{{ replacedCardFeedback }}</span>
+          <button
+            type="button"
+            @click="replacedCardFeedback = null"
+            class="text-emerald-700 hover:underline"
+          >
+            Fermer
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase text-slate-500">
+                <th class="px-3.5 py-2.5">Carte du Deck</th>
+                <th class="px-3.5 py-2.5">Taux de Jeu Effectif (%)</th>
+                <th class="px-3.5 py-2.5">Carte Morte / Défaussée sans effet (%)</th>
+                <th class="px-3.5 py-2.5">Impact si Prized (Tous exemplaires)</th>
+                <th class="px-3.5 py-2.5 text-right">Alternatives Intelligentes</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <template v-for="item in sortedCardTelemetry" :key="item.cardId">
+                <tr class="hover:bg-slate-50/80 transition">
+                  <!-- Carte du Deck -->
+                  <td class="px-3.5 py-3">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
+                        {{ item.quantityInDeck }}x
+                      </span>
+                      <div>
+                        <div class="font-semibold text-slate-900">{{ item.nameFr }}</div>
+                        <div class="font-mono text-[10px] text-slate-400">
+                          {{ item.cardId }} • {{ item.subCategory }}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+
+                  <!-- Taux de Jeu Effectif (%) -->
+                  <td class="px-3.5 py-3">
+                    <div class="flex items-center gap-2.5">
+                      <span class="w-12 font-mono text-xs font-bold text-emerald-700">
+                        {{ item.effectivePlayRate.toFixed(1) }}%
+                      </span>
+                      <div class="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          class="h-full rounded-full bg-emerald-500"
+                          :style="{ width: `${Math.min(100, item.effectivePlayRate)}%` }"
+                        ></div>
+                      </div>
+                      <span class="font-mono text-[10px] text-slate-400">
+                        (Vue: {{ item.drawnRate.toFixed(0) }}%)
+                      </span>
+                    </div>
+                  </td>
+
+                  <!-- Taux de Carte Morte / Défaussée sans effet (%) -->
+                  <td class="px-3.5 py-3">
+                    <div class="flex items-center gap-2.5">
+                      <span
+                        class="w-12 font-mono text-xs font-bold"
+                        :class="
+                          item.discardedUnusedRate + item.deadHandTurnRate >= 25
+                            ? 'text-rose-700'
+                            : item.discardedUnusedRate + item.deadHandTurnRate >= 10
+                              ? 'text-amber-700'
+                              : 'text-slate-600'
+                        "
+                      >
+                        {{ item.discardedUnusedRate.toFixed(1) }}%
+                      </span>
+                      <div class="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          class="h-full rounded-full"
+                          :class="
+                            item.discardedUnusedRate >= 25 ? 'bg-rose-500' : 'bg-amber-500'
+                          "
+                          :style="{ width: `${Math.min(100, item.discardedUnusedRate + item.deadHandTurnRate)}%` }"
+                        ></div>
+                      </div>
+                      <span class="font-mono text-[10px] text-slate-500">
+                        ({{ item.turnsStuckDeadInHand }}t bloquée)
+                      </span>
+                    </div>
+                  </td>
+
+                  <!-- Impact si Prized -->
+                  <td class="px-3.5 py-3 font-mono text-xs">
+                    <div v-if="item.gamesAllCopiesPrized > 0" class="flex items-center gap-1.5">
+                      <span class="text-slate-700">{{ item.allCopiesPrizedRate.toFixed(1) }}% des parties</span>
+                      <span
+                        class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                        :class="
+                          item.winRateImpactWhenAllPrized < 0
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-slate-100 text-slate-700'
+                        "
+                      >
+                        WR: {{ formatSignedDelta(item.winRateImpactWhenAllPrized, '%') }}
+                      </span>
+                    </div>
+                    <span v-else class="text-[11px] text-slate-400">
+                      0% (Jamais 100% Prized)
+                    </span>
+                  </td>
+
+                  <!-- Bouton Alternatives -->
+                  <td class="px-3.5 py-3 text-right">
+                    <button
+                      v-if="(alternativesByCardId[item.cardId]?.length ?? 0) > 0"
+                      type="button"
+                      @click="toggleCardAlternatives(item.cardId)"
+                      class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold transition"
+                      :class="
+                        expandedAlternativeCardId === item.cardId
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+                      "
+                    >
+                      <span>
+                        {{ alternativesByCardId[item.cardId]!.length }} Alternative{{ alternativesByCardId[item.cardId]!.length > 1 ? 's' : '' }} Objet/Attaquant
+                      </span>
+                    </button>
+                    <span v-else class="font-mono text-[10px] text-slate-400">
+                      Ressource de base
+                    </span>
+                  </td>
+                </tr>
+
+                <!-- Tiroir dépliable des Alternatives pour cette carte -->
+                <tr v-if="expandedAlternativeCardId === item.cardId">
+                  <td colspan="5" class="bg-indigo-50/40 px-4 py-4">
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <h4 class="text-xs font-bold text-indigo-950">
+                          Suggestions d'Alternatives dans cards_database.json pour {{ item.nameFr }}
+                        </h4>
+                        <button
+                          type="button"
+                          @click="expandedAlternativeCardId = null"
+                          class="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                        >
+                          Fermer le tiroir
+                        </button>
+                      </div>
+
+                      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div
+                          v-for="alt in alternativesByCardId[item.cardId]"
+                          :key="alt.alternativeCardId"
+                          class="flex flex-col justify-between rounded-xl border border-indigo-200 bg-white p-3.5 shadow-2xs"
+                        >
+                          <div>
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <span class="text-xs font-bold text-slate-900">{{ alt.alternativeNameFr }}</span>
+                                <span class="ml-1.5 font-mono text-[10px] text-slate-400">
+                                  ({{ alt.alternativeCardId }} • {{ alt.alternativeSubCategory }})
+                                </span>
+                              </div>
+                              <span
+                                class="rounded px-2 py-0.5 font-mono text-[10px] font-bold"
+                                :class="
+                                  alt.suggestionType === 'SUPPORTER_TO_ITEM_OR_ABILITY'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                "
+                              >
+                                {{ alt.actionEconomyBadge }}
+                              </span>
+                            </div>
+
+                            <p class="mt-2 text-xs leading-relaxed text-slate-600">
+                              {{ alt.strategicReason }}
+                            </p>
+
+                            <!-- Comparaison côte à côte si c'est un Attaquant / Pokémon -->
+                            <div
+                              v-if="alt.attackerComparison && getTargetAttackerRow(item.cardId)"
+                              class="mt-2.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 font-mono text-[11px]"
+                            >
+                              <div class="grid grid-cols-3 gap-2 border-b border-slate-200 pb-1 text-[10px] font-bold uppercase text-slate-500">
+                                <span>Critère</span>
+                                <span>{{ getTargetAttackerRow(item.cardId)!.nameFr }}</span>
+                                <span class="text-indigo-700">{{ alt.attackerComparison.nameFr }}</span>
+                              </div>
+                              <div class="mt-1.5 grid grid-cols-3 gap-2">
+                                <span class="text-slate-500">PV (HP)</span>
+                                <span>{{ getTargetAttackerRow(item.cardId)!.hp }} PV</span>
+                                <span class="font-bold text-slate-900">{{ alt.attackerComparison.hp }} PV</span>
+                              </div>
+                              <div class="mt-1 grid grid-cols-3 gap-2">
+                                <span class="text-slate-500">Coût Énergie</span>
+                                <span>{{ getTargetAttackerRow(item.cardId)!.energyCostCount }} NRJ</span>
+                                <span class="font-bold text-slate-900">{{ alt.attackerComparison.energyCostCount }} NRJ</span>
+                              </div>
+                              <div class="mt-1 grid grid-cols-3 gap-2">
+                                <span class="text-slate-500">Dégâts Base/Max</span>
+                                <span>{{ getTargetAttackerRow(item.cardId)!.damageSummary }}</span>
+                                <span class="font-bold text-emerald-700">{{ alt.attackerComparison.damageSummary }}</span>
+                              </div>
+                              <div class="mt-1 grid grid-cols-3 gap-2">
+                                <span class="text-slate-500">Coût Retraite</span>
+                                <span>{{ getTargetAttackerRow(item.cardId)!.retreatCost }}</span>
+                                <span class="font-bold text-slate-900">{{ alt.attackerComparison.retreatCost }}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="mt-3 flex justify-end border-t border-slate-100 pt-2.5">
+                            <button
+                              type="button"
+                              @click="handleReplaceWithAlternative(item.cardId, alt)"
+                              class="rounded-lg border border-slate-900 bg-slate-900 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-slate-700"
+                            >
+                              Remplacer dans l'Atelier A/B
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- ======================================================================= -->
@@ -840,6 +1453,95 @@ function getBaselineMatchupWinRate(opponentId: string): number | null {
                   >
                     Δ {{ formatSignedDelta(currentSummary.avgOpponentPrizesWon - baselineSummary.avgOpponentPrizesWon) }}
                     <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.avgOpponentPrizesWon.toFixed(2) }} → {{ currentSummary.avgOpponentPrizesWon.toFixed(2) }})</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Continuité d'Attaque sous One-Shot</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.attackerStreamingRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.attackerStreamingRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.attackerStreamingRate - baselineSummary.attackerStreamingRate > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.attackerStreamingRate - baselineSummary.attackerStreamingRate < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.attackerStreamingRate - baselineSummary.attackerStreamingRate, '%') }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.attackerStreamingRate.toFixed(1) }}% → {{ currentSummary.attackerStreamingRate.toFixed(1) }}%)</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Résilience Post-Tampon / Mashynn</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.postDisruptionResilience.postDisruptionAttackRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.postDisruptionResilience.postDisruptionAttackRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.postDisruptionResilience.postDisruptionAttackRate -
+                        baselineSummary.postDisruptionResilience.postDisruptionAttackRate >
+                      0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.postDisruptionResilience.postDisruptionAttackRate -
+                              baselineSummary.postDisruptionResilience.postDisruptionAttackRate <
+                            0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{
+                      formatSignedDelta(
+                        currentSummary.postDisruptionResilience.postDisruptionAttackRate -
+                          baselineSummary.postDisruptionResilience.postDisruptionAttackRate,
+                        '%',
+                      )
+                    }}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Flexibilité Ordres du Boss</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.bossFlexibilityRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.bossFlexibilityRate.toFixed(1) }}%</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.bossFlexibilityRate - baselineSummary.bossFlexibilityRate > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.bossFlexibilityRate - baselineSummary.bossFlexibilityRate < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.bossFlexibilityRate - baselineSummary.bossFlexibilityRate, '%') }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.bossFlexibilityRate.toFixed(1) }}% → {{ currentSummary.bossFlexibilityRate.toFixed(1) }}%)</span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 font-sans font-semibold text-slate-900">Dégâts Moyens par Tour</td>
+                <td class="px-4 py-3 text-slate-600">{{ baselineSummary.averageDamagePerTurn }}</td>
+                <td class="px-4 py-3 font-bold text-slate-900">{{ currentSummary.averageDamagePerTurn }}</td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-md px-2.5 py-1 font-bold inline-flex items-center gap-1"
+                    :class="
+                      currentSummary.averageDamagePerTurn - baselineSummary.averageDamagePerTurn > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : currentSummary.averageDamagePerTurn - baselineSummary.averageDamagePerTurn < 0
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-600'
+                    "
+                  >
+                    Δ {{ formatSignedDelta(currentSummary.averageDamagePerTurn - baselineSummary.averageDamagePerTurn) }}
+                    <span class="font-normal text-[11px] opacity-80">({{ baselineSummary.averageDamagePerTurn }} → {{ currentSummary.averageDamagePerTurn }})</span>
                   </span>
                 </td>
               </tr>
