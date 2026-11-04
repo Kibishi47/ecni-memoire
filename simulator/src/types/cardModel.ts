@@ -79,6 +79,7 @@ export type PreconditionType =
   | 'SELF_IS_ON_BENCH'
   | 'NO_ENERGY_IN_PLAY'
   | 'SECOND_PLAYER_TURN_1'
+  | 'HAND_MAX_OTHER_CARDS_ZERO'
 
 export type CostType =
   | 'DISCARD_FROM_HAND'
@@ -236,6 +237,7 @@ export interface PlayableAction {
   costs: ActionCost[]
   effects: AtomicEffect[]
   energyCost?: string[]
+  canAttackTwice?: boolean
 }
 
 export interface TurnPhaseWeights {
@@ -309,6 +311,7 @@ export interface PokemonStats {
   hasAbility?: boolean
   weaknessMultiplier?: string
   resistanceModifier?: number
+  canAttackTwice?: boolean
 }
 
 export interface CompilationMetadata {

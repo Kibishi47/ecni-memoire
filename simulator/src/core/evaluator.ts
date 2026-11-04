@@ -12,6 +12,7 @@
 import type { EngineCardModel } from '../types/cardModel'
 import {
   applyAction,
+  canPokemonAttackTwice,
   computeAttackDamageToActive,
   fastCloneState,
   getActiveBoard,
@@ -20,6 +21,7 @@ import {
   getRemainingHp,
   getLegalActions,
   isCardDeadInHand,
+  isZeroEnergyItemLockAttack,
   startTurn,
   type GameAction,
   type InPlayPokemon,
@@ -246,6 +248,18 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     totalScore += 60
   }
 
+  // Bonus Double Attaque ("Fête Battante" / Festival Lead sous Stade) & Bonus de dégâts du tour
+  const isDoubleAttacker = canPokemonAttackTwice(myBoard.activePokemon, state)
+  if (isDoubleAttacker) {
+    totalScore += 75
+  }
+  if (myBoard.turnDamageBoost && myBoard.turnDamageBoost > 0) {
+    totalScore += myBoard.turnDamageBoost * (isDoubleAttacker ? 2.2 : 1.2)
+  }
+  if (oppBoard.itemLockActive && state.turnNumber <= 2) {
+    totalScore += 85
+  }
+
   // Soustraction de la valeur du plateau adverse
   if (oppBoard.activePokemon) {
     totalScore -= computePokemonThreatScore(oppBoard.activePokemon, state.turnNumber, true) * 0.92
@@ -332,12 +346,13 @@ export function getStateHash(state: MatchState): string {
       `P:${b.prizes.length}`,
       `D:${b.deck.length}`,
       `G:${b.discard.length}`,
-      `Flags:${b.supporterPlayedThisTurn ? 1 : 0}${b.energyAttachedThisTurn ? 1 : 0}${b.retreatUsedThisTurn ? 1 : 0}${b.vstarPowerUsed ? 1 : 0}`,
+      `Flags:${b.supporterPlayedThisTurn ? 1 : 0}${b.energyAttachedThisTurn ? 1 : 0}${b.retreatUsedThisTurn ? 1 : 0}${b.vstarPowerUsed ? 1 : 0}${b.itemLockActive ? 1 : 0}:${b.turnDamageBoost || 0}`,
       `Ab[${abilitiesStr}]`,
     ].join('|')
   }
 
-  return `T${state.turnNumber}_P${state.activePlayerIndex}_W${state.winner || 'N'}__${hashBoard(state.player)}__${hashBoard(state.opponent)}`
+  const stadStr = state.activeStadium ? state.activeStadium.card.cardId : 'NONE'
+  return `T${state.turnNumber}_P${state.activePlayerIndex}_W${state.winner || 'N'}_S${stadStr}__${hashBoard(state.player)}__${hashBoard(state.opponent)}`
 }
 
 /**
@@ -347,6 +362,19 @@ export function getStateHash(state: MatchState): string {
 function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): number {
   const activeBoard = getActiveBoard(state)
   const passiveBoard = getPassiveBoard(state)
+
+  const isTurn1GoingSecond =
+    (state.turnNumber === 1 || state.turnNumber === 2) &&
+    state.activePlayerIndex !== state.firstPlayerIndex
+
+  const hasLastCardComboInHand =
+    !activeBoard.supporterPlayedThisTurn &&
+    activeBoard.hand.some((c) =>
+      c.playableActions.some((a) =>
+        a.preconditions.some((p) => p.type === 'HAND_MAX_OTHER_CARDS_ZERO'),
+      ),
+    )
+  const handReducesBonus = hasLastCardComboInHand && activeBoard.hand.length > 1 ? 95 : 0
 
   switch (action.type) {
     case 'DECLARE_ATTACK': {
@@ -358,15 +386,25 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
         if (attackAction?.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS')) {
           atkScore += 180
         }
+        if (isTurn1GoingSecond && attackAction && isZeroEnergyItemLockAttack(attackAction)) {
+          atkScore += 140
+        }
       }
       return atkScore
     }
 
     case 'NORMAL_EVOLVE':
-      return 240
+      return 240 + handReducesBonus
 
     case 'PLAY_TRAINER': {
       const trainerCard = activeBoard.hand.find((c) => c.cardId === action.cardId)
+      if (
+        trainerCard?.playableActions.some((a) =>
+          a.preconditions.some((p) => p.type === 'HAND_MAX_OTHER_CARDS_ZERO'),
+        )
+      ) {
+        return 380
+      }
       if (
         trainerCard?.playableActions.some((a) =>
           a.effects.some((e) => e.primitive === 'TAKE_EXTRA_PRIZE_CARDS'),
@@ -374,9 +412,45 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
       ) {
         return 340
       }
-      if (action.cardId === 'sv04-125') return 260 // Super Bonbon
-      if (action.cardId === 'sv05-144') return state.turnNumber <= 2 ? 250 : 160 // Poffin Copain-Copain
-      if (action.cardId === 'sv01-181') return state.turnNumber <= 2 ? 235 : 155 // Faiblo Ball
+
+      // Priorité au Stade si un Pokémon "Fête Battante" (canAttackTwice) est en jeu
+      if (trainerCard?.subCategory === 'STADIUM' && !state.activeStadium) {
+        const fakeStadState: MatchState = {
+          ...state,
+          activeStadium: { card: trainerCard, ownerIndex: state.activePlayerIndex, usedThisTurn: false },
+        }
+        const allMyPokes = [
+          ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
+          ...activeBoard.bench,
+        ]
+        if (allMyPokes.some((p) => canPokemonAttackTwice(p, fakeStadState))) {
+          return 315
+        }
+      }
+
+      // Bonus pour vider la main si un Supporter "seule carte en main" attend d'être débloqué
+      const hasDiscardCost = trainerCard?.playableActions.some((a) =>
+        a.costs.some((c) => c.type === 'DISCARD_FROM_HAND'),
+      )
+
+      // Bonus en J2 Tour 1 pour un échange (Switch) amenant un Pokémon Item-Lock à 0 énergie (ex: Rozbouton)
+      if (
+        isTurn1GoingSecond &&
+        trainerCard?.playableActions.some((a) =>
+          a.effects.some((e) => e.primitive === 'SWITCH_ACTIVE_POKEMON'),
+        ) &&
+        action.targetBenchIndex !== undefined &&
+        activeBoard.bench[action.targetBenchIndex]
+      ) {
+        const targetBenchPoke = activeBoard.bench[action.targetBenchIndex]!
+        if (targetBenchPoke.card.playableActions.some(isZeroEnergyItemLockAttack)) {
+          return 295
+        }
+      }
+
+      if (action.cardId === 'sv04-125') return 260 + handReducesBonus // Super Bonbon
+      if (action.cardId === 'sv05-144') return (state.turnNumber <= 2 ? 250 : 160) + handReducesBonus // Poffin Copain-Copain
+      if (action.cardId === 'sv01-181') return (state.turnNumber <= 2 ? 235 : 155) + handReducesBonus // Faiblo Ball
 
       // Évaluation fine du Gust (Ordres du Boss / Attrape-Riposte / Attrape-Suprême)
       if (action.targetBenchIndex !== undefined && passiveBoard.bench[action.targetBenchIndex]) {
@@ -401,7 +475,7 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
         return 40
       }
 
-      return 185
+      return 185 + (hasDiscardCost ? handReducesBonus : 0)
     }
 
     case 'USE_ABILITY': {
@@ -474,10 +548,10 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
     }
 
     case 'ATTACH_MANUAL_ENERGY':
-      return action.targetSlot === 'ACTIVE' ? 210 : 195
+      return (action.targetSlot === 'ACTIVE' ? 210 : 195) + handReducesBonus
 
     case 'PUT_BASIC_ON_BENCH':
-      return state.turnNumber <= 2 ? 220 : 165
+      return (state.turnNumber <= 2 ? 220 : 165) + handReducesBonus
 
     case 'RETREAT_ACTIVE': {
       // Battre en retraite n'est pertinent que si l'Actif ne peut pas attaquer et que le Pokémon promu le peut (ou a un meilleur rôle)
@@ -485,6 +559,13 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
       const benchPoke =
         action.targetBenchIndex !== undefined ? activeBoard.bench[action.targetBenchIndex] : null
       if (!activePoke || !benchPoke) return 30
+      if (
+        isTurn1GoingSecond &&
+        benchPoke.card.playableActions.some(isZeroEnergyItemLockAttack) &&
+        !activePoke.card.playableActions.some(isZeroEnergyItemLockAttack)
+      ) {
+        return 285
+      }
       const activeReq = getMainAttackEnergyRequirement(activePoke.card)
       const benchReq = getMainAttackEnergyRequirement(benchPoke.card)
       const activeReady = activePoke.attachedEnergies.length >= activeReq

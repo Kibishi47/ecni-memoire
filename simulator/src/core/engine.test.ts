@@ -552,4 +552,209 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
     expect(afterKoState.player.bench.length).toBe(0)
     expect(afterKoState.opponent.prizes.length).toBe(initialOppPrizes - 1)
   })
+
+  it('executes double attack (Fête Battante / Festival Lead) when a Stadium is in play', () => {
+    const grassEnergy = createNativeBasicEnergyModel('Plante')
+    const dipplinCard: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'twm-018',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'twm-018',
+        nameFr: 'Pomdramour',
+        nameEn: 'Dipplin',
+        rawRulesText: ['Talent : Fête Battante - Si Terrain de la Fête est en jeu, ce Pokémon peut utiliser une attaque une deuxième fois.'],
+      },
+      pokemonStats: {
+        ...mockCharmander.pokemonStats!,
+        hp: 80,
+        types: ['Plante'],
+        canAttackTwice: true,
+      },
+      playableActions: [
+        {
+          actionId: 'ability_festival_lead',
+          label: 'Fête Battante',
+          sourceType: 'ABILITY_PASSIVE',
+          timing: 'PASSIVE_CONTINUOUS',
+          canUseTurn1GoingFirst: true,
+          canUseTurn1GoingSecond: true,
+          preconditions: [],
+          costs: [],
+          effects: [],
+          canAttackTwice: true,
+        },
+        {
+          actionId: 'atk_do_the_wave',
+          label: 'Ronde Festive',
+          sourceType: 'ATTACK',
+          timing: 'END_OF_TURN_ATTACK',
+          canUseTurn1GoingFirst: false,
+          canUseTurn1GoingSecond: true,
+          preconditions: [],
+          costs: [],
+          effects: [{ primitive: 'DEAL_DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 100 }],
+        },
+      ],
+    }
+
+    const festivalGrounds: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'twm-149',
+      category: 'TRAINER',
+      subCategory: 'STADIUM',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'twm-149',
+        nameFr: 'Terrain de la Fête',
+        category: 'TRAINER',
+        subCategory: 'STADIUM',
+      },
+    }
+
+    const dummyState = createInitialMatchState(
+      Array(60).fill(dipplinCard),
+      Array(60).fill(mockTargetBasic),
+      { seed: 77, firstPlayerIndex: 0, maxTurns: 10 },
+    )
+    dummyState.turnNumber = 2
+    dummyState.activeStadium = { card: festivalGrounds, ownerIndex: 0, usedThisTurn: false }
+    dummyState.player.activePokemon = {
+      instanceId: 'dipplin_active',
+      card: dipplinCard,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [grassEnergy],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    // Opponent has 70 HP Active + 70 HP Bench -> 2 hits of 100 damage should KO BOTH and take 2 prizes!
+    dummyState.opponent.activePokemon = {
+      instanceId: 'opp_active_1',
+      card: mockTargetBasic,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    dummyState.opponent.bench = [
+      {
+        instanceId: 'opp_bench_1',
+        card: mockTargetBasic,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+      {
+        instanceId: 'opp_bench_2',
+        card: mockTargetBasic,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+    ]
+
+    const afterAttack = applyAction(dummyState, {
+      type: 'DECLARE_ATTACK',
+      cardId: dipplinCard.cardId,
+      actionId: 'atk_do_the_wave',
+      label: 'Ronde Festive',
+      endsTurnImmediately: true,
+    })
+
+    // Player took 2 prizes in a single turn thanks to Festival Lead double attack!
+    expect(afterAttack.player.prizes.length).toBe(4)
+    expect(afterAttack.opponent.bench.length).toBe(0)
+  })
+
+  it('maintains Item-Lock (Pollen Démangeant / Budew) across the opponent turn and blocks ITEM play', () => {
+    const budewCard: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'pre-004',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'pre-004',
+        nameFr: 'Rozbouton',
+        nameEn: 'Budew',
+      },
+      pokemonStats: {
+        ...mockCharmander.pokemonStats!,
+        hp: 30,
+        retreatCost: 0,
+      },
+      playableActions: [
+        {
+          actionId: 'atk_itchy_pollen',
+          label: 'Pollen Démangeant',
+          sourceType: 'ATTACK',
+          timing: 'END_OF_TURN_ATTACK',
+          canUseTurn1GoingFirst: false,
+          canUseTurn1GoingSecond: true,
+          preconditions: [],
+          costs: [],
+          effects: [
+            { primitive: 'DEAL_DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 10 },
+            { primitive: 'PASSIVE_ABILITY_OR_ITEM_LOCK', count: 1, upTo: false },
+          ],
+          energyCost: [],
+        },
+      ],
+    }
+
+    const dummyState = createInitialMatchState(
+      Array(60).fill(budewCard),
+      Array(60).fill(mockTargetBasic),
+      { seed: 88, firstPlayerIndex: 1, maxTurns: 10 },
+    )
+    // Player (index 0) is Going Second on Turn 2
+    dummyState.turnNumber = 2
+    dummyState.activePlayerIndex = 0
+    dummyState.player.activePokemon = {
+      instanceId: 'budew_1',
+      card: budewCard,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 2,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+
+    const afterBudewAtk = applyAction(dummyState, {
+      type: 'DECLARE_ATTACK',
+      cardId: budewCard.cardId,
+      actionId: 'atk_itchy_pollen',
+      label: 'Pollen Démangeant',
+      endsTurnImmediately: true,
+    })
+
+    // Now it is Opponent's turn (Turn 3, activePlayerIndex = 1)
+    expect(afterBudewAtk.activePlayerIndex).toBe(1)
+    expect(afterBudewAtk.opponent.itemLockActive).toBe(true)
+
+    startTurn(afterBudewAtk)
+    // Item lock must still be active during opponent's turn!
+    expect(afterBudewAtk.opponent.itemLockActive).toBe(true)
+    const oppActions = getLegalActions(afterBudewAtk)
+    expect(oppActions.some((a) => a.type === 'PLAY_TRAINER')).toBe(false)
+  })
 })
