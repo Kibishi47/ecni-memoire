@@ -41,6 +41,7 @@ const simConfig = ref<SimulationConfig>({
   fixedSeed: null,
   perturbationType: 'NONE',
   perturbationTurn: 2,
+  stressTestOhkoEachTurn: false,
 })
 
 const baselineSummary = ref<SimulationMetricsSummary | null>(null)
@@ -249,7 +250,11 @@ function handleAddCatalogCard(model: EngineCardModel) {
   const existing = clonedCards.find((c) => c.cardId === model.cardId)
   if (existing) {
     const maxAllowed =
-      existing.category === 'energy' && existing.subCategory === 'BASIC_ENERGY' ? 59 : 4
+      existing.category === 'energy' && existing.subCategory === 'BASIC_ENERGY'
+        ? 59
+        : model.identity.isAceSpec
+          ? 1
+          : 4
     if (existing.quantity < maxAllowed) {
       existing.quantity += 1
     }
@@ -257,6 +262,40 @@ function handleAddCatalogCard(model: EngineCardModel) {
     clonedCards.push(buildDeckEntryFromModel(model, 1, clonedCards.length + 1))
   }
   rebuildEditableDeck(clonedCards)
+}
+
+function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
+  const clonedCards = editableDeck.value.cards.map((c) => ({ ...c }))
+  const oldIdx = clonedCards.findIndex((c) => c.cardId === oldCardId)
+  const qtyToTransfer = oldIdx !== -1 ? clonedCards[oldIdx]!.quantity : 1
+
+  if (oldIdx !== -1) {
+    clonedCards.splice(oldIdx, 1)
+  }
+
+  const maxAllowed =
+    newModel.category === 'ENERGY' && newModel.subCategory === 'BASIC_ENERGY'
+      ? 59
+      : newModel.identity.isAceSpec
+        ? 1
+        : 4
+
+  const existingNew = clonedCards.find((c) => c.cardId === newModel.cardId)
+  if (existingNew) {
+    existingNew.quantity = Math.min(maxAllowed, existingNew.quantity + qtyToTransfer)
+  } else {
+    const safeQty = Math.min(maxAllowed, qtyToTransfer)
+    clonedCards.push(buildDeckEntryFromModel(newModel, safeQty, clonedCards.length + 1))
+  }
+
+  rebuildEditableDeck(clonedCards)
+}
+
+function handleToggleStressOhko(enabled: boolean) {
+  simConfig.value = {
+    ...simConfig.value,
+    stressTestOhkoEachTurn: enabled,
+  }
 }
 
 function handlePromoteCurrentAsBaseline() {
@@ -434,9 +473,12 @@ function handleResetToBaseline() {
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
         :is-debug-mode="isDebugMode"
+        :stress-test-ohko="Boolean(simConfig.stressTestOhkoEachTurn)"
         @adjust-card-qty="handleAdjustCardQty"
         @remove-card="handleRemoveCard"
         @add-catalog-card="handleAddCatalogCard"
+        @replace-card-in-deck="handleReplaceCardInDeck"
+        @toggle-stress-ohko="handleToggleStressOhko"
         @rerun-and-compare="executeComparisonSimulation"
         @cancel-simulation="handleCancelSimulation"
         @promote-current-as-baseline="handlePromoteCurrentAsBaseline"

@@ -504,6 +504,33 @@ const launchButtonState = computed(() => {
               </span>
             </button>
           </div>
+
+          <!-- Option 6 : Stress-Test "One-Shot par tour" (Continuité d'Attaque / Streaming) -->
+          <div class="mt-4 border-t border-slate-100 pt-3.5">
+            <label class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 transition hover:bg-slate-100/70">
+              <div class="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  :checked="Boolean(config.stressTestOhkoEachTurn)"
+                  @change="patchConfig({ stressTestOhkoEachTurn: ($event.target as HTMLInputElement).checked })"
+                  class="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                />
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-slate-900">
+                      Activer le Stress-Test « One-Shot par tour » (Attacker Streaming)
+                    </span>
+                    <span class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-800">
+                      PRESSION MAXIMALE
+                    </span>
+                  </div>
+                  <p class="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+                    Force la mise K.O. de votre Pokémon Actif à chaque tour adverse (dès le Tour 3) pour mesurer la capacité pure du deck à recharger un nouvel attaquant en continu.
+                  </p>
+                </div>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
 
