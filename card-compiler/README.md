@@ -226,6 +226,14 @@ python -m compiler.cli run --llm-provider lm_studio -j 4 --standard --limit 50
 La CLI intègre tous les outils nécessaires pour piloter l'avancement de votre base de données :
 
 ```bash
+# 0. Mettre à jour la liste officielle des cartes Standard depuis l'API TCGdex (legal.standard=true)
+# Télécharge les ~3 500 cartes légales en Standard (49 sets) et les met en cache localement :
+python -m compiler.cli fetch-cards
+# Alias équivalent :
+python -m compiler.cli update-cards
+# Pour télécharger l'index global de toutes les cartes historiques TCGdex :
+python -m compiler.cli fetch-cards --all
+
 # 1. Connaître le nombre de cartes restantes à compiler (JSON Passe 2)
 python -m compiler.cli remaining
 python -m compiler.cli remaining --set sv08.5 --details
@@ -270,7 +278,7 @@ python -m compiler.cli stats --ids-file data/target_ids.txt
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **119 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **124 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
@@ -287,6 +295,7 @@ PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p 
 | `run` | `compile` | **Commande principale** : exécute le pipeline complet (mode Single-Pass direct ou Two-Pass enchaîné). |
 | `reason` | — | **Passe 1** : Exécute l'IA de raisonnement et sauvegarde les fiches d'analyse textuelles dans `data/reasoning_texts/`. |
 | `code` | — | **Passe 2** : Exécute l'IA de coding pour transformer les analyses textuelles en modèles JSON dans `data/compiled_cards/`. |
+| `fetch-cards` | `update-cards`, `refresh-cards`, `fetch-index`, `update-index` | **Mise à jour TCGdex** : Télécharge la liste officielle des ~3 500 cartes légales en Standard (`legal.standard=true`) ou l'index global. |
 | `remaining` | `todo`, `left`, `pending`, `a-compiler` | Calcule et affiche le nombre de cartes restant à compiler (globalement ou par extension). |
 | `count` | — | Compte les cartes compilées sur le disque avec répartition par catégories et statut de synchronisation. |
 | `sync` | `sync-database`, `check-database`, `sync-db` | Vérifie et synchronise le fichier JSON consolidé global `data/cards_database.json`. |
@@ -327,6 +336,11 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 
 | Commande | Option / Argument | Alias court | Description | Valeurs possibles | Valeur par défaut |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`fetch-cards`** / **`update-cards`** | `--mode` | `-m` | Périmètre à récupérer : `standard` (cartes officielles Standard) ou `all` (index global complet) | `standard`, `all` | `standard` |
+| | `--standard` | — | Raccourci pour forcer la récupération du format Standard (`legal.standard=true`) | Flag booléen | `False` |
+| | `--all` | — | Raccourci pour forcer la récupération de l'index complet de toutes les cartes | Flag booléen | `False` |
+| | `--provider` | `-p` | Fournisseur TCGdex : SDK officiel Python (`tcgdexsdk`) ou REST direct (`httpx`) | `sdk`, `rest` | `sdk` |
+| | `--force` / `--no-force` | — | Force le re-téléchargement et écrase le cache local | Flag booléen | `True` |
 | **`remaining`** | `--ids-file` | `-f` | Filtre les cartes restantes selon un fichier texte d'IDs (déduplication auto) | Chemin fichier | `None` |
 | | `--ids` | — | Filtre les cartes restantes sur une liste précise séparée par des virgules | Chaîne texte | `None` |
 | | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser (si aucun `--ids`/`--ids-file`) | `standard`, `test`, `all` | `standard` |

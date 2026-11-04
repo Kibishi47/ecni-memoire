@@ -25,8 +25,10 @@ import httpx
 
 try:
     from tcgdexsdk import TCGdex
+    from tcgdexsdk.query import Query
 except ImportError:
     TCGdex = None
+    Query = None
 
 from compiler.schemas import (
     CardCategory,
@@ -350,10 +352,12 @@ class TCGdexFetcher:
         self.raw_dir = self.data_dir / "raw_tcgdex"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.raw_dir / "_cards_index.json"
+        self.standard_index_path = self.raw_dir / "_cards_standard_index.json"
         self.timeout_seconds = timeout_seconds
         self.provider = provider
         self._name_to_pre_evo_cache: Dict[str, Optional[str]] = {}
         self._cards_index_cache: Optional[List[Dict[str, Any]]] = None
+        self._standard_cards_index_cache: Optional[List[Dict[str, Any]]] = None
 
         if self.provider == FetcherProvider.sdk and TCGdex is not None:
             self._sdk_fr = TCGdex("fr")
@@ -409,6 +413,60 @@ class TCGdexFetcher:
             encoding="utf-8",
         )
         self._cards_index_cache = cards_list
+        return cards_list
+
+    async def fetch_standard_cards_index(
+        self,
+        client: httpx.AsyncClient,
+        force: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Récupère la liste officielle des cartes légales au format Standard (`legal.standard=true`).
+
+        Interroge en priorité le SDK Python officiel TCGdex (`t.card.listSync(Query().contains('legal.standard', 'true'))`)
+        ou l'API REST `GET /v2/fr/cards?legal.standard=true`. Met en cache dans `data/raw_tcgdex/_cards_standard_index.json`.
+        """
+        if self._standard_cards_index_cache is not None and not force:
+            return self._standard_cards_index_cache
+
+        if self.standard_index_path.exists() and not force:
+            try:
+                cached = json.loads(self.standard_index_path.read_text(encoding="utf-8"))
+                if isinstance(cached, list) and len(cached) > 0:
+                    self._standard_cards_index_cache = cached
+                    return cached
+            except Exception:
+                pass
+
+        # 1. Tentative via SDK officiel si provider SDK
+        if self.provider == FetcherProvider.sdk and self._sdk_fr is not None and Query is not None:
+            try:
+                q = Query().contains("legal.standard", "true")
+                cards_list_obj = await asyncio.to_thread(self._sdk_fr.card.listSync, q)
+                if cards_list_obj and isinstance(cards_list_obj, list):
+                    cards_list = [_clean_tcgdex_dict(asdict(c)) for c in cards_list_obj if hasattr(c, "id")]
+                    if cards_list:
+                        self.standard_index_path.write_text(
+                            json.dumps(cards_list, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        self._standard_cards_index_cache = cards_list
+                        return cards_list
+            except Exception:
+                pass
+
+        # 2. Requête REST via httpx (provider REST ou repli SDK)
+        url = f"{TCGDEX_API_BASE}/fr/cards?legal.standard=true"
+        response = await client.get(url)
+        response.raise_for_status()
+        cards_list = response.json()
+        if not isinstance(cards_list, list):
+            raise ValueError(f"Réponse inattendue de {url}: attendu une liste JSON.")
+
+        self.standard_index_path.write_text(
+            json.dumps(cards_list, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._standard_cards_index_cache = cards_list
         return cards_list
 
     async def _get_card_json_with_variants(
@@ -822,61 +880,48 @@ class TCGdexFetcher:
         self,
         client: httpx.AsyncClient,
         limit: Optional[int] = None,
+        force: bool = False,
     ) -> List[str]:
         """Récupère les IDs des cartes légales au format Standard (`legal.standard == true`).
 
-        Optimise la sélection en filtrant les extensions Écarlate et Violet (`sv*`) de l'index global
-        ou en vérifiant `legal.standard` lors du téléchargement détaillé.
-        Exclut les sets futurs ou placeholders non encore publiés sur TCGdex (ex: sv09, sv10, sv10.5).
+        Interroge en priorité le SDK Python officiel TCGdex (`t.card.listSync(Query().contains('legal.standard', 'true'))`)
+        avec repli HTTP REST (`GET /v2/fr/cards?legal.standard=true`).
+        Met en cache les résultats dans `data/raw_tcgdex/_cards_standard_index.json`.
         """
+        try:
+            cards_index = await self.fetch_standard_cards_index(client, force=force)
+            card_ids = [
+                str(entry.get("id")).strip()
+                for entry in cards_index
+                if isinstance(entry, dict) and entry.get("id")
+            ]
+            unique_ids = list(dict.fromkeys(card_ids))
+            if unique_ids:
+                if limit is not None and limit > 0:
+                    return unique_ids[:limit]
+                return unique_ids
+        except Exception:
+            pass
+
+        # Repli défensif si hors ligne et sans cache _cards_standard_index.json
         cards_index = await self.fetch_cards_index(client, force=False)
-
-        # Extensions Standard officielles parues de l'ère Écarlate et Violet (bloc SV)
-        # Exclut les sets futurs / placeholders non publiés (ex: sv09, sv10, sv10.5) qui provoquent des 404
-        known_released_prefixes = {
-            "sv01", "sv02", "sv03", "sv03.5", "sv04", "sv04.5",
-            "sv05", "sv06", "sv06.5", "sv07", "sv08", "sv08.5",
-            "sve", "svp",
-        }
-
-        sv_candidates: List[str] = []
-        unreleased_sv_candidates: List[str] = []
-        other_candidates: List[str] = []
-
+        candidate_ids: List[str] = []
         for entry in cards_index:
             if not isinstance(entry, dict):
                 continue
             cid = str(entry.get("id") or "").strip()
             if not cid:
                 continue
-
-            set_prefix = cid.split("-")[0].lower() if "-" in cid else cid.lower()
-            if set_prefix in known_released_prefixes:
-                sv_candidates.append(cid)
-                continue
-
             reg_m = str(entry.get("regulationMark") or "").strip().upper()
             if reg_m in {"G", "H", "I"}:
-                sv_candidates.append(cid)
-                continue
+                candidate_ids.append(cid)
+            elif cid.lower().startswith(("sv", "me")):
+                candidate_ids.append(cid)
 
-            # Si l'index inclut déjà l'objet legal, on l'utilise directement
-            legal = entry.get("legal")
-            if isinstance(legal, dict) and "standard" in legal:
-                if legal.get("standard") is True:
-                    sv_candidates.append(cid)
-                continue
-
-            if cid.lower().startswith("sv"):
-                unreleased_sv_candidates.append(cid)
-            else:
-                other_candidates.append(cid)
-
-        # Priorité absolue aux extensions Standard parues, puis unreleased en fin de liste
-        selected = sv_candidates if sv_candidates else (unreleased_sv_candidates or other_candidates)
+        unique_ids = list(dict.fromkeys(candidate_ids))
         if limit is not None and limit > 0:
-            return selected[:limit]
-        return selected
+            return unique_ids[:limit]
+        return unique_ids
 
     async def fetch_batch(
         self,

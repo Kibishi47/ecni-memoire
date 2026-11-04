@@ -134,8 +134,22 @@ SV_SET_NAMES: Dict[str, str] = {
     "sv07": "Couronne Stellaire",
     "sv08": "Étincelles Déferlantes",
     "sv08.5": "Évolutions Prismatiques",
+    "sv09": "Voyage Éclair",
+    "sv10": "Destin Éternel",
+    "sv10.5b": "Forces Noires (SV10.5)",
+    "sv10.5w": "Forces Blanches (SV10.5)",
     "sve": "Énergies de Base SV",
     "svp": "Promos Écarlate et Violet",
+    "me01": "Méga-Évolution 1",
+    "me02": "Méga-Évolution 2",
+    "me02.5": "Méga-Évolution 2.5",
+    "me03": "Méga-Évolution 3",
+    "me04": "Méga-Évolution 4",
+    "me05": "Méga-Évolution 5",
+    "mee": "Énergies Spéciales ME",
+    "mep": "Promos Méga-Évolution",
+    "30th": "30e Anniversaire",
+    "tk": "Kit du Dresseur",
 }
 
 
@@ -274,11 +288,23 @@ def get_remaining_cards_summary(
                     return [str(c.get("id")).strip() for c in idx if isinstance(c, dict) and c.get("id")]
             target_ids = asyncio.run(_fetch_all())
     else:
-        # Mode standard par défaut
-        async def _resolve_std():
-            async with httpx.AsyncClient() as client:
-                return await fetcher.resolve_standard_card_ids(client)
-        target_ids = asyncio.run(_resolve_std())
+        # Mode standard par défaut : vérifie d'abord le cache local _cards_standard_index.json
+        std_index_path = data_dir / "raw_tcgdex" / "_cards_standard_index.json"
+        if std_index_path.exists():
+            try:
+                cached_std = json.loads(std_index_path.read_text(encoding="utf-8"))
+                target_ids = [
+                    str(c.get("id")).strip()
+                    for c in cached_std
+                    if isinstance(c, dict) and c.get("id")
+                ]
+            except Exception:
+                target_ids = []
+        if not target_ids:
+            async def _resolve_std():
+                async with httpx.AsyncClient() as client:
+                    return await fetcher.resolve_standard_card_ids(client)
+            target_ids = asyncio.run(_resolve_std())
 
     # Application du filtre par extension / set
     if set_filter:
@@ -2361,7 +2387,7 @@ def remaining_command(
     elif set_name:
         mode_label = f"Extension spécifique ({set_name.upper()})"
     elif mode == "standard":
-        mode_label = "Standard (bloc Écarlate & Violet)"
+        mode_label = "Standard (format légal officiel legal.standard=true)"
     elif mode == "test":
         mode_label = f"Test ({len(TEST_CARD_IDS)} cartes)"
     else:
@@ -2507,6 +2533,156 @@ def a_compiler_alias(
 ) -> None:
     """Alias de la commande `remaining`."""
     remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+
+
+@app.command("fetch-cards")
+def fetch_cards_command(
+    mode: str = typer.Option(
+        "standard",
+        "--mode",
+        "-m",
+        help="Type de cartes à récupérer : 'standard' (défaut, cartes légales format Standard via legal.standard=true) ou 'all' (index global de toutes les cartes historiques).",
+    ),
+    standard_flag: bool = typer.Option(
+        False,
+        "--standard",
+        help="Raccourci pour forcer la récupération de la liste Standard.",
+    ),
+    all_flag: bool = typer.Option(
+        False,
+        "--all",
+        help="Raccourci pour récupérer l'index global de toutes les cartes historiques TCGdex.",
+    ),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès TCGdex : 'sdk' (SDK Python officiel tcgdex-sdk par défaut) ou 'rest' (API HTTP directe httpx).",
+    ),
+    force: bool = typer.Option(
+        True,
+        "--force/--no-force",
+        help="Force le re-téléchargement et écrase le fichier cache existant (True par défaut).",
+    ),
+) -> None:
+    """Récupère et met à jour depuis l'API TCGdex la liste officielle des cartes (Standard légales ou index global)."""
+    data_dir = get_data_dir()
+    fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
+    effective_mode = "all" if all_flag else ("standard" if standard_flag else mode.lower().strip())
+
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "pokemon-tcg-card-compiler/0.1.0",
+    }
+
+    if effective_mode == "all":
+        with console.status(f"[bold blue]Téléchargement de l'index global TCGdex via {provider.value.upper()}...[/bold blue]"):
+            async def _fetch():
+                async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, headers=headers) as client:
+                    return await fetcher.fetch_cards_index(client, force=force)
+            cards = asyncio.run(_fetch())
+
+        target_file = fetcher.index_path
+        title = "[bold cyan]Mise à Jour de l'Index Global TCGdex[/bold cyan]"
+        desc = "Total de cartes historiques répertoriées"
+    else:
+        with console.status(f"[bold blue]Téléchargement des cartes légales Standard (legal.standard=true) via {provider.value.upper()}...[/bold blue]"):
+            async def _fetch_std():
+                async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, headers=headers) as client:
+                    return await fetcher.fetch_standard_cards_index(client, force=force)
+            cards = asyncio.run(_fetch_std())
+
+        target_file = fetcher.standard_index_path
+        title = "[bold green]Mise à Jour de la Liste Standard TCGdex (legal.standard=true)[/bold green]"
+        desc = "Cartes légales au format Standard"
+
+    total_cards = len(cards)
+    distinct_ids = list(dict.fromkeys(str(c.get("id")).strip() for c in cards if isinstance(c, dict) and c.get("id")))
+
+    # Ventilation par set
+    by_set: Counter[str] = Counter()
+    for cid in distinct_ids:
+        prefix = cid.split("-")[0].lower() if "-" in cid else "autres"
+        by_set[prefix] += 1
+
+    console.print(
+        Panel.fit(
+            f"• [bold]{desc}[/bold] : [bold green]{len(distinct_ids)}[/bold green] (fiches brutes : {total_cards})\n"
+            f"• [bold]Nombre d'extensions représentées[/bold] : [bold cyan]{len(by_set)}[/bold cyan] sets\n"
+            f"• [bold]Fournisseur utilisé[/bold] : [magenta]{provider.value.upper()}[/magenta] ({'SDK officiel tcgdex-sdk' if provider == FetcherProvider.sdk else 'HTTP REST httpx'})\n"
+            f"• [bold]Fichier de cache enregistré[/bold] : [cyan]{target_file}[/cyan]",
+            title=title,
+            border_style="green",
+        )
+    )
+
+    if by_set:
+        table = Table(
+            title=f"Répartition par Extension ({len(by_set)} sets répertoriés)",
+            header_style="bold cyan",
+            show_lines=False,
+        )
+        table.add_column("Code Set", style="bold yellow")
+        table.add_column("Nom de l'Extension", style="white")
+        table.add_column("Nombre de Cartes", justify="right", style="green")
+
+        for s_code, cnt in by_set.most_common(25):
+            s_name = SV_SET_NAMES.get(s_code, s_code.upper())
+            table.add_row(s_code, s_name, str(cnt))
+
+        if len(by_set) > 25:
+            table.add_row("...", f"et {len(by_set) - 25} autre(s) extension(s)", "...")
+
+        console.print(table)
+
+
+@app.command("update-cards")
+def update_cards_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    all_flag: bool = typer.Option(False, "--all"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+) -> None:
+    """Alias de la commande `fetch-cards` : met à jour la liste officielle des cartes."""
+    fetch_cards_command(mode=mode, standard_flag=standard_flag, all_flag=all_flag, provider=provider, force=force)
+
+
+@app.command("refresh-cards", hidden=True)
+def refresh_cards_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    all_flag: bool = typer.Option(False, "--all"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+) -> None:
+    """Alias de la commande `fetch-cards`."""
+    fetch_cards_command(mode=mode, standard_flag=standard_flag, all_flag=all_flag, provider=provider, force=force)
+
+
+@app.command("fetch-index", hidden=True)
+def fetch_index_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    all_flag: bool = typer.Option(False, "--all"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+) -> None:
+    """Alias de la commande `fetch-cards`."""
+    fetch_cards_command(mode=mode, standard_flag=standard_flag, all_flag=all_flag, provider=provider, force=force)
+
+
+@app.command("update-index", hidden=True)
+def update_index_alias(
+    mode: str = typer.Option("standard", "--mode", "-m"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    all_flag: bool = typer.Option(False, "--all"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+) -> None:
+    """Alias de la commande `fetch-cards`."""
+    fetch_cards_command(mode=mode, standard_flag=standard_flag, all_flag=all_flag, provider=provider, force=force)
 
 
 if __name__ == "__main__":
