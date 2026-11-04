@@ -297,4 +297,118 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     const scoreWithTank = evaluateState(state, 0)
     expect(scoreWithTank).toBeGreaterThan(initialScore)
   })
+
+  it('vide la main pour débloquer un Supporter "seule carte en main" (HAND_MAX_OTHER_CARDS_ZERO) puis attaque deux fois', () => {
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+
+    const state = createInitialMatchState(deckA, deckB, {
+      seed: 404,
+      firstPlayerIndex: 0,
+      maxTurns: 12,
+    })
+    state.turnNumber = 3
+    state.activePlayerIndex = 0
+
+    const grassEnergy = createNativeBasicEnergyModel('Plante')
+    const seakingCard: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'pre-021',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'pre-021',
+        nameFr: 'Poissoroy',
+        nameEn: 'Seaking',
+      },
+      pokemonStats: {
+        ...mockCharmander.pokemonStats!,
+        hp: 110,
+        canAttackTwice: true,
+      },
+      playableActions: [
+        {
+          actionId: 'atk_rapid_draw',
+          label: 'Plongeon Festif',
+          sourceType: 'ATTACK',
+          timing: 'END_OF_TURN_ATTACK',
+          canUseTurn1GoingFirst: false,
+          canUseTurn1GoingSecond: true,
+          preconditions: [{ type: 'SELF_HAS_ENERGY_COST', minCount: 1 }],
+          costs: [],
+          effects: [{ primitive: 'DEAL_DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 60 }],
+        },
+      ],
+    }
+
+    const lastCardSupporter: EngineCardModel = {
+      ...mockCharmander,
+      cardId: 'sup-last-card',
+      category: 'TRAINER',
+      subCategory: 'SUPPORTER',
+      identity: {
+        ...mockCharmander.identity,
+        cardId: 'sup-last-card',
+        nameFr: 'Supporter Ultime',
+        category: 'TRAINER',
+        subCategory: 'SUPPORTER',
+      },
+      playableActions: [
+        {
+          actionId: 'sup_final_boost',
+          label: 'Boost Ultime (+60 dégâts)',
+          sourceType: 'TRAINER_PLAY',
+          timing: 'ONCE_PER_TURN_SUPPORTER',
+          canUseTurn1GoingFirst: false,
+          canUseTurn1GoingSecond: true,
+          preconditions: [{ type: 'HAND_MAX_OTHER_CARDS_ZERO', minCount: 0 }],
+          costs: [],
+          effects: [{ primitive: 'PASSIVE_DAMAGE_BOOST', count: 6, upTo: false, baseDamage: 60 }],
+        },
+      ],
+    }
+
+    state.activeStadium = {
+      card: { ...mockCharmander, cardId: 'twm-149', category: 'TRAINER', subCategory: 'STADIUM' },
+      ownerIndex: 0,
+      usedThisTurn: false,
+    }
+    state.player.activePokemon = {
+      instanceId: 'seaking_1',
+      card: seakingCard,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    state.player.bench = []
+    // Hand has: 1 Basic Pokemon, 1 Energy, and 1 Last-Card Supporter
+    // Optimal play: Put Basic on Bench -> Attach Energy to Seaking -> Play Last-Card Supporter (+60 dmg) -> Attack twice (120 x 2 = 240 dmg)!
+    state.player.hand = [mockCharmander, grassEnergy, lastCardSupporter]
+
+    state.opponent.activePokemon = {
+      instanceId: 'opp_big_ex',
+      card: {
+        ...mockTargetBasic,
+        pokemonStats: { ...mockTargetBasic.pokemonStats!, hp: 220, prizeCardsGiven: 2, isRuleBox: true },
+      },
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+
+    const decision = selectBestTurnBranch(state, 20, true)
+    expect(decision.chosenActions.some((a) => a.cardId === 'sup-last-card')).toBe(true)
+    expect(decision.chosenActions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(true)
+    // 220 HP ex is KO'd by (60 + 60) * 2 = 240 damage -> Player takes 2 prizes!
+    expect(decision.finalTurnState.player.prizes.length).toBe(4)
+  })
 })

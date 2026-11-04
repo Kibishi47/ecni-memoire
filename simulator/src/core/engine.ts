@@ -72,6 +72,7 @@ export interface PlayerBoardState {
   initialPrizesSnapshot: string[]
   prizesKnownByPlayer: boolean
   firstSearchTurn: number | null
+  turnDamageBoost?: number
 }
 
 export type ActiveStadiumState = { card: EngineCardModel; ownerIndex: 0 | 1; usedThisTurn: boolean }
@@ -291,6 +292,7 @@ export function clonePlayerBoard(b: PlayerBoardState): PlayerBoardState {
     initialPrizesSnapshot: b.initialPrizesSnapshot,
     prizesKnownByPlayer: b.prizesKnownByPlayer,
     firstSearchTurn: b.firstSearchTurn,
+    turnDamageBoost: b.turnDamageBoost ?? 0,
   }
 }
 
@@ -417,6 +419,53 @@ export function hasRequiredEnergyForPrecondition(
     return poke.attachedEnergies.length >= requiredTotal
   }
   return canPayEnergyCost(poke.attachedEnergies, Array(requiredTotal).fill(reqType))
+}
+
+/**
+ * Détermine si un Pokémon Actif peut attaquer 2 fois durant ce tour
+ * (ex: Talent "Fête Battante" / "Festival Lead" de Pomdramour ou Poissoroy lorsqu'un Stade est en jeu).
+ */
+export function canPokemonAttackTwice(poke: InPlayPokemon | null, state: MatchState): boolean {
+  if (!poke || !state.activeStadium) return false
+  if (poke.card.pokemonStats?.canAttackTwice) return true
+  for (const act of poke.card.playableActions) {
+    if (act.canAttackTwice) return true
+    if (
+      act.sourceType === 'ABILITY_PASSIVE' &&
+      /festival_lead|fete_battante|fête battante|attack_twice|deux fois|2 fois/i.test(
+        `${act.actionId} ${act.label}`,
+      )
+    ) {
+      return true
+    }
+  }
+  const rulesText = (poke.card.identity.rawRulesText || []).join(' ')
+  if (
+    /fête battante|festival lead|attaquer.*deuxième fois|utiliser une attaque une deuxième fois|use an attack a second time|attack twice/i.test(
+      rulesText,
+    )
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Détermine si une attaque est une attaque à 0 énergie infligeant un Item-Lock (ex: Pollen Démangeant de Rozbouton / Budew).
+ */
+export function isZeroEnergyItemLockAttack(action: PlayableAction): boolean {
+  if (action.sourceType !== 'ATTACK') return false
+  const hasEnergyCost =
+    (action.energyCost && action.energyCost.length > 0) ||
+    action.preconditions.some((p) => p.type === 'SELF_HAS_ENERGY_COST' && p.minCount > 0)
+  if (hasEnergyCost) return false
+
+  return (
+    action.effects.some((e) => e.primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK') ||
+    /pollen_demangeant|pollen démangeant|itchy_pollen|itchy pollen|item_lock/i.test(
+      `${action.actionId} ${action.label}`,
+    )
+  )
 }
 
 /**
@@ -571,6 +620,9 @@ export function computeAttackDamageToActive(
   }
 
   if (activeDamage > 0) {
+    if (attackerBoard.turnDamageBoost) {
+      activeDamage += attackerBoard.turnDamageBoost
+    }
     // Bonus d'Outil attaquant (ex: Ceinture Vitalité +10, Maximum Belt +50 contre Pokémon ex)
     for (const tool of attacker.attachedTools) {
       const toolNameNorm = normalizeCardNameForMatch(
@@ -912,6 +964,7 @@ export function createInitialMatchState(
       initialPrizesSnapshot,
       prizesKnownByPlayer: false,
       firstSearchTurn: null,
+      turnDamageBoost: 0,
     }
   }
 
@@ -962,6 +1015,7 @@ export function startTurn(state: MatchState): { drawnCard: EngineCardModel | nul
   activeBoard.supporterPlayedThisTurn = false
   activeBoard.energyAttachedThisTurn = false
   activeBoard.retreatUsedThisTurn = false
+  activeBoard.turnDamageBoost = 0
   activeBoard.usedOncePerTurnAbilities.clear()
 
   if (activeBoard.activePokemon) {
@@ -1096,6 +1150,17 @@ export function checkActionPreconditions(
             ? activeBoard.hand.length - 1
             : activeBoard.hand.length
         if (otherHandCount < pre.minCount) return false
+        break
+      }
+
+      case 'HAND_MAX_OTHER_CARDS_ZERO': {
+        const otherHandCount =
+          handIndexIfFromHand !== undefined
+            ? activeBoard.hand.length - 1
+            : activeBoard.hand.some((c) => c.cardId === sourceCard.cardId)
+              ? activeBoard.hand.length - 1
+              : activeBoard.hand.length
+        if (otherHandCount > 0) return false
         break
       }
 
@@ -1655,17 +1720,20 @@ export function getLegalActions(state: MatchState): GameAction[] {
       }
 
       const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction)
+      const isDoubleAtk = canPokemonAttackTwice(activeBoard.activePokemon, state)
+      const totalEstimatedActiveDmg = isDoubleAtk ? dmgInfo.activeDamage * 2 : dmgInfo.activeDamage
+      const totalEstimatedBenchDmg = isDoubleAtk ? dmgInfo.benchDamage * 2 : dmgInfo.benchDamage
       const oppActiveName = passiveBoard.activePokemon?.card.identity.nameFr || 'Actif adverse'
       const dmgLabel =
         dmgInfo.activeDamage > 0
-          ? `${dmgInfo.activeDamage} dégâts sur ${oppActiveName}${dmgInfo.benchDamage > 0 ? ` + ${dmgInfo.benchDamage} Banc` : ''}`
+          ? `${dmgInfo.activeDamage}${isDoubleAtk ? ' ×2 (Fête Battante)' : ''} dégâts sur ${oppActiveName}${dmgInfo.benchDamage > 0 ? ` + ${dmgInfo.benchDamage} Banc` : ''}`
           : 'Effet tactique'
 
       actions.push({
         type: 'DECLARE_ATTACK',
         cardId: activeBoard.activePokemon.card.cardId,
         actionId: pAction.actionId,
-        estimatedDamage: dmgInfo.activeDamage + dmgInfo.benchDamage,
+        estimatedDamage: totalEstimatedActiveDmg + totalEstimatedBenchDmg,
         endsTurnImmediately: true,
         label: `Attaque ${pAction.label} (${activeBoard.activePokemon.card.identity.nameFr}) : ${dmgLabel}`,
       })
@@ -1814,6 +1882,18 @@ function discardCardsFromHandForCost(
 
     activeBoard.hand.forEach((c, idx) => {
       if (!matchesCardFilter(c, cost.targetFilter)) return
+      const isLastCardComboTarget =
+        !activeBoard.supporterPlayedThisTurn &&
+        c.playableActions.some((a) =>
+          a.preconditions.some((p) => p.type === 'HAND_MAX_OTHER_CARDS_ZERO'),
+        )
+      if (isLastCardComboTarget && activeBoard.hand.length > 1) {
+        if (-5000 > bestDiscardScore) {
+          bestDiscardScore = -5000
+          bestDiscardIdx = idx
+        }
+        return
+      }
       const isDead = isCardDeadInHand(c, activeBoard, passiveBoard)
       // Dans un deck Gardevoir/Ire-Foudre, défausser une Énergie de base est souvent synergique !
       const isSynergisticBasicEnergy = c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY'
@@ -2222,74 +2302,86 @@ export function applyAction(
       activeBoard.koSufferedLastOpponentTurn = false
       passiveBoard.koSufferedLastOpponentTurn = false
 
-      const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction)
+      const totalExecutions = canPokemonAttackTwice(attacker, state) ? 2 : 1
 
-      // Défausse d'énergies en jeu si coût d'attaque (ex: Tempête Éclats d'Ire-Foudre-ex)
-      if (dmgInfo.energyToDiscard > 0) {
-        discardEnergiesFromPlayForAttack(activeBoard, dmgInfo.energyToDiscard)
-      }
+      for (let execIdx = 0; execIdx < totalExecutions; execIdx++) {
+        if (state.winner !== null || !activeBoard.activePokemon || !passiveBoard.activePokemon) {
+          break
+        }
 
-      for (const eff of pAction.effects) {
-        if (eff.primitive === 'DEAL_DAMAGE_ACTIVE') {
-          if (passiveBoard.activePokemon && dmgInfo.activeDamage > 0) {
-            passiveBoard.activePokemon.damage += dmgInfo.activeDamage
-            if (passiveBoard.activePokemon.damage >= getPokemonMaxHp(passiveBoard.activePokemon)) {
-              handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
-            }
-          }
-        } else if (eff.primitive === 'DEAL_DAMAGE_BENCH') {
-          // DEAL_DAMAGE_BENCH inflige des DÉGÂTS au Banc.
-          // Les Pokémon Téracristal (isTera === true) sont immunisés aux dégâts sur le Banc !
-          if (passiveBoard.bench.length > 0) {
-            const benchDmg = eff.baseDamage ?? (eff.count || 1) * 10
-            for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
-              const bPoke = passiveBoard.bench[bIdx]!
-              if (bPoke.card.pokemonStats?.isTera) continue
-              bPoke.damage += benchDmg
-              if (bPoke.damage >= getPokemonMaxHp(bPoke)) {
-                handleKnockOut(state, activeBoard, passiveBoard, bIdx)
+        const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction)
+
+        // Défausse d'énergies en jeu si coût d'attaque (ex: Tempête Éclats d'Ire-Foudre-ex)
+        if (execIdx === 0 && dmgInfo.energyToDiscard > 0) {
+          discardEnergiesFromPlayForAttack(activeBoard, dmgInfo.energyToDiscard)
+        }
+
+        if (isZeroEnergyItemLockAttack(pAction)) {
+          passiveBoard.itemLockActive = true
+        }
+
+        for (const eff of pAction.effects) {
+          if (eff.primitive === 'DEAL_DAMAGE_ACTIVE') {
+            if (passiveBoard.activePokemon && dmgInfo.activeDamage > 0) {
+              passiveBoard.activePokemon.damage += dmgInfo.activeDamage
+              if (passiveBoard.activePokemon.damage >= getPokemonMaxHp(passiveBoard.activePokemon)) {
+                handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
               }
             }
-          }
-        } else if (
-          eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
-          eff.primitive === 'PLACE_DAMAGE_COUNTERS'
-        ) {
-          // PLACE_DAMAGE_COUNTERS place des MARQUEURS de dégâts.
-          // Les marqueurs contournent la prévention des dégâts et affectent les Pokémon Téracristal normalement !
-          if (passiveBoard.bench.length > 0 && dmgInfo.benchDamage > 0) {
-            let bestBenchIdx = 0
-            let bestBenchScore = -9999
-            passiveBoard.bench.forEach((bPoke, bIdx) => {
-              const remHp = getRemainingHp(bPoke)
-              const willKo = remHp <= dmgInfo.benchDamage
-              const s =
-                (willKo ? 500 : 0) +
-                bPoke.card.strategicEvaluator.intrinsicBaseScore -
-                remHp * 0.4
-              if (s > bestBenchScore) {
-                bestBenchScore = s
-                bestBenchIdx = bIdx
-              }
-            })
-            const targetBench = passiveBoard.bench[bestBenchIdx]
-            if (targetBench) {
-              targetBench.damage += dmgInfo.benchDamage
-              if (targetBench.damage >= getPokemonMaxHp(targetBench)) {
-                handleKnockOut(state, activeBoard, passiveBoard, bestBenchIdx)
+          } else if (eff.primitive === 'DEAL_DAMAGE_BENCH') {
+            // DEAL_DAMAGE_BENCH inflige des DÉGÂTS au Banc.
+            // Les Pokémon Téracristal (isTera === true) sont immunisés aux dégâts sur le Banc !
+            if (passiveBoard.bench.length > 0) {
+              const benchDmg = eff.baseDamage ?? (eff.count || 1) * 10
+              for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+                const bPoke = passiveBoard.bench[bIdx]!
+                if (bPoke.card.pokemonStats?.isTera) continue
+                bPoke.damage += benchDmg
+                if (bPoke.damage >= getPokemonMaxHp(bPoke)) {
+                  handleKnockOut(state, activeBoard, passiveBoard, bIdx)
+                }
               }
             }
+          } else if (
+            eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
+            eff.primitive === 'PLACE_DAMAGE_COUNTERS'
+          ) {
+            // PLACE_DAMAGE_COUNTERS place des MARQUEURS de dégâts.
+            // Les marqueurs contournent la prévention des dégâts et affectent les Pokémon Téracristal normalement !
+            if (passiveBoard.bench.length > 0 && dmgInfo.benchDamage > 0) {
+              let bestBenchIdx = 0
+              let bestBenchScore = -9999
+              passiveBoard.bench.forEach((bPoke, bIdx) => {
+                const remHp = getRemainingHp(bPoke)
+                const willKo = remHp <= dmgInfo.benchDamage
+                const s =
+                  (willKo ? 500 : 0) +
+                  bPoke.card.strategicEvaluator.intrinsicBaseScore -
+                  remHp * 0.4
+                if (s > bestBenchScore) {
+                  bestBenchScore = s
+                  bestBenchIdx = bIdx
+                }
+              })
+              const targetBench = passiveBoard.bench[bestBenchIdx]
+              if (targetBench) {
+                targetBench.damage += dmgInfo.benchDamage
+                if (targetBench.damage >= getPokemonMaxHp(targetBench)) {
+                  handleKnockOut(state, activeBoard, passiveBoard, bestBenchIdx)
+                }
+              }
+            }
+          } else {
+            resolveAtomicEffect(
+              state,
+              activeBoard,
+              passiveBoard,
+              eff,
+              action,
+              rng,
+              markDeckSearched,
+            )
           }
-        } else {
-          resolveAtomicEffect(
-            state,
-            activeBoard,
-            passiveBoard,
-            eff,
-            action,
-            rng,
-            markDeckSearched,
-          )
         }
       }
 
@@ -2847,6 +2939,12 @@ function resolveAtomicEffect(
       break
     }
 
+    case 'PASSIVE_DAMAGE_BOOST': {
+      const boostAmount = eff.baseDamage ?? (eff.count ? eff.count * 10 : 60)
+      activeBoard.turnDamageBoost = (activeBoard.turnDamageBoost || 0) + boostAmount
+      break
+    }
+
     default:
       break
   }
@@ -3131,6 +3229,8 @@ export function endTurnAndAdvance(state: MatchState): void {
   }
 
   endingBoard.abilityUsageCountsThisTurn = {}
+  endingBoard.itemLockActive = false
+  endingBoard.turnDamageBoost = 0
 
   // Exécution du Checkup officiel entre les deux tours
   runBetweenTurnsCheckup(state)
