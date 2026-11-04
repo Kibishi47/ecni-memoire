@@ -144,23 +144,30 @@ def get_remaining_cards_summary(
     mode: str = "standard",
     set_filter: Optional[str] = None,
     provider: FetcherProvider = FetcherProvider.sdk,
+    reasoned: bool = False,
 ) -> Dict[str, Any]:
-    """Calcule le statut et le nombre de cartes restant à compiler.
+    """Calcule le statut et le nombre de cartes restant à compiler ou à raisonner.
 
     Retourne un dictionnaire contenant les statistiques globales et par extension :
     - mode : 'standard', 'test', ou 'all'
     - set_filter : préfixe de set filtré (si spécifié)
+    - reasoned : True si l'on inspecte data/reasoning_texts/ (Passe 1), False pour data/compiled_cards/ (Passe 2)
     - total_target : nombre total de cartes visées
-    - total_compiled : nombre de cartes cibles déjà compilées
-    - total_remaining : nombre de cartes restant à compiler
+    - total_compiled : nombre de cartes cibles déjà traitées (conservé pour rétrocompatibilité)
+    - total_done : nombre de cartes cibles déjà traitées
+    - total_remaining : nombre de cartes restant à traiter
     - progress_pct : pourcentage d'avancement
-    - remaining_ids : liste des identifiants des cartes non compilées
+    - remaining_ids : liste des identifiants des cartes non traitées
     - by_set : statistiques groupées par extension
-    - total_disk_compiled : total absolu de cartes compilées sur le disque
+    - total_disk_compiled : total absolu de fichiers sur le disque (conservé pour rétrocompatibilité)
+    - total_disk_done : total absolu de fichiers sur le disque
     """
-    compiled_dir = data_dir / "compiled_cards"
-    compiled_dir.mkdir(parents=True, exist_ok=True)
-    compiled_ids = set(f.stem for f in compiled_dir.glob("*.json"))
+    if reasoned:
+        target_dir = get_reasoning_texts_dir(data_dir)
+    else:
+        target_dir = data_dir / "compiled_cards"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    done_ids = set(f.stem for f in target_dir.glob("*.json"))
 
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
 
@@ -202,14 +209,14 @@ def get_remaining_cards_summary(
             if cid.lower().startswith(f"{s_clean}-") or cid.lower() == s_clean
         ]
 
-    # Analyse des cartes compilées vs restantes
-    compiled_target = [cid for cid in target_ids if cid in compiled_ids]
-    remaining_ids = [cid for cid in target_ids if cid not in compiled_ids]
+    # Analyse des cartes traitées vs restantes
+    done_target = [cid for cid in target_ids if cid in done_ids]
+    remaining_ids = [cid for cid in target_ids if cid not in done_ids]
 
     total_target = len(target_ids)
-    total_compiled = len(compiled_target)
+    total_done = len(done_target)
     total_remaining = len(remaining_ids)
-    progress_pct = (total_compiled / total_target * 100.0) if total_target > 0 else 100.0
+    progress_pct = (total_done / total_target * 100.0) if total_target > 0 else 100.0
 
     # Ventilation par extension
     by_set: Dict[str, Dict[str, Any]] = {}
@@ -221,31 +228,36 @@ def get_remaining_cards_summary(
                 "set_name": SV_SET_NAMES.get(prefix, prefix.upper()),
                 "total": 0,
                 "compiled": 0,
+                "done": 0,
                 "remaining": 0,
                 "remaining_ids": [],
             }
         by_set[prefix]["total"] += 1
-        if cid in compiled_ids:
+        if cid in done_ids:
             by_set[prefix]["compiled"] += 1
+            by_set[prefix]["done"] += 1
         else:
             by_set[prefix]["remaining"] += 1
             by_set[prefix]["remaining_ids"].append(cid)
 
     for s_info in by_set.values():
         t = s_info["total"]
-        c = s_info["compiled"]
+        c = s_info["done"]
         s_info["progress_pct"] = (c / t * 100.0) if t > 0 else 100.0
 
     return {
         "mode": effective_mode,
         "set_filter": set_filter,
+        "reasoned": reasoned,
         "total_target": total_target,
-        "total_compiled": total_compiled,
+        "total_compiled": total_done,
+        "total_done": total_done,
         "total_remaining": total_remaining,
         "progress_pct": progress_pct,
         "remaining_ids": remaining_ids,
         "by_set": by_set,
-        "total_disk_compiled": len(compiled_ids),
+        "total_disk_compiled": len(done_ids),
+        "total_disk_done": len(done_ids),
     }
 
 
@@ -1673,28 +1685,121 @@ def count_command(
         False,
         "--quiet",
         "-q",
-        help="Affiche uniquement le nombre entier de cartes compilées (idéal pour les scripts bash).",
+        help="Affiche uniquement le nombre entier de cartes (idéal pour les scripts bash).",
     ),
     details: bool = typer.Option(
         False,
         "--details",
         "-d",
-        help="Affiche la liste détaillée des cartes compilées avec leurs noms et catégories.",
+        help="Affiche la liste détaillée des cartes avec leurs noms et métadonnées.",
+    ),
+    reasoned: bool = typer.Option(
+        False,
+        "--reasoned",
+        "--reason",
+        "-r",
+        help="Prend en compte les cartes ayant déjà une analyse de raisonnement (Passe 1 dans data/reasoning_texts/) plutôt que compilées en JSON (Passe 2).",
     ),
 ) -> None:
-    """Compte et résume le nombre de cartes Pokémon déjà compilées dans `data/compiled_cards/`."""
+    """Compte et résume le nombre de cartes Pokémon TCG compilées (`data/compiled_cards/`) ou raisonnées (`data/reasoning_texts/`)."""
     data_dir = get_data_dir()
-    compiled_dir = data_dir / "compiled_cards"
-    json_files = sorted(compiled_dir.glob("*.json"))
+    if reasoned:
+        target_dir = get_reasoning_texts_dir(data_dir)
+    else:
+        target_dir = data_dir / "compiled_cards"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    json_files = sorted(target_dir.glob("*.json"))
     total_count = len(json_files)
 
     if quiet:
         console.print(str(total_count))
         return
 
+    if reasoned:
+        if total_count == 0:
+            console.print(
+                f"[yellow]Aucune analyse de raisonnement trouvée dans [bold]{target_dir}[/bold] (0 carte).[/yellow]\n"
+                "Pour lancer l'analyse de raisonnement (Passe 1), exécutez : [cyan]python -m compiler.cli reason[/cyan]"
+            )
+            return
+
+        models_counter: Counter[str] = Counter()
+        cards_summary: List[Dict[str, str]] = []
+
+        for fpath in json_files:
+            card_id = fpath.stem
+            card_name = "Inconnu"
+            model_name = "—"
+            backend = "—"
+            tps = None
+            tokens = None
+            try:
+                with open(fpath, "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+                    card_name = data.get("nameFr") or data.get("nameEn") or card_id
+                    model_name = data.get("modelRepoId") or "—"
+                    backend = data.get("modelBackend") or "—"
+                    tps = data.get("tokensPerSecond")
+                    tokens = data.get("completionTokens")
+            except Exception:
+                pass
+
+            models_counter[model_name] += 1
+            tps_str = f"{tps:.1f} t/s" if isinstance(tps, (int, float)) else "—"
+            tok_str = str(tokens) if isinstance(tokens, int) else "—"
+            cards_summary.append({
+                "id": card_id,
+                "name": card_name,
+                "backend": backend,
+                "model": model_name,
+                "tps": tps_str,
+                "tokens": tok_str,
+            })
+
+        models_str = ", ".join(f"[bold cyan]{cnt}[/bold cyan] via {m}" for m, cnt in models_counter.items())
+        rem_hint = ""
+        try:
+            rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=True)
+            rem_std = rem_summary["total_remaining"]
+            tot_std = rem_summary["total_target"]
+            prog_std = rem_summary["progress_pct"]
+            rem_hint = f"\n• [bold]Restant à raisonner (Standard)[/bold] : [bold yellow]{rem_std}[/bold yellow] / {tot_std} ({prog_std:.1f}% analysé — commande 'remaining -r')"
+        except Exception:
+            pass
+
+        console.print(
+            Panel.fit(
+                f"• [bold]Cartes analysées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
+                f"• [bold]Dossier de stockage[/bold] : [cyan]{target_dir}[/cyan]\n"
+                f"• [bold]Modèles utilisés[/bold] : {models_str}"
+                f"{rem_hint}",
+                title="[bold cyan]Corpus de Cartes Raisonnées (Passe 1)[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        if details:
+            table = Table(
+                title=f"Détail des {total_count} Cartes Raisonnées (Passe 1)",
+                header_style="bold cyan",
+                show_lines=False,
+            )
+            table.add_column("ID", style="bold yellow")
+            table.add_column("Nom", style="white")
+            table.add_column("Backend", style="cyan")
+            table.add_column("Modèle IA", style="magenta")
+            table.add_column("Tokens", justify="right", style="white")
+            table.add_column("Débit", style="green", justify="right")
+
+            for c in cards_summary:
+                table.add_row(c["id"], c["name"], c["backend"], c["model"], c["tokens"], c["tps"])
+
+            console.print(table)
+        return
+
     if total_count == 0:
         console.print(
-            f"[yellow]Aucune carte compilée trouvée dans [bold]{compiled_dir}[/bold] (0 carte).[/yellow]\n"
+            f"[yellow]Aucune carte compilée trouvée dans [bold]{target_dir}[/bold] (0 carte).[/yellow]\n"
             "Pour lancer la compilation, exécutez : [cyan]python -m compiler.cli run --mode test[/cyan]"
         )
         return
@@ -1755,7 +1860,7 @@ def count_command(
 
     rem_hint = ""
     try:
-        rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard")
+        rem_summary = get_remaining_cards_summary(data_dir=data_dir, mode="standard", reasoned=False)
         rem_std = rem_summary["total_remaining"]
         tot_std = rem_summary["total_target"]
         prog_std = rem_summary["progress_pct"]
@@ -1766,7 +1871,7 @@ def count_command(
     console.print(
         Panel.fit(
             f"• [bold]Cartes compilées sur le disque[/bold] : [bold green]{total_count}[/bold green]\n"
-            f"• [bold]Dossier de stockage[/bold] : [cyan]{compiled_dir}[/cyan]\n"
+            f"• [bold]Dossier de stockage[/bold] : [cyan]{target_dir}[/cyan]\n"
             f"• [bold]Répartition par catégorie[/bold] : {repartition_str}"
             f"{db_line}"
             f"{rem_hint}",
@@ -1977,26 +2082,34 @@ def remaining_command(
         "-s",
         help="Filtre sur une extension spécifique (ex: 'sv01', 'sv05', 'sve').",
     ),
+    reasoned: bool = typer.Option(
+        False,
+        "--reasoned",
+        "--reason",
+        "-r",
+        help="Prend en compte les cartes ayant déjà une analyse de raisonnement (Passe 1 dans data/reasoning_texts/) plutôt que compilées en JSON (Passe 2).",
+    ),
     details: bool = typer.Option(
         False,
         "--details",
         "-d",
-        help="Affiche la liste complète des identifiants (IDs) des cartes restant à compiler.",
+        help="Affiche la liste complète des identifiants (IDs) des cartes restant à compiler/analyser.",
     ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
         "-q",
-        help="Affiche uniquement le nombre entier de cartes restant à compiler (idéal pour scripts bash).",
+        help="Affiche uniquement le nombre entier de cartes restant à compiler/analyser (idéal pour scripts bash).",
     ),
 ) -> None:
-    """Calcule et affiche le nombre de cartes Pokémon TCG restant à compiler (globalement ou par extension)."""
+    """Calcule et affiche le nombre de cartes Pokémon TCG restant à compiler ou à raisonner (globalement ou par extension)."""
     data_dir = get_data_dir()
     try:
         summary = get_remaining_cards_summary(
             data_dir=data_dir,
             mode=mode,
             set_filter=set_name,
+            reasoned=reasoned,
         )
     except Exception as e:
         console.print(f"[bold red]✗ Erreur lors du calcul des cartes restantes :[/bold red] {e}")
@@ -2022,14 +2135,19 @@ def remaining_command(
     rem_color = "bold green" if total_remaining == 0 else "bold yellow"
     prog_color = "bold green" if progress_pct >= 100.0 else ("bold cyan" if progress_pct >= 50.0 else "bold yellow")
 
+    panel_title = "[bold cyan]État d'Avancement du Raisonnement Pokémon TCG (Passe 1)[/bold cyan]" if reasoned else "[bold cyan]État d'Avancement de la Compilation Pokémon TCG[/bold cyan]"
+    action_done = "déjà analysées (Passe 1)" if reasoned else "déjà compilées"
+    action_rem = "analyser en Passe 1" if reasoned else "compiler"
+    storage_type = "analyses textuelles" if reasoned else "cartes compilées"
+
     console.print(
         Panel.fit(
             f"• [bold]Périmètre analysé[/bold] : [cyan]{mode_label}[/cyan]\n"
             f"• [bold]Total de cartes cibles[/bold] : [bold white]{total_target}[/bold white]\n"
-            f"• [bold]Cartes déjà compilées[/bold] : [bold green]{total_compiled}[/bold green] ([{prog_color}]{progress_pct:.1f}%[/{prog_color}])\n"
-            f"• [bold]Cartes restant à compiler[/bold] : [{rem_color}]{total_remaining}[/{rem_color}] ([dim]{100.0 - progress_pct:.1f}% restant[/dim])\n"
-            f"• [bold]Total de cartes sur le disque[/bold] : [dim]{summary['total_disk_compiled']} carte(s)[/dim]",
-            title="[bold cyan]État d'Avancement de la Compilation Pokémon TCG[/bold cyan]",
+            f"• [bold]Cartes {action_done}[/bold] : [bold green]{total_compiled}[/bold green] ([{prog_color}]{progress_pct:.1f}%[/{prog_color}])\n"
+            f"• [bold]Cartes restant à {action_rem}[/bold] : [{rem_color}]{total_remaining}[/{rem_color}] ([dim]{100.0 - progress_pct:.1f}% restant[/dim])\n"
+            f"• [bold]Total de {storage_type} sur le disque[/bold] : [dim]{summary['total_disk_compiled']} carte(s)[/dim]",
+            title=panel_title,
             border_style="green" if total_remaining == 0 else "cyan",
         )
     )
@@ -2043,7 +2161,7 @@ def remaining_command(
         )
         table.add_column("Set", style="bold cyan")
         table.add_column("Nom de l'Extension", style="white")
-        table.add_column("Compilées", justify="right", style="green")
+        table.add_column("Raisonnées" if reasoned else "Compilées", justify="right", style="green")
         table.add_column("Total", justify="right", style="white")
         table.add_column("Avancement", justify="right")
         table.add_column("Restantes", justify="right", style="bold yellow")
@@ -2070,7 +2188,7 @@ def remaining_command(
         console.print(table)
 
     if details and remaining_ids:
-        console.print(f"\n[bold yellow]Liste des {len(remaining_ids)} cartes restant à compiler :[/bold yellow]")
+        console.print(f"\n[bold yellow]Liste des {len(remaining_ids)} cartes restant à {action_rem} :[/bold yellow]")
         chunks = [remaining_ids[i:i + 12] for i in range(0, min(len(remaining_ids), 120), 12)]
         for chunk in chunks:
             console.print("  " + ", ".join(f"[cyan]{cid}[/cyan]" for cid in chunk))
@@ -2078,58 +2196,74 @@ def remaining_command(
             console.print(f"  [dim]... et {len(remaining_ids) - 120} autre(s) carte(s)[/dim]")
 
     if total_remaining == 0:
-        console.print(f"\n[bold green]🎉 Félicitations ! Toutes les cartes de ce périmètre ({total_target}) sont déjà compilées ![/bold green]")
+        if reasoned:
+            console.print(f"\n[bold green]🎉 Félicitations ! Toutes les cartes de ce périmètre ({total_target}) sont déjà raisonnées (Passe 1) ![/bold green]")
+            console.print("[dim]👉 Vous pouvez lancer la Passe 2 de codage JSON avec : python -m compiler.cli code[/dim]")
+        else:
+            console.print(f"\n[bold green]🎉 Félicitations ! Toutes les cartes de ce périmètre ({total_target}) sont déjà compilées ![/bold green]")
     else:
-        cmd_hint = (
-            f"python -m compiler.cli run --ids {','.join(remaining_ids[:3])}"
-            if len(remaining_ids) <= 3
-            else (f"python -m compiler.cli run --mode standard" if mode == "standard" and not set_name else f"python -m compiler.cli run --mode {mode}")
-        )
-        console.print(f"\n[dim]💡 Pour compiler les cartes restantes :[/dim] [cyan]{cmd_hint}[/cyan]")
+        if reasoned:
+            cmd_hint = (
+                f"python -m compiler.cli reason --ids {','.join(remaining_ids[:3])}"
+                if len(remaining_ids) <= 3
+                else (f"python -m compiler.cli reason" if mode == "standard" and not set_name else f"python -m compiler.cli reason --mode {mode}")
+            )
+            console.print(f"\n[dim]💡 Pour analyser les cartes restantes en Passe 1 :[/dim] [cyan]{cmd_hint}[/cyan]")
+        else:
+            cmd_hint = (
+                f"python -m compiler.cli run --ids {','.join(remaining_ids[:3])}"
+                if len(remaining_ids) <= 3
+                else (f"python -m compiler.cli run --mode standard" if mode == "standard" and not set_name else f"python -m compiler.cli run --mode {mode}")
+            )
+            console.print(f"\n[dim]💡 Pour compiler les cartes restantes :[/dim] [cyan]{cmd_hint}[/cyan]")
 
 
 @app.command("todo", hidden=True)
 def todo_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("left", hidden=True)
 def left_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("pending", hidden=True)
 def pending_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("a-compiler", hidden=True)
 def a_compiler_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
     details: bool = typer.Option(False, "--details", "-d"),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, reasoned=reasoned, details=details, quiet=quiet)
 
 
 if __name__ == "__main__":
