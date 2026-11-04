@@ -216,13 +216,21 @@ python -m compiler.cli run --llm-provider lm_studio -j 4 --standard --limit 50
 La CLI intègre tous les outils nécessaires pour piloter l'avancement de votre base de données :
 
 ```bash
-# 1. Connaître le nombre de cartes restantes à compiler
+# 1. Connaître le nombre de cartes restantes à compiler (JSON Passe 2)
 python -m compiler.cli remaining
 python -m compiler.cli remaining --set sv08.5 --details
 
-# 2. Compter les cartes déjà compilées sur le disque
+# 1.bis Connaître le nombre de cartes restantes à analyser/raisonner (Passe 1)
+python -m compiler.cli remaining --reasoned
+python -m compiler.cli remaining -r --details
+
+# 2. Compter les cartes déjà compilées sur le disque (data/compiled_cards/)
 python -m compiler.cli count
 python -m compiler.cli count --details
+
+# 2.bis Compter les fiches de raisonnement générées (data/reasoning_texts/)
+python -m compiler.cli count --reasoned
+python -m compiler.cli count -r --details
 
 # 3. Synchroniser la base de données consolidée data/cards_database.json
 python -m compiler.cli sync
@@ -239,7 +247,7 @@ python -m compiler.cli stats
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **92 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **108 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
@@ -297,10 +305,12 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`remaining`** | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser | `standard`, `test`, `all` | `standard` |
 | | `--set` | `-s` | Filtre le décompte sur une extension spécifique (ex: `sv08.5`, `sv01`, `sve`) | Chaîne texte | `None` (toutes) |
-| | `--details` | `-d` | Affiche la liste complète des identifiants (IDs) des cartes restant à compiler | Flag booléen | `False` |
+| | `--reasoned` | `-r`, `--reason` | Prend en compte les cartes analysées en Passe 1 (`data/reasoning_texts/`) plutôt que compilées (`data/compiled_cards/`) | Flag booléen | `False` |
+| | `--details` | `-d` | Affiche la liste complète des identifiants (IDs) des cartes restant à compiler/analyser | Flag booléen | `False` |
 | | `--quiet` | `-q` | Affiche uniquement le chiffre entier (idéal pour intégration dans des scripts bash) | Flag booléen | `False` |
-| **`count`** | `--details` | `-d` | Affiche le tableau détaillé de chaque carte compilée (nom, catégorie, modèle, débit t/s) | Flag booléen | `False` |
-| | `--quiet` | `-q` | Affiche uniquement le nombre total entier de cartes compilées sur le disque | Flag booléen | `False` |
+| **`count`** | `--reasoned` | `-r`, `--reason` | Compte les fiches de raisonnement générées (Passe 1 dans `data/reasoning_texts/`) au lieu des cartes compilées | Flag booléen | `False` |
+| | `--details` | `-d` | Affiche le tableau détaillé de chaque carte (nom, catégorie/backend, modèle, débit t/s) | Flag booléen | `False` |
+| | `--quiet` | `-q` | Affiche uniquement le nombre total entier de cartes sur le disque | Flag booléen | `False` |
 | **`sync`** | `--db-path` | `-p` | Chemin personnalisé vers le fichier JSON consolidé cible | Chemin fichier | `data/cards_database.json` |
 | | `--dry-run` | `-n` | Simule la synchronisation sans écrire ni modifier le fichier sur le disque | Flag booléen | `False` |
 | | `--details` | `-d` | Affiche le tableau détaillé des cartes manquantes insérées dans la base | Flag booléen | `False` |
