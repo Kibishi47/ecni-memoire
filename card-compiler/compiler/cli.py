@@ -3,6 +3,8 @@
 Commandes disponibles :
 - `python -m compiler.cli run` (alias `compile`) : Exécute le pipeline complet (TCGdex -> Llama GBNF -> Disque)
   avec support de `--mode test|standard`, `--test`, `--standard`, `--ids`, `--fast`, `--force`.
+- `python -m compiler.cli code` : Exécute la Passe 2 (Codage JSON formel) dans `data/compiled_cards/`.
+- `python -m compiler.cli re-run` (alias `rerun`, `redo`, `recompile`, `reexecute`) : Réexécute une phase (`--phase all|reason|code`) sur les cartes des dossiers cibles ou une sélection ciblée (`--ids`, `--ids-file`, `--set`, `--mode`), avec récupération automatique depuis TCGdex pour tout ID manquant.
 - `python -m compiler.cli count` : Compte le nombre de cartes déjà compilées dans `data/compiled_cards/` (options `--details` et `--quiet`).
 - `python -m compiler.cli remaining` (alias `todo`, `left`, `pending`, `a-compiler`) : Affiche le nombre de cartes restant à compiler (globalement, par extension via `--set`, avec progression et options `--details` et `--quiet`).
 - `python -m compiler.cli sync` (alias `sync-database`, `sync-db`, `check-database`) : Vérifie que toutes les cartes compilées sont présentes dans `data/cards_database.json` et ajoute automatiquement les cartes manquantes.
@@ -67,6 +69,7 @@ from compiler.post_processor import sanitize_and_enrich_card
 from compiler.reasoning_engine import (
     ReasoningRecord,
     get_reasoning_texts_dir,
+    has_reasoning_record,
     load_reasoning_record,
 )
 from compiler.schemas import CardSubCategory, EngineCardModel
@@ -77,7 +80,11 @@ from compiler.tcgdex_fetcher import (
     FetcherProvider,
     TCGdexFetcher,
 )
-from compiler.two_pass_pipeline import run_two_pass_pipeline
+from compiler.two_pass_pipeline import (
+    run_coding_phase,
+    run_reasoning_phase,
+    run_two_pass_pipeline,
+)
 
 
 class ConditionalBarColumn(BarColumn):
@@ -1688,6 +1695,451 @@ def code_command(
         intensity=intensity,
         phase="code",
         ids_file=ids_file,
+    )
+
+
+@app.command("re-run")
+def re_run_command(
+    phase: str = typer.Option(
+        "all",
+        "--phase",
+        "-ph",
+        help="Phase du pipeline Two-Pass à réexécuter : 'all' (Passe 1 puis Passe 2, défaut), 'reason' (Passe 1 seule), 'code' (Passe 2 seule).",
+    ),
+    mode: Optional[RunMode] = typer.Option(
+        None,
+        "--mode",
+        "-m",
+        help="Mode de filtrage des cartes cibles : 'standard' ou 'test'. Par défaut, inspecte les dossiers selon la phase.",
+    ),
+    test_flag: bool = typer.Option(
+        False,
+        "--test",
+        help="Cible les cartes du jeu d'essai standardisé (11 cartes stratégiques de référence).",
+    ),
+    standard_flag: bool = typer.Option(
+        False,
+        "--standard",
+        help="Cible l'ensemble des cartes légales au format Standard.",
+    ),
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants précis (séparés par des virgules ou syntaxe @fichier.txt).",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant des IDs ligne par ligne (déduplication automatique).",
+    ),
+    set_name: Optional[str] = typer.Option(
+        None,
+        "--set",
+        "-s",
+        help="Filtre les cartes par extension (ex: 'sv06', 'sv05', 'me01').",
+    ),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès TCGdex ('sdk' ou 'rest').",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité du modèle : 'soft' (défaut, ~7-8 Go RAM) ou 'intense' (~14-18 Go RAM).",
+    ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp').",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["LLM_MODEL"],
+        help="Override manuel du modèle LLM.",
+    ),
+    force: bool = typer.Option(
+        True,
+        "--force/--no-force",
+        help="Force le recalcul et écrase les fiches existantes (défaut: True pour re-run).",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Nombre maximum de cartes à réexécuter.",
+    ),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution.",
+    ),
+    hf_token: Optional[str] = typer.Option(
+        None,
+        "--hf-token",
+        envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
+        help="Jeton d'authentification Hugging Face.",
+    ),
+) -> None:
+    """Réexécute une phase ou les deux phases du pipeline Two-Pass sur les cartes cibles.
+
+    - Si `--phase reason` : inspecte `data/reasoning_texts/` et réexécute la Passe 1.
+    - Si `--phase code` : inspecte `data/compiled_cards/` et réexécute la Passe 2.
+    - Si `--phase all` : inspecte les cartes de `data/reasoning_texts/` et/ou `data/compiled_cards/`
+      et réexécute la Passe 1 d'abord pour toutes les cartes, puis la Passe 2 ensuite pour toutes les cartes.
+    - Sélection ciblée supportée via `--ids`, `--ids-file` / `-f`, `--mode test|standard`, `--test`, `--standard`, ou `--set`.
+    - Si un identifiant demandé n'existe pas dans les dossiers concernés (ou dans le cache raw),
+      il est automatiquement généré/téléchargé depuis TCGdex pour effectuer les phases dessus.
+    """
+    import os
+    data_dir = get_data_dir()
+    reason_dir = get_reasoning_texts_dir(data_dir)
+    compiled_dir = data_dir / "compiled_cards"
+
+    eff_phase = normalize_pipeline_phase(phase)
+    eff_intensity = normalize_intensity_mode(intensity or os.environ.get("INTENSITY_MODE"))
+    raw_b = (
+        local_backend
+        or os.environ.get("LOCAL_BACKEND")
+        or os.environ.get("LOCAL_OPTIMIZATION")
+        or "mlx"
+    ).strip().lower()
+    effective_backend = "mlx" if raw_b == "mlx" else "llama_cpp"
+
+    fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
+
+    # 1. Résolution des identifiants cibles
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+
+    if custom_ids is not None:
+        target_ids = list(custom_ids)
+        origin_descr = f"Sélection ciblée (--ids / --ids-file) : {len(target_ids)} carte(s)"
+    elif test_flag or (mode is not None and mode == RunMode.test):
+        target_ids = list(TEST_CARD_IDS)
+        origin_descr = f"Jeu d'essai de référence (--test) : {len(target_ids)} carte(s)"
+    elif standard_flag or (mode is not None and mode == RunMode.standard):
+        std_index_path = data_dir / "raw_tcgdex" / "_cards_standard_index.json"
+        if std_index_path.exists():
+            try:
+                cached_std = json.loads(std_index_path.read_text(encoding="utf-8"))
+                target_ids = [
+                    str(c.get("id")).strip()
+                    for c in cached_std
+                    if isinstance(c, dict) and c.get("id")
+                ]
+            except Exception:
+                target_ids = []
+        else:
+            target_ids = []
+
+        if not target_ids:
+            async def _resolve_std():
+                async with httpx.AsyncClient() as client:
+                    return await fetcher.resolve_standard_card_ids(client)
+            target_ids = asyncio.run(_resolve_std())
+        origin_descr = f"Ensemble légal Standard : {len(target_ids)} carte(s)"
+    else:
+        # Découverte automatique selon la phase demandée
+        if eff_phase == PipelinePhase.reason:
+            target_ids = sorted([
+                f.stem for f in reason_dir.glob("*.json")
+                if not f.name.startswith("_")
+            ])
+            origin_descr = f"Cartes existantes dans data/reasoning_texts/ : {len(target_ids)} carte(s)"
+        elif eff_phase == PipelinePhase.code:
+            target_ids = sorted([
+                f.stem for f in compiled_dir.glob("*.json")
+                if not f.name.startswith("_")
+            ])
+            origin_descr = f"Cartes existantes dans data/compiled_cards/ : {len(target_ids)} carte(s)"
+        else:  # PipelinePhase.all
+            reason_ids = {
+                f.stem for f in reason_dir.glob("*.json")
+                if not f.name.startswith("_")
+            }
+            compiled_ids = {
+                f.stem for f in compiled_dir.glob("*.json")
+                if not f.name.startswith("_")
+            }
+            target_ids = sorted(list(reason_ids | compiled_ids))
+            origin_descr = f"Cartes existantes dans data/reasoning_texts/ & data/compiled_cards/ : {len(target_ids)} carte(s)"
+
+    # Application du filtre par extension (--set) si renseigné
+    if set_name:
+        s_clean = set_name.strip().lower()
+        target_ids = [
+            cid for cid in target_ids
+            if cid.lower().startswith(f"{s_clean}-") or cid.lower() == s_clean
+        ]
+
+    # Application de la limite éventuelle
+    if limit is not None and limit > 0:
+        target_ids = target_ids[:limit]
+
+    # Déduplication finale en préservant l'ordre
+    target_ids = list(dict.fromkeys(target_ids))
+
+    if not target_ids:
+        console.print(
+            f"[yellow]⚠️ Aucune carte trouvée à réexécuter pour la phase '{eff_phase.value}'.[/yellow]"
+        )
+        return
+
+    # Détection des cartes demandées absentes des dossiers concernés
+    missing_in_target_folder: List[str] = []
+    if eff_phase == PipelinePhase.reason:
+        missing_in_target_folder = [cid for cid in target_ids if not (reason_dir / f"{cid}.json").exists()]
+    elif eff_phase == PipelinePhase.code:
+        missing_in_target_folder = [cid for cid in target_ids if not (compiled_dir / f"{cid}.json").exists()]
+    else:  # all
+        missing_in_target_folder = [
+            cid for cid in target_ids
+            if not (reason_dir / f"{cid}.json").exists() and not (compiled_dir / f"{cid}.json").exists()
+        ]
+
+    if missing_in_target_folder:
+        console.print(
+            f"[cyan]ℹ️ {len(missing_in_target_folder)} carte(s) demandée(s) absente(s) du dossier cible : "
+            f"récupération / génération depuis TCGdex...[/cyan]"
+        )
+
+    # Récupération des bundles (cache local dans data/raw_tcgdex/ ou téléchargement direct TCGdex)
+    with console.status("[bold blue]Récupération et validation des données brutes TCGdex (cache local ou téléchargement)...[/bold blue]"):
+        bundles = asyncio.run(
+            fetcher.fetch_batch(
+                custom_ids=target_ids,
+                force=False,
+            )
+        )
+
+    if not bundles:
+        console.print("[yellow]⚠️ Aucune carte valide n'a pu être préparée.[/yellow]")
+        return
+
+    phase_title_map = {
+        PipelinePhase.reason: "Passe 1 / 2 : Raisonnement Approfondi",
+        PipelinePhase.code: "Passe 2 / 2 : Codage JSON Formel",
+        PipelinePhase.all: "Double Passe Complète (Passe 1 puis Passe 2)",
+    }
+    console.print(
+        Panel.fit(
+            f"[bold cyan]Pokémon TCG Card Compiler — Réexécution de Phase (Two-Pass Pipeline)[/bold cyan]\n"
+            f"• [bold]Phase ciblée[/bold] : [bold magenta]{phase_title_map.get(eff_phase, eff_phase.value)}[/bold magenta]\n"
+            f"• [bold]Périmètre[/bold] : {origin_descr}\n"
+            f"• [bold]Cartes à réexécuter[/bold] : [bold green]{len(bundles)}[/bold green]\n"
+            f"• [bold]Intensité[/bold] : [bold green]{eff_intensity.value.upper()}[/bold green]\n"
+            f"• [bold]Backend[/bold] : [cyan]{effective_backend}[/cyan]\n"
+            f"• [bold]Recompilation forcée[/bold] : {'Oui' if force else 'Non'}\n"
+            f"• [bold]Gestion des erreurs[/bold] : {'Ignorer et continuer (-k)' if continue_on_error else 'Arrêt immédiat'}",
+            border_style="cyan",
+        )
+    )
+
+    # Si la phase ciblée est 'code' (Passe 2 seule), vérifier si des cartes n'ont pas encore d'analyse de Passe 1
+    if eff_phase == PipelinePhase.code:
+        bundles_needing_reasoning = [
+            b for b in bundles
+            if not is_basic_energy(b) and not has_reasoning_record(b.card_id, data_dir)
+        ]
+        if bundles_needing_reasoning:
+            console.print(
+                f"[yellow]⚡ {len(bundles_needing_reasoning)} carte(s) n'ont pas encore d'analyse de Passe 1 : "
+                "génération automatique préalable de la Passe 1 avant le codage JSON...[/yellow]"
+            )
+            run_reasoning_phase(
+                bundles=bundles_needing_reasoning,
+                data_dir=data_dir,
+                model=model,
+                intensity=eff_intensity,
+                backend=effective_backend,
+                hf_token=hf_token,
+                force=False,
+                continue_on_error=continue_on_error,
+                console=console,
+            )
+
+    # Exécution du pipeline Two-Pass avec force=force pour écraser les fiches existantes
+    run_two_pass_pipeline(
+        bundles=bundles,
+        data_dir=data_dir,
+        phase=eff_phase,
+        model=model,
+        intensity=eff_intensity,
+        backend=effective_backend,
+        hf_token=hf_token,
+        force=force,
+        continue_on_error=continue_on_error,
+        console=console,
+    )
+
+    # Si du code JSON a été généré (Passe 2 ou All), synchronisation automatique de data/cards_database.json
+    if eff_phase in {PipelinePhase.all, PipelinePhase.code}:
+        db_path = rebuild_consolidated_database(data_dir, active_ids=None)
+        console.print(
+            f"[green]✓[/green] Base consolidée mise à jour : [bold]{db_path}[/bold]."
+        )
+
+
+@app.command("rerun", hidden=True)
+def rerun_command(
+    phase: str = typer.Option("all", "--phase", "-ph"),
+    mode: Optional[RunMode] = typer.Option(None, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    intensity: Optional[str] = typer.Option(None, "--intensity", "-it"),
+    local_backend: Optional[str] = typer.Option(None, "--local-backend", "--local-opt"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token"),
+) -> None:
+    """Alias pour `re-run`."""
+    re_run_command(
+        phase=phase,
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        ids_file=ids_file,
+        set_name=set_name,
+        provider=provider,
+        intensity=intensity,
+        local_backend=local_backend,
+        model=model,
+        force=force,
+        limit=limit,
+        continue_on_error=continue_on_error,
+        hf_token=hf_token,
+    )
+
+
+@app.command("redo", hidden=True)
+def redo_command(
+    phase: str = typer.Option("all", "--phase", "-ph"),
+    mode: Optional[RunMode] = typer.Option(None, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    intensity: Optional[str] = typer.Option(None, "--intensity", "-it"),
+    local_backend: Optional[str] = typer.Option(None, "--local-backend", "--local-opt"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token"),
+) -> None:
+    """Alias pour `re-run`."""
+    re_run_command(
+        phase=phase,
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        ids_file=ids_file,
+        set_name=set_name,
+        provider=provider,
+        intensity=intensity,
+        local_backend=local_backend,
+        model=model,
+        force=force,
+        limit=limit,
+        continue_on_error=continue_on_error,
+        hf_token=hf_token,
+    )
+
+
+@app.command("recompile", hidden=True)
+def recompile_command(
+    phase: str = typer.Option("all", "--phase", "-ph"),
+    mode: Optional[RunMode] = typer.Option(None, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    intensity: Optional[str] = typer.Option(None, "--intensity", "-it"),
+    local_backend: Optional[str] = typer.Option(None, "--local-backend", "--local-opt"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token"),
+) -> None:
+    """Alias pour `re-run`."""
+    re_run_command(
+        phase=phase,
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        ids_file=ids_file,
+        set_name=set_name,
+        provider=provider,
+        intensity=intensity,
+        local_backend=local_backend,
+        model=model,
+        force=force,
+        limit=limit,
+        continue_on_error=continue_on_error,
+        hf_token=hf_token,
+    )
+
+
+@app.command("reexecute", hidden=True)
+def reexecute_command(
+    phase: str = typer.Option("all", "--phase", "-ph"),
+    mode: Optional[RunMode] = typer.Option(None, "--mode", "-m"),
+    test_flag: bool = typer.Option(False, "--test"),
+    standard_flag: bool = typer.Option(False, "--standard"),
+    ids: Optional[str] = typer.Option(None, "--ids"),
+    ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
+    intensity: Optional[str] = typer.Option(None, "--intensity", "-it"),
+    local_backend: Optional[str] = typer.Option(None, "--local-backend", "--local-opt"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    force: bool = typer.Option(True, "--force/--no-force"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token"),
+) -> None:
+    """Alias pour `re-run`."""
+    re_run_command(
+        phase=phase,
+        mode=mode,
+        test_flag=test_flag,
+        standard_flag=standard_flag,
+        ids=ids,
+        ids_file=ids_file,
+        set_name=set_name,
+        provider=provider,
+        intensity=intensity,
+        local_backend=local_backend,
+        model=model,
+        force=force,
+        limit=limit,
+        continue_on_error=continue_on_error,
+        hf_token=hf_token,
     )
 
 

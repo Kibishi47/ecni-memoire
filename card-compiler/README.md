@@ -192,6 +192,31 @@ python -m compiler.cli code -f data/target_ids.txt
 python -m compiler.cli run --pipeline two_pass --phase all -f data/target_ids.txt
 ```
 
+#### Méthode 3 : Réexécuter une phase existante (`re-run` / `rerun`)
+La commande `re-run` inspecte automatiquement vos dossiers de cartes existants et réexécute la phase souhaitée en écrasant les anciens résultats (`--force` activé par défaut) :
+
+```bash
+# 1. Réexécuter la Passe 1 (Raisonnement) :
+# Inspecte data/reasoning_texts/ et recalcule les analyses pour toutes les cartes présentes
+python -m compiler.cli re-run --phase reason
+
+# 2. Réexécuter la Passe 2 (Codage JSON) :
+# Inspecte data/compiled_cards/ et recompile en JSON formel toutes les cartes présentes
+python -m compiler.cli re-run --phase code
+
+# 3. Réexécuter les 2 passes à la suite :
+# Inspecte l'union des cartes existantes (Passe 1 pour toutes d'abord, puis Passe 2 ensuite)
+python -m compiler.cli re-run --phase all
+
+# 4. Cibler des cartes spécifiques (fichier d'identifiants, liste d'IDs, ou extension) :
+python -m compiler.cli re-run --phase reason -f data/target_ids.txt
+python -m compiler.cli re-run --phase code --ids sv06-128,sv06-129
+python -m compiler.cli re-run --phase all --set sv06
+
+# 💡 Note importante : Si un ID demandé via --ids, -f ou --set n'existe pas encore dans les
+# dossiers cibles ou le cache brut, il est automatiquement téléchargé depuis TCGdex !
+```
+
 ---
 
 ### Option B : Le Mode Single-Pass (IA directe / Rapide)
@@ -288,7 +313,7 @@ python -m compiler.cli stats --ids-file data/target_ids.txt
 
 ## 🧪 Tests Unitaires Automatisés
 
-Le projet intègre une suite de **128 tests automatisés** validant l'ensemble de la chaîne :
+Le projet intègre une suite de **127 tests automatisés** validant l'ensemble de la chaîne :
 
 ```bash
 PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p "test_*.py"
@@ -305,6 +330,7 @@ PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p 
 | `run` | `compile` | **Commande principale** : exécute le pipeline complet (mode Single-Pass direct ou Two-Pass enchaîné). |
 | `reason` | — | **Passe 1** : Exécute l'IA de raisonnement et sauvegarde les fiches d'analyse textuelles dans `data/reasoning_texts/`. |
 | `code` | — | **Passe 2** : Exécute l'IA de coding pour transformer les analyses textuelles en modèles JSON dans `data/compiled_cards/`. |
+| `re-run` | `rerun`, `redo`, `recompile`, `reexecute` | **Réexécution de phase** : Réexécute la Passe 1, la Passe 2, ou les deux passes sur les cartes des dossiers existants ou sur sélection ciblée, avec récupération auto depuis TCGdex. |
 | `fetch-cards` | `update-cards`, `fetch-raw`, `cache-raw`, `refresh-cards`, `fetch-index`, `update-index` | **Mise à jour TCGdex** : Télécharge la liste officielle des cartes (Standard ou index global) et/ou les fiches détaillées individuelles dans `data/raw_tcgdex/{card_id}.json`. |
 | `remaining` | `todo`, `left`, `pending`, `a-compiler` | Calcule et affiche le nombre de cartes restant à compiler (globalement ou par extension). |
 | `count` | — | Compte les cartes compilées sur le disque avec répartition par catégories et statut de synchronisation. |
@@ -314,31 +340,32 @@ PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p 
 
 ---
 
-### 2. Options des Commandes de Compilation (`run`, `reason`, `code`)
+### 2. Options des Commandes de Compilation (`run`, `reason`, `code`, `re-run`)
 
-Ce tableau détaille toutes les options configurables pour la commande principale `run` ainsi que pour les commandes dédiées `reason` et `code` (et les scripts autonomes équivalents `run_reasoning.py` et `run_coding.py`) :
+Ce tableau détaille toutes les options configurables pour la commande principale `run`, les commandes de passe `reason` et `code`, ainsi que la commande de réexécution `re-run` :
 
 | Option CLI | Alias court | Description | Valeurs possibles | Valeur par défaut | Variable `.env` | Commandes compatibles |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `--mode` | `-m` | Mode de sélection des cartes cibles | `test`, `standard` | `test` | `RUN_MODE` | `run`, `reason`, `code` |
-| `--test` | — | Raccourci pour forcer le lot test (11 cartes stratégiques de référence) | Flag booléen | `False` | — | `run`, `reason`, `code` |
-| `--standard` | — | Raccourci pour forcer toutes les cartes légales au format Standard | Flag booléen | `False` | — | `run`, `reason`, `code` |
-| `--ids` | — | Liste d'identifiants précis (virgules `id1,id2`, syntaxe `@fichier.txt` ou chemin de fichier) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code` |
-| `--ids-file` | `-f` | Chemin vers un fichier texte contenant des IDs ligne par ligne (déduplication automatique des doublons) | Chemin fichier | `None` | — | `run`, `reason`, `code` |
+| `--phase` | `-ph` | Phase à exécuter dans le pipeline Two-Pass | `all`, `reason`, `code` | `all` | `PIPELINE_PHASE` | `run`, `re-run` |
+| `--mode` | `-m` | Mode de sélection des cartes cibles | `test`, `standard` | `test` (dossier si `re-run`) | `RUN_MODE` | `run`, `reason`, `code`, `re-run` |
+| `--test` | — | Raccourci pour forcer le lot test (11 cartes stratégiques de référence) | Flag booléen | `False` | — | `run`, `reason`, `code`, `re-run` |
+| `--standard` | — | Raccourci pour forcer toutes les cartes légales au format Standard | Flag booléen | `False` | — | `run`, `reason`, `code`, `re-run` |
+| `--ids` | — | Liste d'identifiants précis (virgules `id1,id2`, syntaxe `@fichier.txt` ou chemin de fichier) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code`, `re-run` |
+| `--ids-file` | `-f` | Chemin vers un fichier texte contenant des IDs ligne par ligne (déduplication automatique des doublons) | Chemin fichier | `None` | — | `run`, `reason`, `code`, `re-run` |
+| `--set` | `-s` | Filtre les cartes par extension (ex: `sv06`, `sv05`, `me01`) | Chaîne texte | `None` | — | `re-run`, `remaining` |
 | `--pipeline` | `-pl` | Architecture du pipeline de traitement | `single`, `two_pass` | `single` | `PIPELINE_MODE` | `run` |
-| `--intensity` | `-it` | Niveau de puissance et consommation mémoire de l'IA | `soft`, `intense` | `soft` | `INTENSITY_MODE` | `run`, `reason`, `code` |
-| `--phase` | — | Phase à exécuter lorsque `--pipeline two_pass` est sélectionné | `all`, `reason`, `code` | `all` | `PIPELINE_PHASE` | `run` |
-| `--local-backend` | `--local-opt` | Moteur d'optimisation Apple Silicon pour l'exécution locale | `mlx`, `llama_cpp` | `mlx` | `LOCAL_BACKEND` | `run`, `reason`, `code` |
+| `--intensity` | `-it` | Niveau de puissance et consommation mémoire de l'IA | `soft`, `intense` | `soft` | `INTENSITY_MODE` | `run`, `reason`, `code`, `re-run` |
+| `--local-backend` | `--local-opt` | Moteur d'optimisation Apple Silicon pour l'exécution locale | `mlx`, `llama_cpp` | `mlx` | `LOCAL_BACKEND` | `run`, `reason`, `code`, `re-run` |
 | `--llm-provider` | `-lp` | Fournisseur d'inférence LLM | `local`, `lm_studio` | `local` | `LLM_PROVIDER` | `run` |
-| `--model` | — | Override manuel du modèle LLM (nom LM Studio, chemin `.gguf` local ou repo HF) | Chaîne texte | *Auto-détecté* | `LLM_MODEL` / `REASONING_MODEL` / `CODING_MODEL` | `run`, `reason`, `code` |
-| `--force` | — | Force le recalcul même si la carte ou l'analyse existe déjà en cache | Flag booléen | `False` | — | `run`, `reason`, `code` |
-| `--limit` | — | Nombre maximum de cartes à traiter (en mode `standard`) | Entier (`int`) | `None` (illimité) | — | `run`, `reason`, `code` |
-| `--continue-on-error` | `-k`, `--ignore-errors`, `--skip-errors` | Poursuit le traitement du lot en cas d'erreur sur une carte sans interrompre le script | Flag booléen | `False` | `CONTINUE_ON_ERROR` | `run`, `reason`, `code` |
+| `--model` | — | Override manuel du modèle LLM (nom LM Studio, chemin `.gguf` local ou repo HF) | Chaîne texte | *Auto-détecté* | `LLM_MODEL` / `REASONING_MODEL` / `CODING_MODEL` | `run`, `reason`, `code`, `re-run` |
+| `--force` | — | Force le recalcul même si la carte ou l'analyse existe déjà en cache | Flag booléen | `False` (`True` pour `re-run`) | — | `run`, `reason`, `code`, `re-run` |
+| `--limit` | — | Nombre maximum de cartes à traiter | Entier (`int`) | `None` (illimité) | — | `run`, `reason`, `code`, `re-run` |
+| `--continue-on-error` | `-k`, `--ignore-errors`, `--skip-errors` | Poursuit le traitement du lot en cas d'erreur sur une carte sans interrompre le script | Flag booléen | `False` | `CONTINUE_ON_ERROR` | `run`, `reason`, `code`, `re-run` |
 | `--parallel` | `-j`, `--concurrency` | Nombre de cartes compilées simultanément (multi-slots LM Studio uniquement) | Entier (`int`) | `1` (séquentiel) | `LM_STUDIO_PARALLEL` | `run` |
 | `--no-think` | `--disable-thinking` | Désactive le mode réflexion des modèles raisonnants (DeepSeek / Qwen) | Flag booléen | `False` | `DISABLE_THINKING` | `run` |
 | `--thinking` | `-tk` | Niveau de réflexion des modèles raisonnants | `null`, `low`, `medium`, `high`, ou nb tokens | Niveau standard | `THINKING` | `run` |
-| `--provider` | `-p` | Fournisseur d'accès aux données sources TCGdex | `sdk`, `rest` | `sdk` | `TCGDEX_PROVIDER` | `run`, `reason`, `code` |
-| `--hf-token` | — | Jeton Hugging Face pour accélérer les téléchargements de modèles | Chaîne texte | `None` | `HF_TOKEN` | `run`, `reason`, `code` |
+| `--provider` | `-p` | Fournisseur d'accès aux données sources TCGdex | `sdk`, `rest` | `sdk` | `TCGDEX_PROVIDER` | `run`, `reason`, `code`, `re-run` |
+| `--hf-token` | — | Jeton Hugging Face pour accélérer les téléchargements de modèles | Chaîne texte | `None` | `HF_TOKEN` | `run`, `reason`, `code`, `re-run` |
 
 ---
 
