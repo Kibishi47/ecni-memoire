@@ -1,4 +1,4 @@
-"""Tests unitaires exhaustifs pour valider la robustesse absolue des schémas Pydantic.
+"""Tests unitaires exhaustifs pour valider la robustesse absolue des schémas Pydantic V2.
 
 Ces tests vérifient qu'aucun type inattendu provenant d'un LLM (`None`, chaînes décimales,
 chaînes avec texte ("70 HP", "20x"), listes nulles, booléens en chaîne ("true"/"false"),
@@ -7,28 +7,27 @@ champs supplémentaires inattendus ou virgules pendantes) ne provoque de `Valida
 
 import json
 import unittest
+
+from compiler.deterministic_builder import (
+    build_deterministic_skeleton,
+    build_fallback_llm_payload,
+)
 from compiler.llm_engine import extract_json_payload
 from compiler.schemas import (
-    ActionCost,
-    ActionPrecondition,
-    ActionSourceType,
-    ActionTiming,
+    ActionType,
+    AIRole,
     AtomicEffect,
     CardCategory,
-    CardFilter,
     CardIdentity,
     CardSubCategory,
-    CostType,
     EffectPrimitive,
-    LLMCompiledCardPart,
+    LLMCompiledPayload,
+    LLMTranslatedSlot,
     PlayableAction,
-    PreconditionType,
     StrategicEvaluator,
-    StrategicRole,
-    SynergyRequirement,
+    TimingPhase,
     TurnPhaseWeights,
-    ZoneType,
-    build_fallback_compiled_part,
+    TypeModifier,
 )
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
@@ -36,215 +35,135 @@ from compiler.tcgdex_fetcher import FetchedCardBundle
 class TestBulletproofSchemas(unittest.TestCase):
     """Test suite vérifiant la résilience des schémas face à 2000+ cartes."""
 
-    def test_atomic_effect_up_to_none_and_strings(self):
-        # 1. upTo: None -> False
-        eff1 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK_TO_HAND", "upTo": None})
+    def test_atomic_effect_up_to_and_optional_booleans(self):
+        eff1 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK_TO_HAND", "upTo": None, "optional": None})
+        self.assertEqual(eff1.primitive, EffectPrimitive.SEARCH_DECK)
         self.assertFalse(eff1.upTo)
+        self.assertFalse(eff1.optional)
 
-        # 2. upTo: "true" -> True
-        eff2 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK_TO_HAND", "upTo": "true"})
+        eff2 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK", "upTo": "true", "optional": "1"})
         self.assertTrue(eff2.upTo)
+        self.assertTrue(eff2.optional)
 
-        # 3. upTo: "false" -> False
-        eff3 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK_TO_HAND", "upTo": "false"})
+        eff3 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK", "upTo": "false", "optional": ""})
         self.assertFalse(eff3.upTo)
+        self.assertFalse(eff3.optional)
 
-        # 4. upTo: "" -> False
-        eff4 = AtomicEffect.model_validate({"primitive": "SEARCH_DECK_TO_HAND", "upTo": ""})
-        self.assertFalse(eff4.upTo)
-
-    def test_atomic_effect_damage_clamping_robustness(self):
-        # 1. "70+" -> 70
+    def test_atomic_effect_damage_and_count_coercion(self):
         eff1 = AtomicEffect.model_validate({"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": "70+"})
-        self.assertEqual(eff1.baseDamage, 70)
+        self.assertEqual(eff1.primitive, EffectPrimitive.DAMAGE_ACTIVE)
+        self.assertEqual(eff1.value, 70)
 
-        # 2. "20x" -> 20
-        eff2 = AtomicEffect.model_validate({"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": "20x"})
-        self.assertEqual(eff2.baseDamage, 20)
+        eff2 = AtomicEffect.model_validate({"primitive": "DAMAGE_ACTIVE", "value": "20x"})
+        self.assertEqual(eff2.value, 20)
 
-        # 3. "N/A" -> None
-        eff3 = AtomicEffect.model_validate({"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": "N/A"})
-        self.assertIsNone(eff3.baseDamage)
+        eff3 = AtomicEffect.model_validate({"primitive": "DAMAGE_ACTIVE", "value": "N/A"})
+        self.assertIsNone(eff3.value)
 
-        # 4. "" -> None
-        eff4 = AtomicEffect.model_validate({"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": ""})
-        self.assertIsNone(eff4.baseDamage)
-
-        # 5. None -> None
-        eff5 = AtomicEffect.model_validate({"primitive": "DEAL_DAMAGE_ACTIVE", "baseDamage": None})
-        self.assertIsNone(eff5.baseDamage)
-
-    def test_card_filter_resilience_and_extra_fields(self):
-        # Extra fields should be ignored, not fail
-        data = {
-            "extra_llm_hallucination": "ignored",
-            "category": "pokemon",
-            "subCategory": "basic",
-            "maxHp": "70 PV",
-            "minHp": "30",
-            "isRuleBox": "false",
-            "hasAbility": "true",
-            "energyType": "Feu",
-            "specificCardName": "Salamèche",
-        }
-        filt = CardFilter.model_validate(data)
-        self.assertEqual(filt.category, CardCategory.POKEMON)
-        self.assertEqual(filt.subCategory, CardSubCategory.BASIC)
-        self.assertEqual(filt.maxHp, 70)
-        self.assertEqual(filt.minHp, 30)
-        self.assertFalse(filt.isRuleBox)
-        self.assertTrue(filt.hasAbility)
-
-    def test_action_precondition_resilience(self):
-        # minCount: None -> 1
-        pc1 = ActionPrecondition.model_validate({"type": "ZONE_HAS_MATCHING_CARD", "minCount": None})
-        self.assertEqual(pc1.minCount, 1)
-
-        # minCount: "2 cards" -> 2
-        pc2 = ActionPrecondition.model_validate({"type": "ZONE_HAS_MATCHING_CARD", "minCount": "2 cards"})
-        self.assertEqual(pc2.minCount, 2)
-
-        # targetFilter as string
-        pc3 = ActionPrecondition.model_validate({"type": "ZONE_HAS_MATCHING_CARD", "targetFilter": "Dracaufeu"})
-        self.assertIsNotNone(pc3.targetFilter)
-        self.assertEqual(pc3.targetFilter.specificCardName, "Dracaufeu")
-
-    def test_action_cost_resilience(self):
-        # count: None -> 1
-        c1 = ActionCost.model_validate({"type": "DISCARD_FROM_HAND", "count": None})
-        self.assertEqual(c1.count, 1)
-
-        # count: "2 défaussées" -> 2
-        c2 = ActionCost.model_validate({"type": "DISCARD_FROM_HAND", "count": "2 défaussées"})
-        self.assertEqual(c2.count, 2)
+        eff4 = AtomicEffect.model_validate({"primitive": "DRAW_CARDS", "count": "2 cartes"})
+        self.assertEqual(eff4.count, 2)
 
     def test_playable_action_null_lists_and_bools(self):
         data = {
-            "actionId": "test_action",
+            "actionId": "trainer_0",
             "label": "Test",
             "sourceType": "TRAINER_PLAY",
             "timing": "ONCE_PER_CARD",
             "canUseTurn1GoingFirst": None,
             "canUseTurn1GoingSecond": "true",
-            "energyCost": None,
-            "preconditions": None,
-            "costs": None,
+            "cost": ["Incolore", "Incolore"],
+            "preconditions": [{"type": "SELF_IS_ACTIVE"}],
             "effects": None,
         }
         act = PlayableAction.model_validate(data)
-        self.assertIsInstance(act.energyCost, list)
-        self.assertIsInstance(act.preconditions, list)
-        self.assertIsInstance(act.costs, list)
-        self.assertIsInstance(act.effects, list)
+        self.assertEqual(act.actionType, ActionType.PLAY_FROM_HAND)
+        self.assertEqual(act.timingPhase, TimingPhase.MAIN_PHASE_1)
+        self.assertEqual(act.cost, {"Incolore": 2})
+        self.assertEqual(act.preconditions, ["SELF_IS_ACTIVE"])
+        self.assertEqual(act.effects, [])
         self.assertTrue(act.canUseTurn1GoingSecond)
 
-    def test_turn_phase_weights_clamping(self):
+    def test_turn_phase_weights_clamping_zero_to_one(self):
         data = {
             "turn1": None,
-            "turn2": "1.8",
-            "turn3": 3.5,   # Should clamp to 2.0
-            "turn4Plus": -1,  # Should clamp to 0.0
+            "turn2": "0.8",
+            "turn3": 3.5,   # Clamped strictly to 1.0
+            "turn4Plus": -1,  # Clamped strictly to 0.0
         }
         w = TurnPhaseWeights.model_validate(data)
-        self.assertEqual(w.turn1, 1.0)
-        self.assertEqual(w.turn2, 1.8)
-        self.assertEqual(w.turn3, 2.0)
+        self.assertEqual(w.turn1, 0.8)
+        self.assertEqual(w.turn2, 0.8)
+        self.assertEqual(w.turn3, 1.0)
         self.assertEqual(w.turn4Plus, 0.0)
 
-    def test_synergy_requirement_resilience(self):
+    def test_strategic_evaluator_normalization(self):
         data = {
-            "requiredFilter": {"category": "POKEMON"},
-            "minCountInDeck": None,
-            "ifMissingSetValueToZero": "true",
-            "bonusWeightPerCopy": None,
-        }
-        syn = SynergyRequirement.model_validate(data)
-        self.assertEqual(syn.minCountInDeck, 1)
-        self.assertTrue(syn.ifMissingSetValueToZero)
-        self.assertEqual(syn.bonusWeightPerCopy, 0.0)
-
-    def test_strategic_evaluator_null_lists(self):
-        data = {
-            "primaryRole": "MAIN_ATTACKER",
-            "intrinsicBaseScore": None,
-            "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            "decklistSynergyRequirements": None,
-            "inGameDeadCardConditions": None,
-            "discardPriorityWhenDead": None,
-            "holdForNextTurnBonus": None,
+            "primaryRole": "BENCH_DEPLOYER",
+            "turnPhaseWeights": {"turn1": 1.0, "turn2": 0.9, "turn3": 0.5, "turn4Plus": 0.2},
+            "decklistSynergyRequirements": [{"requiredFilter": {"specificCardName": "Salameche"}}, "requires_basic_hp_lte_70"],
         }
         strat = StrategicEvaluator.model_validate(data)
-        self.assertEqual(strat.intrinsicBaseScore, 50)
-        self.assertEqual(strat.discardPriorityWhenDead, 50)
-        self.assertEqual(strat.holdForNextTurnBonus, 0)
-        self.assertIsInstance(strat.decklistSynergyRequirements, list)
-        self.assertIsInstance(strat.inGameDeadCardConditions, list)
+        self.assertEqual(strat.aiRole, AIRole.CONSISTENCY_BOOSTER)
+        self.assertIn("requires_evolution_line:Salameche", strat.decklistSynergyRequirements)
+        self.assertIn("requires_basic_hp_lte_70", strat.decklistSynergyRequirements)
 
-    def test_llm_compiled_card_part_fallbacks(self):
+    def test_llm_compiled_payload_resilience(self):
         data = {
-            "reasoningAnalysis": None,
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": None,
-            "strategicEvaluator": None,
+            "translatedSlots": [
+                {
+                    "slotId": "ability_0",
+                    "preconditions": ["SELF_IS_ACTIVE"],
+                    "effects": [{"primitive": "DRAW_CARDS", "count": 2}],
+                    "deadCardCondition": "NONE",
+                }
+            ],
+            "aiRole": "DRAW_SUPPORT",
+            "turnPhaseWeights": {"turn1": 0.9, "turn2": 0.9, "turn3": 0.8, "turn4Plus": 0.8},
+            "additionalSynergyTags": None,
         }
-        part = LLMCompiledCardPart.model_validate(data)
-        self.assertTrue("Analyse déterministe" in part.reasoningAnalysis)
-        self.assertIsInstance(part.playableActions, list)
-        self.assertIsNotNone(part.strategicEvaluator)
+        payload = LLMCompiledPayload.model_validate(data)
+        self.assertEqual(len(payload.translatedSlots), 1)
+        self.assertEqual(payload.translatedSlots[0].slotId, "ability_0")
+        self.assertIsNone(payload.translatedSlots[0].deadCardCondition)
+        self.assertEqual(payload.aiRole, AIRole.DRAW_ENGINE)
+        self.assertEqual(payload.additionalSynergyTags, [])
 
     def test_extract_json_payload_trailing_comma(self):
         raw = """
         ```json
         {
-          "reasoningAnalysis": "Test",
-          "category": "POKEMON",
-          "subCategory": "BASIC",
-          "playableActions": [
+          "translatedSlots": [
             {
-              "actionId": "atk_1",
-              "label": "Charge",
-              "sourceType": "ATTACK",
-              "timing": "END_OF_TURN_ATTACK",
-              "canUseTurn1GoingFirst": false,
-              "canUseTurn1GoingSecond": true,
-              "energyCost": ["Incolore",],
+              "slotId": "attack_0",
+              "preconditions": [],
               "effects": [
                 {
-                  "primitive": "DEAL_DAMAGE_ACTIVE",
-                  "baseDamage": 30,
-                  "count": 1,
+                  "primitive": "DAMAGE_ACTIVE",
+                  "value": 30,
                   "upTo": false,
                 },
               ],
             },
           ],
-          "strategicEvaluator": {
-            "primaryRole": "MAIN_ATTACKER",
-            "intrinsicBaseScore": 50,
-            "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0,},
-            "decklistSynergyRequirements": [],
-            "inGameDeadCardConditions": [],
-            "discardPriorityWhenDead": 50,
-            "holdForNextTurnBonus": 0,
-          },
+          "aiRole": "MAIN_ATTACKER",
+          "turnPhaseWeights": {"turn1": 0.9, "turn2": 0.9, "turn3": 0.8, "turn4Plus": 0.8,},
+          "additionalSynergyTags": [],
         }
         ```
         """
         clean = extract_json_payload(raw)
-        # Verify it can be loaded directly as valid JSON
         data = json.loads(clean)
-        self.assertEqual(data["category"], "POKEMON")
-        part = LLMCompiledCardPart.model_validate(data)
-        self.assertEqual(len(part.playableActions), 1)
+        payload = LLMCompiledPayload.model_validate(data)
+        self.assertEqual(len(payload.translatedSlots), 1)
+        self.assertEqual(payload.aiRole, AIRole.MAIN_ATTACKER)
 
-    def test_build_fallback_compiled_part(self):
+    def test_build_fallback_llm_payload(self):
         identity = CardIdentity(
             cardId="sv05-144",
             nameFr="Poffin Copain-Copain",
             nameEn="Buddy-Buddy Poffin",
             setId="sv05",
-            localId="144",
+            setName="Forces Temporelles",
             category=CardCategory.TRAINER,
             subCategory=CardSubCategory.ITEM,
         )
@@ -253,15 +172,24 @@ class TestBulletproofSchemas(unittest.TestCase):
             resolved_tcgdex_id="sv05-144",
             identity=identity,
             pokemon_stats=None,
-            raw_fr={"name": "Poffin Copain-Copain"},
+            raw_fr={
+                "id": "sv05-144",
+                "name": "Poffin Copain-Copain",
+                "category": "Dresseur",
+                "trainerType": "Objet",
+                "effect": "Cherchez dans votre deck jusqu'à 2 Pokémon de base ayant 70 PV ou moins et placez-les sur votre Banc.",
+            },
             raw_en={"name": "Buddy-Buddy Poffin"},
             raw_cache_path=None,
         )
-        fallback = build_fallback_compiled_part(bundle, reasoning_text="Analyse préalable")
-        self.assertEqual(fallback.category, CardCategory.TRAINER)
-        self.assertEqual(fallback.subCategory, CardSubCategory.ITEM)
-        self.assertTrue(len(fallback.playableActions) > 0)
-        self.assertEqual(fallback.reasoningAnalysis, "Analyse préalable")
+        skeleton = build_deterministic_skeleton(bundle)
+        fallback = build_fallback_llm_payload(skeleton)
+        self.assertEqual(fallback.aiRole, AIRole.CONSISTENCY_BOOSTER)
+        self.assertEqual(len(fallback.translatedSlots), 1)
+        self.assertEqual(fallback.translatedSlots[0].slotId, "trainer_0")
+        self.assertEqual(fallback.translatedSlots[0].effects[0].primitive, EffectPrimitive.SEARCH_DECK)
+        self.assertEqual(fallback.translatedSlots[0].effects[0].count, 2)
+        self.assertTrue(fallback.translatedSlots[0].effects[0].upTo)
 
 
 if __name__ == "__main__":

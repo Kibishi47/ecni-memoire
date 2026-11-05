@@ -232,7 +232,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         self.assertEqual(model.cardId, "sv01-181")
         self.assertEqual(model.category, CardCategory.TRAINER)
         self.assertEqual(model.subCategory, CardSubCategory.ITEM)
-        self.assertEqual(model.strategicEvaluator.primaryRole.value, "BENCH_DEPLOYER")
+        self.assertEqual(model.strategicEvaluator.aiRole.value, "CONSISTENCY_BOOSTER")
         self.assertEqual(model.compilationMetadata.modelRepoId, "LM_STUDIO")
 
     @patch("httpx.Client")
@@ -561,8 +561,9 @@ class TestLMStudioCompiler(unittest.TestCase):
         model = compiler.compile_card(bundle)
         self.assertIsInstance(model, EngineCardModel)
         self.assertEqual(model.cardId, "sv06.5-001")
-        self.assertEqual(len(model.playableActions), 1)
-        self.assertEqual(model.playableActions[0].effects[0].primitive.value, "DEAL_DAMAGE_ACTIVE")
+        attack_acts = [a for a in model.playableActions if a.actionId.startswith("attack_")]
+        self.assertEqual(len(attack_acts), 1)
+        self.assertEqual(attack_acts[0].effects[0].primitive.value, "DAMAGE_ACTIVE")
 
     @patch("httpx.Client")
     def test_load_model_in_memory_auto_detects_server_model(self, mock_client_cls):
@@ -1479,14 +1480,8 @@ class TestLMStudioCompiler(unittest.TestCase):
         # 1. Vérification directe sur le modèle Pydantic LLMCompiledCardPart
         parsed_part = LLMCompiledCardPart.model_validate_json(json.dumps(raw_statitik_llm_json))
         self.assertIsInstance(parsed_part, LLMCompiledCardPart)
-        # La primitive COIN_FLIP / PREVENT_DAMAGE doit être normalisée
-        self.assertEqual(parsed_part.playableActions[0].effects[0].primitive.value, "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS")
-        # L'entrée 'NONE' doit être filtrée, et 'BENCH_FULL' normalisée vers BENCH_ALREADY_FULL
-        self.assertEqual(len(parsed_part.strategicEvaluator.inGameDeadCardConditions), 1)
-        self.assertEqual(
-            parsed_part.strategicEvaluator.inGameDeadCardConditions[0].reason.value,
-            "BENCH_ALREADY_FULL",
-        )
+        self.assertEqual(parsed_part.translatedSlots[0].effects[0].primitive.value, "DAMAGE_ACTIVE")
+        self.assertEqual(parsed_part.aiRole.value, "MAIN_ATTACKER")
 
         # 2. Vérification de bout en bout via compile_card
         mock_resp = MagicMock()
