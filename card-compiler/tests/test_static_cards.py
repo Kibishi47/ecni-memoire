@@ -7,10 +7,11 @@ import unittest
 from pathlib import Path
 
 from compiler.schemas import (
+    ActionType,
+    AIRole,
     CardCategory,
     CardSubCategory,
     EngineCardModel,
-    StrategicRole,
 )
 from compiler.static_cards import (
     CANONICAL_ENERGY_TYPES,
@@ -157,15 +158,12 @@ class TestStaticCards(unittest.TestCase):
         self.assertEqual(model.category, CardCategory.ENERGY)
         self.assertEqual(model.subCategory, CardSubCategory.BASIC_ENERGY)
         self.assertIsNone(model.pokemonStats)
-        self.assertEqual(model.playableActions, [])
+        self.assertEqual(len(model.playableActions), 1)
+        self.assertEqual(model.playableActions[0].actionType, ActionType.ATTACH_ENERGY)
 
         evaluator = model.strategicEvaluator
-        self.assertEqual(evaluator.primaryRole, StrategicRole.RESOURCE_ENERGY)
-        self.assertEqual(evaluator.intrinsicBaseScore, 50)
-        self.assertEqual(evaluator.discardPriorityWhenDead, 15)
-        self.assertEqual(evaluator.holdForNextTurnBonus, 25)
+        self.assertEqual(evaluator.aiRole, AIRole.ENERGY_ACCELERATOR)
         self.assertEqual(evaluator.decklistSynergyRequirements, [])
-        self.assertEqual(evaluator.inGameDeadCardConditions, [])
         self.assertEqual(evaluator.turnPhaseWeights.turn1, 1.0)
         self.assertEqual(evaluator.turnPhaseWeights.turn2, 1.0)
         self.assertEqual(evaluator.turnPhaseWeights.turn3, 1.0)

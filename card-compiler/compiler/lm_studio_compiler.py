@@ -856,7 +856,7 @@ class LMStudioCardCompiler:
                                     "subCategory": bundle.identity.subCategory.value,
                                     "playableActions": [
                                         {
-                                            "actionId": "attack_1",
+                                            "actionId": "attack_0",
                                             "label": attack_label,
                                             "sourceType": "ATTACK",
                                             "timing": "END_OF_TURN_ATTACK",
@@ -946,18 +946,13 @@ class LMStudioCardCompiler:
             timeToFirstTokenSeconds=round(ttft, 3) if ttft is not None else None,
         )
 
-        engine_card = EngineCardModel(
-            cardId=bundle.card_id,
-            identity=bundle.identity,
-            pokemonStats=bundle.pokemon_stats,
-            category=compiled_part.category,
-            subCategory=compiled_part.subCategory,
-            playableActions=compiled_part.playableActions,
-            strategicEvaluator=compiled_part.strategicEvaluator,
-            compilationMetadata=metadata,
+        from compiler.deterministic_builder import (
+            build_deterministic_skeleton,
+            merge_llm_payload_into_skeleton,
         )
 
-        engine_card = sanitize_and_enrich_card(bundle, engine_card)
+        skeleton = build_deterministic_skeleton(bundle)
+        engine_card = merge_llm_payload_into_skeleton(skeleton, compiled_part, metadata)
         return engine_card
 
     def unload_model(self) -> None:

@@ -1,176 +1,215 @@
-"""Moteur de raisonnement approfondi (Passe 1 du pipeline Two-Pass) pour Pokémon TCG Card Compiler.
+"""Moteur d'analyse et de raisonnement textuel (Passe 1 du pipeline Two-Pass).
 
-Ce module :
-1. Charge une IA de raisonnement (ex: DeepSeek-R1 Distill Qwen 14B) en mémoire via Apple MLX ou llama.cpp.
-2. Analyse exhaustivement les règles officielles TCGdex d'une carte Pokémon et génère
-   une fiche technique textuelle complète expliquant le fonctionnement exact de la carte.
-3. Sauvegarde chaque analyse dans `data/reasoning_texts/{card_id}.json`.
-4. Décharge complètement l'IA de la mémoire (RAM / Metal) dès la fin du traitement
-   du lot pour permettre le chargement ultérieur de l'IA de coding (Passe 2).
+Ce module gère :
+1. Le chargement de l'IA de raisonnement (DeepSeek-R1 Distill Qwen 14B en 4-bit ou 8-bit)
+   via MLX (`mlx-lm`) ou GGUF (`llama-cpp-python` avec `n_gpu_layers=-1`).
+2. La génération d'une analyse ciblée EXCLUSIVEMENT sur les `slots_for_llm`
+   (extraits par `compiler/deterministic_builder.py`) et le profil stratégique (`aiRole`, `turnPhaseWeights`).
+3. La sauvegarde de chaque analyse dans `data/reasoning_texts/{card_id}.json`.
+4. Le déchargement strict et total de la mémoire (`close()`, `del`, `gc.collect()`, `mx.clear_cache()`)
+   avant le lancement de la Passe 2 (Coding).
 """
 
 from __future__ import annotations
 
+import gc
 import json
-import os
+import re
 import time
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-from pydantic import BaseModel, Field
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from compiler import load_env_file
+from compiler.deterministic_builder import (
+    DeterministicCardSkeleton,
+    build_deterministic_skeleton,
+)
 from compiler.models_config import (
     IntensityMode,
     PipelineMode,
     PipelinePhase,
     normalize_intensity_mode,
+    resolve_gguf_filename_for_repo,
     resolve_model_for_configuration,
 )
-from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
-REASONING_SYSTEM_PROMPT = """Tu es un grand maître et théoricien expert des règles officielles du Jeu de Cartes à Collectionner Pokémon (Pokémon TCG - Format Standard).
-Ta mission est d'analyser en profondeur une carte Pokémon à partir de ses données officielles TCGdex et d'en expliquer de manière exhaustive, structurée et algorithmique le fonctionnement exact.
-Ton analyse servira de spécification technique intégrale pour qu'un compilateur génère le modèle formel exécutable du moteur de jeu.
 
-Structure impérativement ton explication selon ces 5 axes :
+REASONING_SYSTEM_PROMPT = """Tu es un Juge Officiel Pokémon TCG (Professeur Pokémon) et un expert en modélisation de moteur de jeu par IA.
 
-1. IDENTIFICATION & TYPOLOGIE :
-   - Catégorie (POKEMON, TRAINER, ENERGY) et Sous-catégorie exacte (BASIC, STAGE_1, STAGE_2, ITEM, SUPPORTER, STADIUM, TOOL, SPECIAL_ENERGY).
-   - Rôle stratégique principal (ex: MAIN_ATTACKER, BENCH_SNIPER, DRAW_ENGINE, ENERGY_ACCELERATOR, HAND_DISRUPTION, CONSISTENCY_TUTOR, GUEST_ATTACKER, TANK, WALL).
+TA MISSION (PASSE 1 - ANALYSE CIBLÉE DES SLOTS D'EFFETS ET STRATÉGIE) :
+Python a DÉJÀ construit de façon 100 % déterministe l'identité de la carte, ses statistiques, ses coûts d'énergie, ses timings et les dégâts numériques de base de ses attaques.
+Tu ne dois analyser QUE les slots textuels fournis (`slots_for_llm`) et le profil stratégique de la carte.
 
-2. ANALYSE EXHAUSTIVE DES ACTIONS JOUABLES :
-   - Pour chaque Talent (Ability) et chaque Attaque (Attack), ou action Dresseur :
-     * Libellé exact et type de source (ATTACK, ABILITY_ACTIVATED, ABILITY_ON_EVOLVE, ABILITY_PASSIVE, TRAINER_PLAY, etc.).
-     * Timing d'exécution (END_OF_TURN_ATTACK, ONCE_PER_TURN_ABILITY, ON_EVOLVE_TRIGGER, ONCE_PER_TURN_SUPPORTER, etc.).
-     * Restrictions d'activation du Tour 1 (canUseTurn1GoingFirst, canUseTurn1GoingSecond). Rappel : les Supporters et la majorité des Attaques sont interdits au Tour 1 joueur 1.
-     * Coûts d'activation précis (énergies requises, défausse de cartes depuis la main `DISCARD_FROM_HAND`, défausse d'énergies en jeu `DISCARD_ENERGY_FROM_PLAY`, etc.).
-     * Préconditions strictes (présence en Actif `SELF_IS_ACTIVE`, place sur le banc `BENCH_HAS_EMPTY_SLOTS`, cartes cibles requises dans une zone, etc.).
-     * Effets atomiques décomposés : dégâts de base, dégâts conditionnels, recherche dans le deck vers main/banc avec filtres précis, pioche, switch, statuts spéciaux.
+Pour chaque `slotId` fourni en entrée, détaille de manière concise et chirurgicale :
+1. **Préconditions (`preconditions`)** :
+   Conditions requises pour activer ce slot (ex: `["SELF_IS_ACTIVE"]`, `["BENCH_HAS_EMPTY_SLOT"]`, `["HAND_MIN_OTHER_CARDS:2"]`, `["PLAYER_BEHIND_ON_PRIZES"]`, `["KO_SUFFERED_LAST_TURN"]`, `["NOT_FIRST_TURN"]`).
+2. **Séquence d'effets atomiques (`effects`)** :
+   Traduis l'effet avec les primitives officielles :
+   `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `APPLY_SPECIAL_CONDITION`, `EVOLVE_POKEMON`, `SHUFFLE_HAND_DRAW`, `RECOVER_FROM_DISCARD`.
+   Précise pour chaque effet : `primitive`, `target` (`SELF`, `OPPONENT_ACTIVE`, `OPPONENT_BENCH`, `OWN_BENCH`, `OWN_POKEMON_ANY`, `PLAYER`), `value` (dégâts/soin), `count` (nombre de cartes), `zone` (`DECK`, `HAND`, `DISCARD`, `BENCH`, `ACTIVE`), `filter` (ex: `CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70`), `upTo` (`true`/`false`), `optional` (`true`/`false`).
+3. **Condition de carte morte (`deadCardCondition`)** :
+   Dans quelle situation précise ce slot ou cette carte est-elle morte en main (ex: `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, `BENCH_FULL_OR_NO_TARGET_IN_DECK`, `null` si toujours utilisable).
+4. **Évaluation Stratégique (`strategicEvaluator`)** :
+   - `aiRole` parmi : `MAIN_ATTACKER`, `SECONDARY_ATTACKER`, `DRAW_ENGINE`, `ENERGY_ACCELERATOR`, `GUEST_TECH`, `DISRUPTION`, `CONSISTENCY_BOOSTER`.
+   - `turnPhaseWeights` : 4 poids flottants strictement compris entre `0.0` et `1.0` (`turn1`, `turn2`, `turn3`, `turn4Plus`).
+   - `additionalSynergyTags` : tags complémentaires éventuels (ex: `requires_stage_2_pokemon`, `requires_basic_hp_lte_70`).
 
-3. FILTRES EXACTS ET CRITÈRES DE CIBLAGE :
-   - Précise tous les filtres de cartes ciblées par la carte (ex: 'Pokémon de base avec 70 PV ou moins' pour Poffin, 'Énergie de base Feu' pour Dracaufeu, 'Outil Pokémon' pour Pepper).
-   - Attention aux symboles d'énergie : {R}=Feu, {L}=Électrique, {F}=Combat, {W}=Eau, {G}=Plante, {P}=Psy, {D}=Obscurité, {M}=Métal, {C}=Incolore.
-
-4. SYNERGIES DE DECKLIST & CONDITIONS DE CARTE MORTE :
-   - Cartes ou types indispensables dans la decklist pour rendre cette carte efficace (synergies).
-   - Circonstances exactes où la carte devient totalement morte / injouable pendant la partie (ex: plus de cibles valides dans le deck, banc saturé, absence d'énergie).
-
-5. PONDÉRATIONS STRATÉGIQUES PAR PHASE :
-   - Valeur relative de la carte du Tour 1 au Tour 4+ (poids recommandés entre 0.0 et 2.0).
-
-RÈGLE D'OR : Reste factuel, rigoureux et base-toi STRICTEMENT sur le texte officiel de la carte. N'invente JAMAIS de talent ou d'effet qui ne figure pas dans les données brutes."""
+Sois direct, concis et structuré slot par slot."""
 
 
-def build_reasoning_prompt(bundle: FetchedCardBundle) -> str:
-    """Construit le prompt utilisateur pour l'étape de raisonnement."""
-    identity = bundle.identity
-    pstats = bundle.pokemon_stats
+@dataclass
+class ReasoningRecord:
+    """Structure sauvegardée dans `data/reasoning_texts/{card_id}.json`."""
 
-    payload: Dict[str, Any] = {
-        "cardId": identity.cardId,
-        "nameFr": identity.nameFr,
-        "nameEn": identity.nameEn,
-        "category": identity.category.value,
-        "subCategory": identity.subCategory.value,
-        "setId": identity.setId,
-        "localId": identity.localId,
-    }
+    cardId: str
+    nameFr: str
+    nameEn: Optional[str] = None
+    modelRepoId: str = ""
+    modelBackend: str = "mlx"
+    reasoningText: str = ""
+    rawThinkingProcess: Optional[str] = None
+    createdAtIso: str = ""
+    completionTokens: int = 0
+    tokensPerSecond: float = 0.0
+    generationDurationSeconds: float = 0.0
+    timeToFirstTokenSeconds: float = 0.0
 
-    if pstats:
-        payload["pokemonStats"] = {
-            "hp": pstats.hp,
-            "types": pstats.types,
-            "stage": pstats.stage,
-            "evolvesFrom": pstats.evolvesFrom,
-            "rootBasicName": pstats.rootBasicName,
-            "evolutionChain": pstats.evolutionChain,
-            "retreatCost": pstats.retreatCost,
-            "weaknesses": pstats.weaknesses,
-            "resistances": pstats.resistances,
-            "prizeCardsGiven": pstats.prizeCardsGiven,
-            "isRuleBox": pstats.isRuleBox,
-            "hasAbility": pstats.hasAbility,
-        }
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
-    if bundle.raw_fr.get("abilities"):
-        payload["abilitiesFr"] = bundle.raw_fr.get("abilities")
-    if bundle.raw_en and bundle.raw_en.get("abilities"):
-        payload["abilitiesEn"] = bundle.raw_en.get("abilities")
-    if bundle.raw_fr.get("attacks"):
-        payload["attacksFr"] = bundle.raw_fr.get("attacks")
-    if bundle.raw_en and bundle.raw_en.get("attacks"):
-        payload["attacksEn"] = bundle.raw_en.get("attacks")
-    if bundle.raw_fr.get("effect"):
-        payload["effectFr"] = bundle.raw_fr.get("effect")
-    if bundle.raw_en and bundle.raw_en.get("effect"):
-        payload["effectEn"] = bundle.raw_en.get("effect")
-
-    return (
-        f"Analyse en profondeur la carte Pokémon TCG '{identity.nameFr}' ({identity.cardId}) "
-        "selon la méthode en 5 points spécifiée.\n\n"
-        "DONNÉES OFFICIELLES TCGDEX :\n"
-        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
-        "Rédige une fiche d'analyse technique complète expliquant comment la carte fonctionne "
-        "et tout ce dont nous avons besoin pour la compiler en modèle formel de simulation."
-    )
-
-
-class ReasoningRecord(BaseModel):
-    """Enregistrement persisté de l'analyse textuelle d'une carte."""
-
-    cardId: str = Field(description="Identifiant unique de la carte (ex: sv08.5-001)")
-    nameFr: str = Field(description="Nom français de la carte")
-    nameEn: Optional[str] = Field(default=None, description="Nom anglais")
-    modelRepoId: str = Field(description="Identifiant du modèle de raisonnement utilisé")
-    modelBackend: str = Field(description="Backend utilisé (mlx ou llama_cpp)")
-    reasoningText: str = Field(description="Texte complet d'explication généré par l'IA")
-    createdAtIso: str = Field(description="Horodatage ISO de création")
-    completionTokens: Optional[int] = Field(default=None, description="Tokens générés")
-    tokensPerSecond: Optional[float] = Field(default=None, description="Débit moyen en tokens/s")
-    generationDurationSeconds: Optional[float] = Field(default=None, description="Durée de génération en secondes")
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ReasoningRecord":
+        return cls(
+            cardId=str(data.get("cardId", "")),
+            nameFr=str(data.get("nameFr", "")),
+            nameEn=data.get("nameEn"),
+            modelRepoId=str(data.get("modelRepoId", "")),
+            modelBackend=str(data.get("modelBackend", "mlx")),
+            reasoningText=str(data.get("reasoningText", "")),
+            rawThinkingProcess=data.get("rawThinkingProcess"),
+            createdAtIso=str(data.get("createdAtIso", "")),
+            completionTokens=int(data.get("completionTokens", 0) or 0),
+            tokensPerSecond=float(data.get("tokensPerSecond", 0.0) or 0.0),
+            generationDurationSeconds=float(data.get("generationDurationSeconds", 0.0) or 0.0),
+            timeToFirstTokenSeconds=float(data.get("timeToFirstTokenSeconds", 0.0) or 0.0),
+        )
 
 
 def get_reasoning_texts_dir(data_dir: Path) -> Path:
-    """Retourne et crée si nécessaire le dossier `data/reasoning_texts/`."""
-    reason_dir = data_dir / "reasoning_texts"
-    reason_dir.mkdir(parents=True, exist_ok=True)
-    return reason_dir
-
-
-def save_reasoning_record(record: ReasoningRecord, data_dir: Path) -> Path:
-    """Sauvegarde le résultat de raisonnement dans `data/reasoning_texts/{card_id}.json`."""
-    out_dir = get_reasoning_texts_dir(data_dir)
-    file_path = out_dir / f"{record.cardId}.json"
-    file_path.write_text(
-        json.dumps(record.model_dump(mode="json"), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return file_path
+    """Retourne et crée si besoin le dossier `data/reasoning_texts/`."""
+    r_dir = data_dir / "reasoning_texts"
+    r_dir.mkdir(parents=True, exist_ok=True)
+    return r_dir
 
 
 def load_reasoning_record(card_id: str, data_dir: Path) -> Optional[ReasoningRecord]:
-    """Charge l'analyse de raisonnement existante pour une carte, si présente."""
-    out_dir = get_reasoning_texts_dir(data_dir)
-    file_path = out_dir / f"{card_id}.json"
-    if not file_path.exists():
+    """Charge la fiche d'analyse d'une carte depuis `data/reasoning_texts/{card_id}.json` si elle existe."""
+    fpath = get_reasoning_texts_dir(data_dir) / f"{card_id}.json"
+    if not fpath.exists():
         return None
     try:
-        data = json.loads(file_path.read_text(encoding="utf-8"))
-        return ReasoningRecord.model_validate(data)
+        raw = json.loads(fpath.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and raw.get("reasoningText"):
+            return ReasoningRecord.from_dict(raw)
     except Exception:
         return None
+    return None
+
+
+def save_reasoning_record(record: ReasoningRecord, data_dir: Path) -> Path:
+    """Sauvegarde la fiche d'analyse d'une carte dans `data/reasoning_texts/{card_id}.json`."""
+    fpath = get_reasoning_texts_dir(data_dir) / f"{record.cardId}.json"
+    fpath.write_text(
+        json.dumps(record.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return fpath
 
 
 def has_reasoning_record(card_id: str, data_dir: Path) -> bool:
-    """Vérifie si une analyse de raisonnement valide existe pour la carte."""
-    return load_reasoning_record(card_id, data_dir) is not None
+    """Vérifie si une carte possède déjà une fiche d'analyse de raisonnement valide."""
+    rec = load_reasoning_record(card_id, data_dir)
+    return rec is not None and bool(rec.reasoningText.strip())
+
+
+def build_reasoning_prompt(
+    bundle: FetchedCardBundle,
+    skeleton: Optional[DeterministicCardSkeleton] = None,
+) -> str:
+    """Construit le prompt ultra-ciblé pour la Passe 1 (Raisonnement) contenant uniquement le résumé court et `slots_for_llm`."""
+    skel = skeleton or build_deterministic_skeleton(bundle)
+    ident = skel.identity
+    stats = skel.pokemonStats
+
+    summary_lines = [
+        f"ID: {skel.cardId}",
+        f"Nom: {ident.nameFr}" + (f" ({ident.nameEn})" if ident.nameEn else ""),
+        f"Catégorie: {skel.category.value} / {skel.subCategory.value}",
+    ]
+    if stats is not None:
+        summary_lines.append(
+            f"Stats Pokémon: {stats.hp} PV | Types: {', '.join(stats.types)} | Stade: {stats.stage} | "
+            f"Retraite: {stats.retreatCost} | Récompenses données: {ident.prizeCardsGiven} (RuleBox={ident.isRuleBox})"
+        )
+        attacks_summary = [
+            f"{a.label} ({a.effects[0].value if a.effects else 0})"
+            for a in skel.playableActions
+            if a.actionType.value == "ATTACK"
+        ]
+        if attacks_summary:
+            summary_lines.append(f"Attaques connues: {', '.join(attacks_summary)}")
+
+    slots_payload = []
+    for slot in skel.slots_for_llm:
+        slot_dict: Dict[str, Any] = {
+            "slotId": slot.slotId,
+            "actionType": slot.actionType.value,
+            "label": slot.label,
+            "textFr": slot.textFr,
+        }
+        if slot.textEn:
+            slot_dict["textEn"] = slot.textEn
+        if slot.baseDamage is not None:
+            slot_dict["baseDamageAlreadySetByPython"] = slot.baseDamage
+        slots_payload.append(slot_dict)
+
+    slots_json = json.dumps(slots_payload, ensure_ascii=False, indent=2)
+
+    return (
+        "Voici le résumé déterministe de la carte et la liste stricte des slots d'effets à analyser :\n\n"
+        + "\n".join(summary_lines)
+        + "\n\nSLOTS À ANALYSER (`slots_for_llm`) :\n"
+        + f"```json\n{slots_json}\n```\n\n"
+        + "Analyse chaque slot (`preconditions`, `effects`, `deadCardCondition`) ainsi que le profil stratégique (`aiRole`, `turnPhaseWeights` entre 0.0 et 1.0, `additionalSynergyTags`)."
+    )
+
+
+def _split_thinking_and_explanation(raw_text: str) -> tuple[Optional[str], str]:
+    """Sépare le bloc `<think>...</think>` éventuel de l'explication finale."""
+    if not raw_text:
+        return None, ""
+    m = re.search(r"<think>(.*?)</think>", raw_text, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        thinking = m.group(1).strip()
+        explanation = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+        if not explanation:
+            explanation = thinking
+        return thinking, explanation
+
+    if "</think>" in raw_text:
+        parts = raw_text.split("</think>", 1)
+        thinking = parts[0].replace("<think>", "").strip()
+        explanation = parts[1].strip()
+        return thinking, explanation or thinking
+
+    return None, raw_text.strip()
 
 
 class ReasoningEngine:
-    """Moteur dédié à l'exécution de la Passe 1 (Génération de raisonnement textuel)."""
+    """Moteur d'exécution de la Passe 1 (Raisonnement) supportant Apple MLX et llama.cpp GGUF."""
 
     def __init__(
         self,
@@ -178,12 +217,14 @@ class ReasoningEngine:
         intensity: Optional[Union[IntensityMode, str]] = None,
         backend: Optional[str] = None,
         hf_token: Optional[str] = None,
+        max_tokens: int = 800,
+        temperature: float = 0.2,
     ) -> None:
         load_env_file()
-        self.intensity = normalize_intensity_mode(intensity or os.environ.get("INTENSITY_MODE"))
-        raw_b = (backend or os.environ.get("LOCAL_BACKEND") or "mlx").strip().lower()
-        self.backend = "mlx" if raw_b == "mlx" else "llama_cpp"
-        self.hf_token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        self.intensity = normalize_intensity_mode(intensity)
+        self.backend = (backend or "mlx").strip().lower()
+        if self.backend not in {"mlx", "llama_cpp"}:
+            self.backend = "mlx"
 
         self.repo_id = resolve_model_for_configuration(
             pipeline_mode=PipelineMode.two_pass,
@@ -192,178 +233,179 @@ class ReasoningEngine:
             backend=self.backend,
             explicit_model=model,
         )
+        self.hf_token = hf_token
+        self.max_tokens = max_tokens
+        self.temperature = temperature
 
-        self._model = None
-        self._tokenizer = None
-        self._llm = None
+        self._model: Any = None
+        self._tokenizer: Any = None
+        self._llama_instance: Any = None
 
     def load_model_in_memory(self) -> None:
-        """Charge le modèle de raisonnement en mémoire unifiée (Apple MLX ou llama.cpp)."""
+        """Charge le modèle de raisonnement en mémoire unifiée."""
         if self.backend == "mlx":
             if self._model is not None and self._tokenizer is not None:
                 return
             import mlx_lm
-            self._model, self._tokenizer = mlx_lm.load(
-                self.repo_id,
-                tokenizer_config={"trust_remote_code": True},
-            )
-        else:
-            if self._llm is not None:
-                return
-            from llama_cpp import Llama
-            from compiler.llm_engine import resolve_gguf_from_spec
-            r_id, f_name, local_p = resolve_gguf_from_spec(self.repo_id, hf_token=self.hf_token)
-            if local_p is not None and local_p.exists():
-                m_path = str(local_p)
-            else:
-                from huggingface_hub import hf_hub_download
-                m_path = hf_hub_download(repo_id=r_id, filename=f_name, token=self.hf_token)
 
-            self._llm = Llama(
-                model_path=m_path,
-                n_ctx=16384,
+            try:
+                self._model, self._tokenizer = mlx_lm.load(self.repo_id)
+            except Exception:
+                from huggingface_hub import snapshot_download
+
+                try:
+                    local_snap = snapshot_download(self.repo_id, local_files_only=True)
+                except Exception:
+                    local_snap = snapshot_download(
+                        "mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit",
+                        local_files_only=True,
+                    )
+                self._model, self._tokenizer = mlx_lm.load(local_snap)
+        else:
+            if self._llama_instance is not None:
+                return
+            from huggingface_hub import hf_hub_download
+            from llama_cpp import Llama
+
+            gguf_file = resolve_gguf_filename_for_repo(self.repo_id, self.intensity)
+            if ":" in self.repo_id:
+                repo_part, gguf_file = self.repo_id.split(":", 1)
+            else:
+                repo_part = self.repo_id
+
+            if Path(self.repo_id).expanduser().is_file():
+                model_path = str(Path(self.repo_id).expanduser().resolve())
+            else:
+                if not gguf_file:
+                    gguf_file = "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
+                model_path = hf_hub_download(
+                    repo_id=repo_part,
+                    filename=gguf_file,
+                    token=self.hf_token,
+                )
+
+            self._llama_instance = Llama(
+                model_path=model_path,
                 n_gpu_layers=-1,
+                n_ctx=8192,
+                n_batch=512,
+                flash_attn=True,
                 verbose=False,
             )
 
     def generate_reasoning(
         self,
         bundle: FetchedCardBundle,
-        max_tokens: int = 4096,
-        temperature: float = 0.6,
         on_token: Optional[Callable[[int, float], None]] = None,
     ) -> ReasoningRecord:
-        """Génère l'analyse de raisonnement textuelle complète pour une carte Pokémon."""
-        if is_basic_energy(bundle):
-            # Synthèse instantanée pour les énergies de base
-            text = (
-                f"### ANALYSE DE CARTE ÉNERGIE DE BASE : {bundle.identity.nameFr}\n"
-                f"- Catégorie : ENERGY (BASIC_ENERGY)\n"
-                "- Fonction : Fournit 1 énergie du type correspondant lorsqu'elle est attachée à un Pokémon.\n"
-                "- Règle : Règle standard de 1 attachement d'énergie par tour depuis la main.\n"
-                "- Compilation formelle : Traitée par court-circuit déterministe."
+        """Exécute la Passe 1 de raisonnement sur une carte et retourne son `ReasoningRecord`."""
+        from compiler.static_cards import is_basic_energy
+
+        skeleton = build_deterministic_skeleton(bundle)
+
+        # Court-circuit déterministe si Énergie de base ou aucun slot d'effet textuel (0 slot IA)
+        if is_basic_energy(bundle) or not skeleton.slots_for_llm:
+            static_text = (
+                f"Analyse déterministe immédiate pour {bundle.card_id} ({bundle.identity.nameFr}) : "
+                "aucun slot d'effet textuel à traduire (0 slot IA)."
             )
             return ReasoningRecord(
                 cardId=bundle.card_id,
                 nameFr=bundle.identity.nameFr,
                 nameEn=bundle.identity.nameEn,
-                modelRepoId="static_engine",
-                modelBackend="static",
-                reasoningText=text,
+                modelRepoId="STATIC_DETERMINISTIC",
+                modelBackend=self.backend,
+                reasoningText=static_text,
+                rawThinkingProcess=None,
                 createdAtIso=datetime.now(timezone.utc).isoformat(),
                 completionTokens=0,
                 tokensPerSecond=0.0,
                 generationDurationSeconds=0.0,
+                timeToFirstTokenSeconds=0.0,
             )
 
         self.load_model_in_memory()
-
-        user_prompt = build_reasoning_prompt(bundle)
+        user_prompt = build_reasoning_prompt(bundle, skeleton=skeleton)
         messages = [
             {"role": "system", "content": REASONING_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
 
         t0 = time.perf_counter()
-        accumulated_text: List[str] = []
-        token_count = 0
-        live_tps = 0.0
         first_token_time: Optional[float] = None
-        last_token_time: Optional[float] = None
-        window_start_time: Optional[float] = None
-        window_start_tokens = 0
-        last_cb_time = 0.0
+        last_ui_update = t0
+        token_count = 0
+        chunks: List[str] = []
 
         if self.backend == "mlx":
             import mlx_lm
             from mlx_lm.sample_utils import make_sampler
 
             try:
-                prompt_text = self._tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
+                formatted_prompt = self._tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
                 )
             except Exception:
-                prompt_text = f"System: {REASONING_SYSTEM_PROMPT}\nUser: {user_prompt}\nAssistant:"
+                formatted_prompt = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
 
-            sampler = make_sampler(temp=temperature)
-            gen_stream = mlx_lm.stream_generate(
+            sampler = make_sampler(temp=self.temperature)
+            for response in mlx_lm.stream_generate(
                 self._model,
                 self._tokenizer,
-                prompt=prompt_text,
-                max_tokens=max_tokens,
+                prompt=formatted_prompt,
+                max_tokens=self.max_tokens,
                 sampler=sampler,
-            )
-
-            for chunk in gen_stream:
-                if chunk.text:
-                    accumulated_text.append(chunk.text)
-                token_count = chunk.generation_tokens
-                now = time.perf_counter()
-
-                if first_token_time is None and token_count > 0:
-                    first_token_time = now
-                    window_start_time = now
-                    window_start_tokens = token_count
-                last_token_time = now
-
-                if window_start_time is not None:
-                    window_elapsed = now - window_start_time
-                    if window_elapsed >= 1.0:
-                        delta_tokens = max(0, token_count - window_start_tokens)
-                        live_tps = round(delta_tokens / max(0.0001, window_elapsed), 1)
-                        window_start_time = now
-                        window_start_tokens = token_count
-
-                if on_token:
-                    if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
+            ):
+                piece = getattr(response, "text", "")
+                if piece:
+                    now = time.perf_counter()
+                    if first_token_time is None:
+                        first_token_time = now
+                    chunks.append(piece)
+                    token_count = getattr(response, "generation_tokens", token_count + 1)
+                    if on_token is not None and (now - last_ui_update) >= 0.5:
+                        gen_elapsed = now - first_token_time
+                        live_tps = token_count / gen_elapsed if gen_elapsed > 0.05 else 0.0
                         on_token(token_count, live_tps)
-                        last_cb_time = now
-
+                        last_ui_update = now
         else:
-            # llama.cpp stream
-            stream_gen = self._llm.create_chat_completion(
+            stream = self._llama_instance.create_chat_completion(
                 messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
                 stream=True,
             )
-            for chunk in stream_gen:
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                content = delta.get("content") or ""
-                if content:
-                    accumulated_text.append(content)
+            for chunk in stream:
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
+                piece = delta.get("content") or delta.get("reasoning_content") or ""
+                if piece:
+                    now = time.perf_counter()
+                    if first_token_time is None:
+                        first_token_time = now
+                    chunks.append(piece)
                     token_count += 1
-                now = time.perf_counter()
-
-                if first_token_time is None and token_count > 0:
-                    first_token_time = now
-                    window_start_time = now
-                    window_start_tokens = token_count
-                last_token_time = now
-
-                if window_start_time is not None:
-                    window_elapsed = now - window_start_time
-                    if window_elapsed >= 1.0:
-                        delta_tokens = max(0, token_count - window_start_tokens)
-                        live_tps = round(delta_tokens / max(0.0001, window_elapsed), 1)
-                        window_start_time = now
-                        window_start_tokens = token_count
-
-                if on_token:
-                    if (now - last_cb_time >= 0.05) or (token_count == 2 and last_cb_time == 0.0):
+                    if on_token is not None and (now - last_ui_update) >= 0.5:
+                        gen_elapsed = now - first_token_time
+                        live_tps = token_count / gen_elapsed if gen_elapsed > 0.05 else 0.0
                         on_token(token_count, live_tps)
-                        last_cb_time = now
+                        last_ui_update = now
 
-        total_elapsed = max(0.001, round(time.perf_counter() - t0, 3))
-        raw_output = "".join(accumulated_text)
+        t_end = time.perf_counter()
+        total_elapsed = max(0.001, t_end - t0)
+        ttft = (first_token_time - t0) if first_token_time is not None else total_elapsed
+        gen_duration = (t_end - first_token_time) if first_token_time is not None else total_elapsed
+        tps = round(token_count / gen_duration, 2) if gen_duration > 0 and token_count > 0 else 0.0
 
-        final_tps = live_tps
-        if first_token_time is not None and token_count > 1:
-            gen_elapsed = max(0.0001, (last_token_time or time.perf_counter()) - first_token_time)
-            final_tps = round((token_count - 1) / gen_elapsed, 1)
+        if on_token is not None and token_count > 0:
+            on_token(token_count, tps)
 
-        if on_token and token_count > 0:
-            on_token(token_count, final_tps)
+        raw_full_text = "".join(chunks)
+        thinking_part, explanation_part = _split_thinking_and_explanation(raw_full_text)
 
         return ReasoningRecord(
             cardId=bundle.card_id,
@@ -371,28 +413,39 @@ class ReasoningEngine:
             nameEn=bundle.identity.nameEn,
             modelRepoId=self.repo_id,
             modelBackend=self.backend,
-            reasoningText=raw_output,
+            reasoningText=explanation_part,
+            rawThinkingProcess=thinking_part,
             createdAtIso=datetime.now(timezone.utc).isoformat(),
             completionTokens=token_count,
-            tokensPerSecond=final_tps,
-            generationDurationSeconds=total_elapsed,
+            tokensPerSecond=tps,
+            generationDurationSeconds=round(gen_duration, 3),
+            timeToFirstTokenSeconds=round(ttft, 3),
         )
 
     def close(self) -> None:
-        """Libère rigoureusement le modèle et toute la mémoire associée."""
-        self._model = None
-        self._tokenizer = None
-        self._llm = None
-
-        import gc
-        gc.collect()
-
-        if self.backend == "mlx":
+        """Décharge strictement et intégralement le modèle de la RAM/VRAM."""
+        if self._model is not None:
+            del self._model
+            self._model = None
+        if self._tokenizer is not None:
+            del self._tokenizer
+            self._tokenizer = None
+        if self._llama_instance is not None:
             try:
-                import mlx.core as mx
-                if hasattr(mx, "clear_cache"):
-                    mx.clear_cache()
-                elif hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                    mx.metal.clear_cache()
+                if hasattr(self._llama_instance, "close"):
+                    self._llama_instance.close()
             except Exception:
                 pass
+            del self._llama_instance
+            self._llama_instance = None
+
+        gc.collect()
+        try:
+            import mlx.core as mx
+
+            if hasattr(mx, "clear_cache"):
+                mx.clear_cache()
+            elif hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                mx.metal.clear_cache()
+        except Exception:
+            pass

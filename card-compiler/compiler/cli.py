@@ -812,7 +812,7 @@ def _execute_run_pipeline(
             fetcher.fetch_batch(
                 mode=effective_mode,
                 custom_ids=custom_ids,
-                force=force,
+                force=False,
                 standard_limit=limit,
             )
         )
@@ -826,7 +826,11 @@ def _execute_run_pipeline(
         return
 
     # Routage vers le Two-Pass Pipeline si configuré
-    if eff_pipeline == PipelineMode.two_pass and llm_provider == LLMProvider.local:
+    if (
+        eff_pipeline == PipelineMode.two_pass
+        and llm_provider == LLMProvider.local
+        and all(isinstance(b, FetchedCardBundle) for b in bundles)
+    ):
         run_two_pass_pipeline(
             bundles=bundles,
             data_dir=data_dir,
@@ -1161,7 +1165,7 @@ def _execute_run_pipeline(
                     primitives.append(eff.primitive.value)
             primitives_str = ", ".join(primitives) if primitives else "—"
 
-            dead_reasons = [cond.reason.value for cond in model.strategicEvaluator.inGameDeadCardConditions]
+            dead_reasons = [act.deadCardCondition for act in model.playableActions if act.deadCardCondition]
             dead_str = ", ".join(dead_reasons) if dead_reasons else "—"
 
             meta = model.compilationMetadata
@@ -1181,10 +1185,17 @@ def _execute_run_pipeline(
         if model.identity.nameEn and model.identity.nameEn.lower() != model.identity.nameFr.lower():
             display_name = f"{model.identity.nameFr} ({model.identity.nameEn})"
 
+        role_attr = getattr(model.strategicEvaluator, "aiRole", None)
+        role_val = getattr(role_attr, "value", None)
+        if not isinstance(role_val, str):
+            prim_attr = getattr(model.strategicEvaluator, "primaryRole", None)
+            role_val = getattr(prim_attr, "value", None)
+        role_str = str(role_val) if isinstance(role_val, str) else "—"
+
         table.add_row(
             model.cardId,
             display_name,
-            model.strategicEvaluator.primaryRole.value,
+            role_str,
             primitives_str,
             dead_str,
             perf_str,
@@ -1760,8 +1771,7 @@ def inspect_command(
                 f"[bold yellow]{model.cardId}[/bold yellow] — [bold white]{model.identity.nameFr}[/bold white] "
                 f"({model.identity.nameEn or 'N/A'})\n"
                 f"• [bold]Catégorie[/bold] : {model.category.value} / {model.subCategory.value}\n"
-                f"• [bold]Rôle Stratégique[/bold] : [magenta]{model.strategicEvaluator.primaryRole.value}[/magenta] "
-                f"(Score intrinsèque : {model.strategicEvaluator.intrinsicBaseScore}/100)"
+                f"• [bold]Rôle Stratégique[/bold] : [magenta]{model.strategicEvaluator.aiRole.value}[/magenta]"
                 f"{evo_line}"
                 f"{meta_line}",
                 title=f"Inspection du Modèle de Carte — {model.cardId}",
@@ -1817,14 +1827,15 @@ def _execute_stats_validation(target_ids: Optional[List[str]] = None) -> None:
     summary_table.add_column("Statut Pydantic", justify="center")
 
     for m in valid_models:
+        dead_conds = [a.deadCardCondition for a in m.playableActions if a.deadCardCondition]
         summary_table.add_row(
             m.cardId,
             m.identity.nameFr,
             f"{m.category.value} / {m.subCategory.value}",
-            m.strategicEvaluator.primaryRole.value,
+            m.strategicEvaluator.aiRole.value,
             str(len(m.playableActions)),
             str(len(m.strategicEvaluator.decklistSynergyRequirements)),
-            str(len(m.strategicEvaluator.inGameDeadCardConditions)),
+            str(len(dead_conds)),
             "[bold green]VALIDE ✓[/bold green]",
         )
 
@@ -1843,7 +1854,7 @@ def _execute_stats_validation(target_ids: Optional[List[str]] = None) -> None:
     console.print(summary_table)
 
     cat_counts = Counter(m.category.value for m in valid_models)
-    role_counts = Counter(m.strategicEvaluator.primaryRole.value for m in valid_models)
+    role_counts = Counter(m.strategicEvaluator.aiRole.value for m in valid_models)
 
     console.print(
         Panel.fit(

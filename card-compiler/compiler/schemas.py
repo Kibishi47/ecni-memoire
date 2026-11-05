@@ -1,24 +1,26 @@
-"""Schémas Pydantic V2 stricts et Enums fermés de primitives atomiques pour le compilateur Pokémon TCG.
+"""Schémas Pydantic V2 stricts pour la compilation de cartes Pokémon TCG.
 
 Ce module définit :
-1. Les 10 Enums fermés obligatoires utilisés pour borner la génération LLM via GBNF.
-2. Le modèle `LLMCompiledCardPart` dont le JSON Schema guide `llama-cpp-python` en Constrained Decoding.
-3. Le modèle consolidé `EngineCardModel` fusionnant les métadonnées déterministes TCGdex (`identity`,
-   `pokemonStats`) et la sortie compilée de l'IA (`playableActions`, `strategicEvaluator`).
+1. Les énumérations normalisées (`CardCategory`, `CardSubCategory`, `ActionType`,
+   `TimingPhase`, `EffectPrimitive`, `AIRole`).
+2. La structure complète et déterministe du modèle final `EngineCardModel`
+   (`CardIdentity`, `PokemonStats`, `TypeModifier`, `PlayableAction`,
+   `AtomicEffect`, `StrategicEvaluator`, `TurnPhaseWeights`, `CompilationMetadata`).
+3. Le schéma micro-ciblé pour l'IA (`LLMTranslatedSlot`, `LLMCompiledPayload`)
+   utilisé exclusivement en Passe 2 via Constrained Decoding.
 """
 
 from __future__ import annotations
 
-import difflib
 import re
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ============================================================================
-# A. ENUMS FERMÉS OBLIGATOIRES
+# A. ENUMS NORMALISÉS (MAJUSCULES AVEC UNDERSCORES)
 # ============================================================================
 
 
@@ -32,2075 +34,1103 @@ class CardSubCategory(str, Enum):
     BASIC = "BASIC"
     STAGE_1 = "STAGE_1"
     STAGE_2 = "STAGE_2"
-    ITEM = "ITEM"
     SUPPORTER = "SUPPORTER"
-    TOOL = "TOOL"
+    ITEM = "ITEM"
     STADIUM = "STADIUM"
+    TOOL = "TOOL"
     BASIC_ENERGY = "BASIC_ENERGY"
     SPECIAL_ENERGY = "SPECIAL_ENERGY"
 
 
-class StrategicRole(str, Enum):
-    MAIN_ATTACKER = "MAIN_ATTACKER"
-    SECONDARY_ATTACKER = "SECONDARY_ATTACKER"
-    SNIPER_BENCH_ATTACKER = "SNIPER_BENCH_ATTACKER"
-    DRAW_ENGINE_POKEMON = "DRAW_ENGINE_POKEMON"
-    TUTOR_ENGINE_POKEMON = "TUTOR_ENGINE_POKEMON"
-    ENERGY_ACCELERATOR = "ENERGY_ACCELERATOR"
-    BENCH_DEPLOYER = "BENCH_DEPLOYER"
-    CONSISTENCY_TUTOR = "CONSISTENCY_TUTOR"
-    EVOLUTION_ACCELERATOR = "EVOLUTION_ACCELERATOR"
-    HAND_REFRESH_DRAW = "HAND_REFRESH_DRAW"
-    HAND_DISRUPTION = "HAND_DISRUPTION"
-    GUST_BOSS_EFFECT = "GUST_BOSS_EFFECT"
-    RECOVERY_RECYCLER = "RECOVERY_RECYCLER"
-    MOBILITY_SWITCH = "MOBILITY_SWITCH"
-    RESOURCE_ENERGY = "RESOURCE_ENERGY"
-    CONTROL_LOCK_DISRUPTION = "CONTROL_LOCK_DISRUPTION"
-    DEFENSIVE_TANK_WALL = "DEFENSIVE_TANK_WALL"
-    PASSIVE_STAT_BUFFER = "PASSIVE_STAT_BUFFER"
-    HEALER_SUPPORT = "HEALER_SUPPORT"
-    TECH_UTILITY = "TECH_UTILITY"
-
-
-class ActionSourceType(str, Enum):
-    TRAINER_PLAY = "TRAINER_PLAY"
-    ABILITY_ACTIVATED = "ABILITY_ACTIVATED"
-    ABILITY_ON_EVOLVE = "ABILITY_ON_EVOLVE"
-    ABILITY_ON_PLAY_FROM_HAND = "ABILITY_ON_PLAY_FROM_HAND"
-    ABILITY_REACTIVE = "ABILITY_REACTIVE"
-    ABILITY_PASSIVE = "ABILITY_PASSIVE"
+class ActionType(str, Enum):
+    PLAY_FROM_HAND = "PLAY_FROM_HAND"
+    EVOLVE = "EVOLVE"
+    USE_ABILITY = "USE_ABILITY"
+    ATTACH_ENERGY = "ATTACH_ENERGY"
+    RETREAT = "RETREAT"
     ATTACK = "ATTACK"
-    STADIUM_EFFECT = "STADIUM_EFFECT"
-    TOOL_EFFECT = "TOOL_EFFECT"
-    SPECIAL_ENERGY_EFFECT = "SPECIAL_ENERGY_EFFECT"
 
 
-class ActionTiming(str, Enum):
-    ONCE_PER_CARD = "ONCE_PER_CARD"
-    ONCE_PER_TURN_ABILITY = "ONCE_PER_TURN_ABILITY"
-    AS_OFTEN_AS_YOU_LIKE = "AS_OFTEN_AS_YOU_LIKE"
-    ONCE_PER_TURN_SUPPORTER = "ONCE_PER_TURN_SUPPORTER"
-    ONCE_PER_TURN_STADIUM = "ONCE_PER_TURN_STADIUM"
-    ONCE_PER_GAME_VSTAR = "ONCE_PER_GAME_VSTAR"
-    ON_EVOLVE_TRIGGER = "ON_EVOLVE_TRIGGER"
-    ON_PLAY_FROM_HAND_TRIGGER = "ON_PLAY_FROM_HAND_TRIGGER"
-    ON_DAMAGED_OR_KO_TRIGGER = "ON_DAMAGED_OR_KO_TRIGGER"
-    BETWEEN_TURNS_CHECKUP = "BETWEEN_TURNS_CHECKUP"
-    PASSIVE_CONTINUOUS = "PASSIVE_CONTINUOUS"
-    END_OF_TURN_ATTACK = "END_OF_TURN_ATTACK"
-
-
-class PreconditionType(str, Enum):
-    ZONE_HAS_MATCHING_CARD = "ZONE_HAS_MATCHING_CARD"
-    BENCH_HAS_EMPTY_SLOTS = "BENCH_HAS_EMPTY_SLOTS"
-    HAND_MIN_OTHER_CARDS = "HAND_MIN_OTHER_CARDS"
-    PLAYER_BEHIND_ON_PRIZES = "PLAYER_BEHIND_ON_PRIZES"
-    KO_SUFFERED_LAST_TURN = "KO_SUFFERED_LAST_TURN"
-    BASIC_IN_PLAY_PREVIOUS_TURN = "BASIC_IN_PLAY_PREVIOUS_TURN"
-    SELF_IS_ACTIVE = "SELF_IS_ACTIVE"
-    SELF_IS_ON_BENCH = "SELF_IS_ON_BENCH"
-    SELF_HAS_ENERGY_COST = "SELF_HAS_ENERGY_COST"
-    HAS_TERA_POKEMON_IN_PLAY = "HAS_TERA_POKEMON_IN_PLAY"
-    STADIUM_IN_PLAY = "STADIUM_IN_PLAY"
-    OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION = "OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION"
-    OPPONENT_PRIZES_EXACT_COUNT = "OPPONENT_PRIZES_EXACT_COUNT"
-    NO_ENERGY_IN_PLAY = "NO_ENERGY_IN_PLAY"
-    SECOND_PLAYER_TURN_1 = "SECOND_PLAYER_TURN_1"
-
-
-class CostType(str, Enum):
-    DISCARD_FROM_HAND = "DISCARD_FROM_HAND"
-    DISCARD_ENERGY_FROM_PLAY = "DISCARD_ENERGY_FROM_PLAY"
-    PUT_DAMAGE_COUNTERS_ON_SELF = "PUT_DAMAGE_COUNTERS_ON_SELF"
-    END_TURN_IMMEDIATELY = "END_TURN_IMMEDIATELY"
-    KNOCK_OUT_SELF = "KNOCK_OUT_SELF"
-    SELF_DAMAGE = "SELF_DAMAGE"
-    SHUFFLE_ATTACHED_ENERGY_TO_DECK = "SHUFFLE_ATTACHED_ENERGY_TO_DECK"
-    CANT_ATTACK_NEXT_TURN = "CANT_ATTACK_NEXT_TURN"
-    PUT_HAND_CARD_BOTTOM_DECK = "PUT_HAND_CARD_BOTTOM_DECK"
+class TimingPhase(str, Enum):
+    PREPARATION = "PREPARATION"
+    MAIN_PHASE_1 = "MAIN_PHASE_1"
+    MAIN_PHASE_2 = "MAIN_PHASE_2"
+    ATTACK_PHASE = "ATTACK_PHASE"
 
 
 class EffectPrimitive(str, Enum):
-    SEARCH_DECK_TO_HAND = "SEARCH_DECK_TO_HAND"
-    SEARCH_DECK_TO_BENCH = "SEARCH_DECK_TO_BENCH"
+    SEARCH_DECK = "SEARCH_DECK"
     DRAW_CARDS = "DRAW_CARDS"
-    DRAW_UNTIL_HAND_SIZE = "DRAW_UNTIL_HAND_SIZE"
-    DISCARD_HAND_AND_DRAW = "DISCARD_HAND_AND_DRAW"
-    SHUFFLE_HAND_AND_DRAW = "SHUFFLE_HAND_AND_DRAW"
-    SHUFFLE_HAND_BOTTOM_DRAW_PRIZES = "SHUFFLE_HAND_BOTTOM_DRAW_PRIZES"
-    LOOK_TOP_DECK_PICK = "LOOK_TOP_DECK_PICK"
-    EVOLVE_NORMAL = "EVOLVE_NORMAL"
-    EVOLVE_SKIP_STAGE1 = "EVOLVE_SKIP_STAGE1"
-    SEARCH_AND_ATTACH_ENERGY = "SEARCH_AND_ATTACH_ENERGY"
-    ATTACH_ENERGY_FROM_DISCARD = "ATTACH_ENERGY_FROM_DISCARD"
-    ATTACH_EXTRA_ENERGY_FROM_HAND = "ATTACH_EXTRA_ENERGY_FROM_HAND"
-    MOVE_ENERGY_BETWEEN_POKEMON = "MOVE_ENERGY_BETWEEN_POKEMON"
-    RECOVER_DISCARD_TO_HAND = "RECOVER_DISCARD_TO_HAND"
-    SHUFFLE_DISCARD_TO_DECK = "SHUFFLE_DISCARD_TO_DECK"
-    RETURN_POKEMON_TO_HAND = "RETURN_POKEMON_TO_HAND"
-    SWITCH_ACTIVE_POKEMON = "SWITCH_ACTIVE_POKEMON"
-    GUST_OPPONENT_BENCH = "GUST_OPPONENT_BENCH"
-    DEAL_DAMAGE_ACTIVE = "DEAL_DAMAGE_ACTIVE"
-    DEAL_DAMAGE_BENCH = "DEAL_DAMAGE_BENCH"
-    DISTRIBUTE_DAMAGE_COUNTERS_BENCH = "DISTRIBUTE_DAMAGE_COUNTERS_BENCH"
-    PLACE_DAMAGE_COUNTERS = "PLACE_DAMAGE_COUNTERS"
-    MOVE_DAMAGE_COUNTERS = "MOVE_DAMAGE_COUNTERS"
-    HEAL_DAMAGE = "HEAL_DAMAGE"
+    DAMAGE_ACTIVE = "DAMAGE_ACTIVE"
+    DAMAGE_BENCH = "DAMAGE_BENCH"
+    ATTACH_ENERGY = "ATTACH_ENERGY"
+    DISCARD_CARDS = "DISCARD_CARDS"
+    HEAL = "HEAL"
+    SWITCH_ACTIVE = "SWITCH_ACTIVE"
     APPLY_SPECIAL_CONDITION = "APPLY_SPECIAL_CONDITION"
-    DISCARD_OPPONENT_ENERGY = "DISCARD_OPPONENT_ENERGY"
-    DISCARD_TOOL_OR_STADIUM = "DISCARD_TOOL_OR_STADIUM"
-    MILL_OPPONENT_DECK = "MILL_OPPONENT_DECK"
-    DISCARD_FROM_OPPONENT_HAND = "DISCARD_FROM_OPPONENT_HAND"
-    DEVOLVE_OPPONENT_POKEMON = "DEVOLVE_OPPONENT_POKEMON"
-    TAKE_EXTRA_PRIZE_CARDS = "TAKE_EXTRA_PRIZE_CARDS"
-    PASSIVE_DAMAGE_REDUCTION = "PASSIVE_DAMAGE_REDUCTION"
-    PASSIVE_DAMAGE_BOOST = "PASSIVE_DAMAGE_BOOST"
-    PASSIVE_HP_BOOST = "PASSIVE_HP_BOOST"
-    PASSIVE_RETREAT_COST_MOD = "PASSIVE_RETREAT_COST_MOD"
-    PASSIVE_PREVENT_DAMAGE_OR_EFFECTS = "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS"
-    PASSIVE_ABILITY_OR_ITEM_LOCK = "PASSIVE_ABILITY_OR_ITEM_LOCK"
+    EVOLVE_POKEMON = "EVOLVE_POKEMON"
+    SHUFFLE_HAND_DRAW = "SHUFFLE_HAND_DRAW"
+    RECOVER_FROM_DISCARD = "RECOVER_FROM_DISCARD"
 
 
-class ZoneType(str, Enum):
-    DECK = "DECK"
-    HAND = "HAND"
-    DISCARD = "DISCARD"
-    BENCH = "BENCH"
-    ACTIVE = "ACTIVE"
-    IN_PLAY_ALL = "IN_PLAY_ALL"
-    PRIZES = "PRIZES"
-    OPPONENT_ACTIVE = "OPPONENT_ACTIVE"
-    OPPONENT_BENCH = "OPPONENT_BENCH"
-    OPPONENT_IN_PLAY_ALL = "OPPONENT_IN_PLAY_ALL"
-    OPPONENT_HAND = "OPPONENT_HAND"
-    OPPONENT_DECK = "OPPONENT_DECK"
-    OPPONENT_DISCARD = "OPPONENT_DISCARD"
-    STADIUM = "STADIUM"
-    LOST_ZONE = "LOST_ZONE"
+class AIRole(str, Enum):
+    MAIN_ATTACKER = "MAIN_ATTACKER"
+    SECONDARY_ATTACKER = "SECONDARY_ATTACKER"
+    DRAW_ENGINE = "DRAW_ENGINE"
+    ENERGY_ACCELERATOR = "ENERGY_ACCELERATOR"
+    GUEST_TECH = "GUEST_TECH"
+    DISRUPTION = "DISRUPTION"
+    CONSISTENCY_BOOSTER = "CONSISTENCY_BOOSTER"
 
 
-class DeadCardReason(str, Enum):
-    NO_VALID_TARGET_IN_DECK = "NO_VALID_TARGET_IN_DECK"
-    NO_STAGE2_LEFT_IN_DECK_OR_HAND = "NO_STAGE2_LEFT_IN_DECK_OR_HAND"
-    NO_BASE_POKEMON_LINE_LEFT = "NO_BASE_POKEMON_LINE_LEFT"
-    BENCH_ALREADY_FULL = "BENCH_ALREADY_FULL"
-    NOT_BEHIND_ON_PRIZES = "NOT_BEHIND_ON_PRIZES"
-    DISCARD_PILE_EMPTY = "DISCARD_PILE_EMPTY"
-    NO_TERA_POKEMON_IN_PLAY = "NO_TERA_POKEMON_IN_PLAY"
-    HAND_ALREADY_FULL_OR_AT_LIMIT = "HAND_ALREADY_FULL_OR_AT_LIMIT"
-    NO_DAMAGE_ON_OWN_POKEMON = "NO_DAMAGE_ON_OWN_POKEMON"
-    NO_KO_LAST_TURN = "NO_KO_LAST_TURN"
-    STADIUM_ALREADY_IN_PLAY_SAME_NAME = "STADIUM_ALREADY_IN_PLAY_SAME_NAME"
-
-
-class DamageScalingType(str, Enum):
-    PER_COIN_FLIP_HEADS = "PER_COIN_FLIP_HEADS"
-    PER_ENERGY_ATTACHED_SELF = "PER_ENERGY_ATTACHED_SELF"
-    PER_ENERGY_ATTACHED_ALL = "PER_ENERGY_ATTACHED_ALL"
-    PER_ENERGY_ATTACHED_TARGET = "PER_ENERGY_ATTACHED_TARGET"
-    PER_DAMAGE_COUNTER_ON_SELF = "PER_DAMAGE_COUNTER_ON_SELF"
-    PER_DAMAGE_COUNTER_ON_FRIENDLY = "PER_DAMAGE_COUNTER_ON_FRIENDLY"
-    PER_DAMAGE_COUNTER_ON_TARGET = "PER_DAMAGE_COUNTER_ON_TARGET"
-    PER_ENERGY_DISCARDED = "PER_ENERGY_DISCARDED"
-    PER_OPPONENT_PRIZE_TAKEN = "PER_OPPONENT_PRIZE_TAKEN"
-    IF_TARGET_IS_EX_OR_EVOLUTION = "IF_TARGET_IS_EX_OR_EVOLUTION"
-    PER_BENCHED_POKEMON = "PER_BENCHED_POKEMON"
-    PER_CARD_IN_DISCARD_OR_LOST_ZONE = "PER_CARD_IN_DISCARD_OR_LOST_ZONE"
-
-
-class SpecialConditionType(str, Enum):
-    POISONED = "POISONED"
-    BURNED = "BURNED"
-    CONFUSED = "CONFUSED"
-    PARALYZED = "PARALYZED"
-    ASLEEP = "ASLEEP"
+# Alias de rétrocompatibilité
+StrategicRole = AIRole
+ActionSourceType = ActionType
+ActionTiming = TimingPhase
 
 
 # ============================================================================
-# B. MODÈLES DE FILTRES, ACTIONS ATOMIQUES ET ÉVALUATION STRATÉGIQUE
+# FONCTIONS DE COERCITION ET TOLÉRANCE AUX VARIATIONS LLM
 # ============================================================================
 
 
-class CardFilter(BaseModel):
-    """Filtre générique de ciblage de cartes utilisable dans les préconditions, coûts, effets et synergies."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    category: Optional[CardCategory] = Field(
-        default=None,
-        description="Catégorie de carte ciblée (POKEMON, TRAINER, ENERGY) ou null si non restreint.",
-    )
-    subCategory: Optional[CardSubCategory] = Field(
-        default=None,
-        description=(
-            "Sous-catégorie de carte ciblée (BASIC, STAGE_1, STAGE_2, ITEM, SUPPORTER, "
-            "TOOL, STADIUM, BASIC_ENERGY, SPECIAL_ENERGY) ou null."
-        ),
-    )
-    maxHp: Optional[int] = Field(
-        default=None,
-        description="PV maximum autorisés pour le Pokémon ciblé (ex: 70 pour Poffin Pote-Pote) ou null.",
-    )
-    minHp: Optional[int] = Field(
-        default=None,
-        description="PV minimum requis pour le Pokémon ciblé ou null.",
-    )
-    energyType: Optional[str] = Field(
-        default=None,
-        description="Type d'énergie ou de Pokémon requis (ex: 'Feu', 'Fire', 'Obscurité') ou null.",
-    )
-    specificCardName: Optional[str] = Field(
-        default=None,
-        description="Nom exact du Pokémon ou de la carte ciblée (ex: 'Salamèche', 'Dracaufeu ex') ou null.",
-    )
-    isRuleBox: Optional[bool] = Field(
-        default=None,
-        description="True si cible un Pokémon à encadré Règle (ex, V...), False si l'exclut (ex: Cuencia), ou null.",
-    )
-    isEvolution: Optional[bool] = Field(
-        default=None,
-        description="True si cible un Pokémon Évolutif (STAGE_1 ou STAGE_2), False sinon, ou null.",
-    )
-    isTera: Optional[bool] = Field(
-        default=None,
-        description="True si cible un Pokémon Téracristal, ou null.",
-    )
-    isAncient: Optional[bool] = Field(
-        default=None,
-        description="True si cible une carte Temps passé (Ancient), ou null.",
-    )
-    isFuture: Optional[bool] = Field(
-        default=None,
-        description="True si cible une carte Temps futur (Future), ou null.",
-    )
-    hasAbility: Optional[bool] = Field(
-        default=None,
-        description="True si cible un Pokémon doté d'un Talent, False si sans Talent, ou null.",
-    )
-    maxRetreatCost: Optional[int] = Field(
-        default=None,
-        description="Coût de retraite maximum autorisé ou null.",
-    )
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def normalize_filter_category(cls, v: Any) -> Optional[CardCategory]:
-        if v is None:
-            return None
-        if isinstance(v, CardCategory):
-            return v
-        if not isinstance(v, str):
-            return None
-        raw = v.strip().upper()
-        if not raw or raw in {"NONE", "NULL", "N/A", "ANY"}:
-            return None
-        if "POK" in raw:
-            return CardCategory.POKEMON
-        if "TRAIN" in raw or "DRESS" in raw:
-            return CardCategory.TRAINER
-        if "ENERG" in raw:
-            return CardCategory.ENERGY
-        try:
-            return CardCategory(raw)
-        except ValueError:
-            return None
-
-    @field_validator("subCategory", mode="before")
-    @classmethod
-    def normalize_filter_sub_category(cls, v: Any) -> Optional[CardSubCategory]:
-        if v is None:
-            return None
-        if isinstance(v, CardSubCategory):
-            return v
-        if not isinstance(v, str):
-            return None
-        raw = v.strip().upper()
-        if not raw or raw in {"NONE", "NULL", "N/A", "ANY"}:
-            return None
-        SUB_MAP: Dict[str, CardSubCategory] = {
-            "BASE": CardSubCategory.BASIC,
-            "BASIC": CardSubCategory.BASIC,
-            "STAGE_1": CardSubCategory.STAGE_1,
-            "STAGE1": CardSubCategory.STAGE_1,
-            "NIVEAU_1": CardSubCategory.STAGE_1,
-            "NIVEAU1": CardSubCategory.STAGE_1,
-            "STAGE_2": CardSubCategory.STAGE_2,
-            "STAGE2": CardSubCategory.STAGE_2,
-            "NIVEAU_2": CardSubCategory.STAGE_2,
-            "NIVEAU2": CardSubCategory.STAGE_2,
-            "ITEM": CardSubCategory.ITEM,
-            "OBJET": CardSubCategory.ITEM,
-            "SUPPORTER": CardSubCategory.SUPPORTER,
-            "TOOL": CardSubCategory.TOOL,
-            "OUTIL": CardSubCategory.TOOL,
-            "STADIUM": CardSubCategory.STADIUM,
-            "STADE": CardSubCategory.STADIUM,
-            "BASIC_ENERGY": CardSubCategory.BASIC_ENERGY,
-            "SPECIAL_ENERGY": CardSubCategory.SPECIAL_ENERGY,
-        }
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        if clean in SUB_MAP:
-            return SUB_MAP[clean]
-        try:
-            return CardSubCategory(clean)
-        except ValueError:
-            return None
-
-    @field_validator("maxHp", "minHp", "maxRetreatCost", mode="before")
-    @classmethod
-    def normalize_int_optional(cls, v: Any) -> Optional[int]:
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return int(round(v))
-        s = str(v).strip().lower()
-        if s in ("", "none", "null", "n/a", "na", "undefined"):
-            return None
-        m = re.search(r"\d+", s)
-        if m:
-            return int(m.group())
-        return None
-
-    @field_validator("isRuleBox", "isEvolution", "isTera", "isAncient", "isFuture", "hasAbility", mode="before")
-    @classmethod
-    def normalize_bool_optional(cls, v: Any) -> Optional[bool]:
-        if v is None:
-            return None
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        s = str(v).strip().lower()
-        if s in ("", "none", "null", "n/a", "undefined"):
-            return None
-        if s in ("true", "1", "yes", "oui"):
-            return True
-        if s in ("false", "0", "no", "non"):
-            return False
-        return None
-
-    @field_validator("energyType", "specificCardName", mode="before")
-    @classmethod
-    def normalize_str_optional(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        s = str(v).strip()
-        if not s or s.lower() in ("none", "null", "n/a", "undefined"):
-            return None
-        return s
+def _clean_enum_key(val: Any) -> str:
+    if isinstance(val, Enum):
+        return str(val.value).strip().upper()
+    s = str(val or "").strip().upper()
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s
 
 
-class ActionPrecondition(BaseModel):
-    """Précondition formelle devant être vérifiée dans l'état du jeu avant d'exécuter une action."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    type: PreconditionType = Field(
-        ...,
-        description="Type de précondition requise avant de pouvoir jouer ou activer l'action.",
-    )
-    zone: Optional[ZoneType] = Field(
-        default=None,
-        description="Zone de jeu inspectée par la précondition (DECK, HAND, DISCARD, BENCH, ACTIVE, IN_PLAY_ALL, PRIZES) ou null.",
-    )
-    minCount: int = Field(
-        default=1,
-        ge=0,
-        description="Nombre minimum de cartes ou d'emplacements requis pour satisfaire la précondition.",
-    )
-    targetFilter: Optional[CardFilter] = Field(
-        default=None,
-        description="Filtre identifiant les cartes requises dans la zone vérifiée, ou null.",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_precondition_input(cls, data: Any) -> Any:
-        if isinstance(data, str):
-            raw = data.strip().upper()
-            return {
-                "type": raw,
-                "zone": "IN_PLAY_ALL" if "PLAY" in raw else ("HAND" if "HAND" in raw else "DECK"),
-                "minCount": 1,
-                "targetFilter": None,
-            }
-        return data
-
-    @field_validator("minCount", mode="before")
-    @classmethod
-    def normalize_min_count(cls, v: Any) -> int:
-        if v is None:
-            return 1
-        if isinstance(v, (int, float)):
-            return max(0, int(round(v)))
-        s = str(v).strip()
-        m = re.search(r"\d+", s)
-        if m:
-            return max(0, int(m.group()))
-        return 1
-
-    @field_validator("targetFilter", mode="before")
-    @classmethod
-    def normalize_target_filter(cls, v: Any) -> Optional[Any]:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            s = v.strip()
-            if not s or s.lower() in ("none", "null", "n/a"):
-                return None
-            return {"specificCardName": s}
-        return v
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def normalize_precondition_type(cls, v: Any) -> PreconditionType:
-        if not v:
-            return PreconditionType.ZONE_HAS_MATCHING_CARD
-        if isinstance(v, PreconditionType):
-            return v
-        if not isinstance(v, str):
-            return PreconditionType.ZONE_HAS_MATCHING_CARD
-        raw = v.strip().upper()
-        if not raw or raw in {"NONE", "NULL", "N/A"}:
-            return PreconditionType.ZONE_HAS_MATCHING_CARD
-        for p in PreconditionType:
-            if p.value == raw:
-                return p
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for p in PreconditionType:
-            if p.value == clean:
-                return p
-        PRECOND_MAP: Dict[str, PreconditionType] = {
-            "BENCH_EMPTY_SLOTS": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
-            "BENCH_FULL": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
-            "BENCH_NOT_FULL": PreconditionType.BENCH_HAS_EMPTY_SLOTS,
-            "HAND_MIN_CARDS": PreconditionType.HAND_MIN_OTHER_CARDS,
-            "DISCARD_OTHER_CARDS": PreconditionType.HAND_MIN_OTHER_CARDS,
-            "BEHIND_ON_PRIZES": PreconditionType.PLAYER_BEHIND_ON_PRIZES,
-            "KO_LAST_TURN": PreconditionType.KO_SUFFERED_LAST_TURN,
-            "ACTIVE": PreconditionType.SELF_IS_ACTIVE,
-            "BENCH": PreconditionType.SELF_IS_ON_BENCH,
-            "TERA": PreconditionType.HAS_TERA_POKEMON_IN_PLAY,
-            "STADIUM": PreconditionType.STADIUM_IN_PLAY,
-        }
-        if clean in PRECOND_MAP:
-            return PRECOND_MAP[clean]
-        matches = difflib.get_close_matches(clean, [e.value for e in PreconditionType], n=1, cutoff=0.5)
-        if matches:
-            return PreconditionType(matches[0])
-        return PreconditionType.ZONE_HAS_MATCHING_CARD
-
-    @field_validator("zone", mode="before")
-    @classmethod
-    def sanitize_precond_zone(cls, v: Any) -> Optional[ZoneType]:
-        if v is None:
-            return None
-        if isinstance(v, ZoneType):
-            return v
-        if isinstance(v, str):
-            clean = v.strip().upper()
-            if clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
-                return ZoneType.IN_PLAY_ALL
-            if clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
-                return ZoneType.DISCARD
-            try:
-                return ZoneType(clean)
-            except ValueError:
-                return None
-        return None
-
-
-class ActionCost(BaseModel):
-    """Coût additionnel à payer pour jouer ou activer l'action."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    type: CostType = Field(
-        ...,
-        description="Nature du coût à acquitter (DISCARD_FROM_HAND, DISCARD_ENERGY_FROM_PLAY, PUT_DAMAGE_COUNTERS_ON_SELF, END_TURN_IMMEDIATELY).",
-    )
-    count: int = Field(
-        default=1,
-        ge=0,
-        description="Nombre de cartes à défausser ou quantité de marqueurs de dégâts à placer.",
-    )
-    targetFilter: Optional[CardFilter] = Field(
-        default=None,
-        description="Filtre éventuel sur les cartes autorisées pour payer ce coût, ou null.",
-    )
-
-    @field_validator("targetFilter", mode="before")
-    @classmethod
-    def normalize_cost_target_filter(cls, v: Any) -> Optional[Any]:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            s = v.strip()
-            if not s or s.lower() in ("none", "null", "n/a"):
-                return None
-            return {"specificCardName": s}
-        return v
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def normalize_cost_type(cls, v: Any) -> CostType:
-        if not v:
-            return CostType.DISCARD_FROM_HAND
-        if isinstance(v, CostType):
-            return v
-        if not isinstance(v, str):
-            return CostType.DISCARD_FROM_HAND
-        raw = v.strip().upper()
-        if not raw or raw in {"NONE", "NULL", "N/A"}:
-            return CostType.DISCARD_FROM_HAND
-        for c in CostType:
-            if c.value == raw:
-                return c
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for c in CostType:
-            if c.value == clean:
-                return c
-        COST_MAP: Dict[str, CostType] = {
-            "DISCARD_HAND": CostType.DISCARD_FROM_HAND,
-            "DISCARD_CARD": CostType.DISCARD_FROM_HAND,
-            "DISCARD": CostType.DISCARD_FROM_HAND,
-            "DISCARD_ENERGY": CostType.DISCARD_ENERGY_FROM_PLAY,
-            "DAMAGE_SELF": CostType.SELF_DAMAGE,
-            "PUT_DAMAGE": CostType.PUT_DAMAGE_COUNTERS_ON_SELF,
-            "END_TURN": CostType.END_TURN_IMMEDIATELY,
-            "KO_SELF": CostType.KNOCK_OUT_SELF,
-        }
-        if clean in COST_MAP:
-            return COST_MAP[clean]
-        matches = difflib.get_close_matches(clean, [e.value for e in CostType], n=1, cutoff=0.5)
-        if matches:
-            return CostType(matches[0])
-        return CostType.DISCARD_FROM_HAND
-
-    @field_validator("count", mode="before")
-    @classmethod
-    def clamp_cost_count(cls, v: Any) -> int:
-        if v is None:
-            return 1
-        if isinstance(v, (int, float)):
-            return max(0, int(round(v)))
-        s = str(v).strip()
-        m = re.search(r"\d+", s)
-        if m:
-            return max(0, int(m.group()))
-        return 1
-
-
-class AtomicEffect(BaseModel):
-    """Effet élémentaire atomique modifiant l'état de la partie Pokémon TCG."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    primitive: EffectPrimitive = Field(
-        ...,
-        description="Primitive atomique normalisée décrivant l'effet mécanique.",
-    )
-    sourceZone: Optional[ZoneType] = Field(
-        default=None,
-        description="Zone de départ des cartes manipulées (ex: DECK, DISCARD, HAND) ou null.",
-    )
-    targetZone: Optional[ZoneType] = Field(
-        default=None,
-        description="Zone d'arrivée des cartes manipulées (ex: HAND, BENCH, ACTIVE, DECK) ou null.",
-    )
-    count: int = Field(
-        default=1,
-        ge=0,
-        description="Nombre de cartes cherchées, piochées, attachées ou affectées par l'effet.",
-    )
-    upTo: bool = Field(
-        default=False,
-        description="True si le joueur peut choisir 'jusqu'à' count cartes (ex: Poffin Pote-Pote, Règne Infernal), False sinon.",
-    )
-    targetFilter: Optional[CardFilter] = Field(
-        default=None,
-        description="Filtre caractérisant les cartes ciblées par l'effet atomique, ou null.",
-    )
-    baseDamage: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Dégâts de base infligés par une attaque (ex: 180 pour Combustion Obscure, 120 pour Rafale Tornade) ou null.",
-    )
-    damageScalingPerOpponentPrizeTaken: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Bonus de dégâts par carte Récompense déjà prise par l'adversaire (ex: 30 pour Dracaufeu ex) ou null.",
-    )
-    damageScalingType: Optional[DamageScalingType] = Field(
-        default=None,
-        description="Type de calcul dynamique des dégâts (ex: PER_ENERGY_DISCARDED, PER_BENCHED_POKEMON, PER_COIN_FLIP_HEADS) ou null.",
-    )
-    damageScalingValue: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Valeur unitaire du bonus ou multiplicateur de dégâts dynamiques (ex: 70 pour 70×, 30 pour +30) ou null.",
-    )
-    specialCondition: Optional[SpecialConditionType] = Field(
-        default=None,
-        description="État Spécial infligé (POISONED, BURNED, CONFUSED, PARALYZED, ASLEEP) ou null.",
-    )
-
-    @field_validator("primitive", mode="before")
-    @classmethod
-    def normalize_primitive(cls, v: Any) -> EffectPrimitive:
-        if isinstance(v, EffectPrimitive):
-            return v
-        if not isinstance(v, str):
-            return EffectPrimitive.DEAL_DAMAGE_ACTIVE
-        raw = v.strip().upper()
-        for prim in EffectPrimitive:
-            if prim.value == raw:
-                return prim
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for prim in EffectPrimitive:
-            if prim.value == clean:
-                return prim
-
-        SYNONYMS: Dict[str, EffectPrimitive] = {
-            # Dégâts
-            "DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "DEAL_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "ATTACK": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "ATTACK_ACTIVE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "DAMAGE_ACTIVE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "DIRECT_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "INFLICT_DAMAGE": EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-            "DAMAGE_BENCH": EffectPrimitive.DEAL_DAMAGE_BENCH,
-            "DEAL_DAMAGE_BENCH": EffectPrimitive.DEAL_DAMAGE_BENCH,
-            "BENCH_DAMAGE": EffectPrimitive.DEAL_DAMAGE_BENCH,
-            "SNIPER": EffectPrimitive.DEAL_DAMAGE_BENCH,
-            "SNIPE": EffectPrimitive.DEAL_DAMAGE_BENCH,
-            "DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
-            "PLACE_DAMAGE_COUNTER": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
-            "PUT_DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
-            "MOVE_DAMAGE_COUNTER": EffectPrimitive.MOVE_DAMAGE_COUNTERS,
-            # Protection / Prévention (ex: Statitik Esquive / Splashing Dodge)
-            "PREVENT_DAMAGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "PREVENT_ALL_DAMAGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "PREVENT_DAMAGE_OR_EFFECTS": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "PREVENT_EFFECTS": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "PREVENT": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "DODGE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "INVULNERABLE": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "IMMUNITY": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "FLIP_COIN": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "COIN_FLIP": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            "COIN": EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS,
-            # Pioche / Recherche
-            "DRAW": EffectPrimitive.DRAW_CARDS,
-            "DRAW_CARD": EffectPrimitive.DRAW_CARDS,
-            "DRAW_CARDS": EffectPrimitive.DRAW_CARDS,
-            "DRAW_UNTIL": EffectPrimitive.DRAW_UNTIL_HAND_SIZE,
-            "SEARCH": EffectPrimitive.SEARCH_DECK_TO_HAND,
-            "SEARCH_DECK": EffectPrimitive.SEARCH_DECK_TO_HAND,
-            "SEARCH_DECK_HAND": EffectPrimitive.SEARCH_DECK_TO_HAND,
-            "TUTOR": EffectPrimitive.SEARCH_DECK_TO_HAND,
-            "SEARCH_BENCH": EffectPrimitive.SEARCH_DECK_TO_BENCH,
-            "SEARCH_DECK_BENCH": EffectPrimitive.SEARCH_DECK_TO_BENCH,
-            "CALL_FOR_FAMILY": EffectPrimitive.SEARCH_DECK_TO_BENCH,
-            # Énergie
-            "ATTACH_ENERGY": EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND,
-            "ATTACH_EXTRA_ENERGY": EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND,
-            "SEARCH_ENERGY": EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
-            "ACCELERATE_ENERGY": EffectPrimitive.SEARCH_AND_ATTACH_ENERGY,
-            "ATTACH_FROM_DISCARD": EffectPrimitive.ATTACH_ENERGY_FROM_DISCARD,
-            "MOVE_ENERGY": EffectPrimitive.MOVE_ENERGY_BETWEEN_POKEMON,
-            # Soin
-            "HEAL": EffectPrimitive.HEAL_DAMAGE,
-            "HEALING": EffectPrimitive.HEAL_DAMAGE,
-            # Mouvement / Switch / Gust
-            "SWITCH": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
-            "SWITCH_POKEMON": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
-            "RETREAT": EffectPrimitive.SWITCH_ACTIVE_POKEMON,
-            "GUST": EffectPrimitive.GUST_OPPONENT_BENCH,
-            "BOSS": EffectPrimitive.GUST_OPPONENT_BENCH,
-            "GUST_BENCH": EffectPrimitive.GUST_OPPONENT_BENCH,
-            "SWITCH_OPPONENT": EffectPrimitive.GUST_OPPONENT_BENCH,
-            # États Spéciaux
-            "SPECIAL_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            "PARALYZE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            "POISON": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            "BURN": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            "ASLEEP": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            "CONFUSE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-            # Défausse / Meule
-            "DISCARD_ENERGY": EffectPrimitive.DISCARD_OPPONENT_ENERGY,
-            "DISCARD_OPPONENT_ENERGY": EffectPrimitive.DISCARD_OPPONENT_ENERGY,
-            "DISCARD_HAND": EffectPrimitive.DISCARD_HAND_AND_DRAW,
-            "SHUFFLE_DRAW": EffectPrimitive.SHUFFLE_HAND_AND_DRAW,
-            "SHUFFLE_HAND": EffectPrimitive.SHUFFLE_HAND_AND_DRAW,
-            "MILL": EffectPrimitive.MILL_OPPONENT_DECK,
-            "MILL_DECK": EffectPrimitive.MILL_OPPONENT_DECK,
-            "DISCARD_OPPONENT_HAND": EffectPrimitive.DISCARD_FROM_OPPONENT_HAND,
-            "DEVOLVE": EffectPrimitive.DEVOLVE_OPPONENT_POKEMON,
-            "EVOLVE": EffectPrimitive.EVOLVE_NORMAL,
-            "RECOVER": EffectPrimitive.RECOVER_DISCARD_TO_HAND,
-            "RETRIEVE": EffectPrimitive.RECOVER_DISCARD_TO_HAND,
-            "DISCARD_TOOL": EffectPrimitive.DISCARD_TOOL_OR_STADIUM,
-            "DISCARD_STADIUM": EffectPrimitive.DISCARD_TOOL_OR_STADIUM,
-        }
-        if clean in SYNONYMS:
-            return SYNONYMS[clean]
-
-        matches = difflib.get_close_matches(clean, [e.value for e in EffectPrimitive], n=1, cutoff=0.5)
-        if matches:
-            return EffectPrimitive(matches[0])
-
-        if any(w in clean for w in ["DAMAGE", "ATTACK", "HIT", "STRIKE"]):
-            return EffectPrimitive.DEAL_DAMAGE_ACTIVE
-        if any(w in clean for w in ["DRAW", "CARD"]):
-            return EffectPrimitive.DRAW_CARDS
-        if any(w in clean for w in ["SEARCH", "FIND", "FETCH"]):
-            return EffectPrimitive.SEARCH_DECK_TO_HAND
-        if any(w in clean for w in ["ENERGY"]):
-            return EffectPrimitive.ATTACH_EXTRA_ENERGY_FROM_HAND
-        if any(w in clean for w in ["HEAL"]):
-            return EffectPrimitive.HEAL_DAMAGE
-        if any(w in clean for w in ["SWITCH"]):
-            return EffectPrimitive.SWITCH_ACTIVE_POKEMON
-        if any(w in clean for w in ["PREVENT", "PROTECT", "EVADE", "DODGE"]):
-            return EffectPrimitive.PASSIVE_PREVENT_DAMAGE_OR_EFFECTS
-
-        return EffectPrimitive.DEAL_DAMAGE_ACTIVE
-
-    @field_validator("sourceZone", "targetZone", mode="before")
-    @classmethod
-    def sanitize_effect_zone(cls, v: Any) -> Optional[ZoneType]:
-        if v is None:
-            return None
-        if isinstance(v, ZoneType):
-            return v
-        if isinstance(v, str):
-            clean = v.strip().upper()
-            if clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
-                return ZoneType.IN_PLAY_ALL
-            if clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
-                return ZoneType.DISCARD
-            try:
-                return ZoneType(clean)
-            except ValueError:
-                return None
-        return None
-
-    @field_validator("damageScalingType", mode="before")
-    @classmethod
-    def normalize_damage_scaling_type(cls, v: Any) -> Optional[DamageScalingType]:
-        if v is None:
-            return None
-        if isinstance(v, DamageScalingType):
-            return v
-        if isinstance(v, str):
-            clean = v.strip().upper()
-            for ds in DamageScalingType:
-                if ds.value == clean:
-                    return ds
-            clean_norm = re.sub(r"[^A-Z0-9]+", "_", clean).strip("_")
-            for ds in DamageScalingType:
-                if ds.value == clean_norm:
-                    return ds
-            if "COIN" in clean_norm:
-                return DamageScalingType.PER_COIN_FLIP_HEADS
-            if "PRIZE" in clean_norm:
-                return DamageScalingType.PER_OPPONENT_PRIZE_TAKEN
-            if "BENCH" in clean_norm:
-                return DamageScalingType.PER_BENCHED_POKEMON
-            if "DISCARD" in clean_norm or "LOST" in clean_norm:
-                return DamageScalingType.PER_CARD_IN_DISCARD_OR_LOST_ZONE
-            if "ENERGY" in clean_norm:
-                if "TARGET" in clean_norm:
-                    return DamageScalingType.PER_ENERGY_ATTACHED_TARGET
-                if "ALL" in clean_norm:
-                    return DamageScalingType.PER_ENERGY_ATTACHED_ALL
-                if "DISCARD" in clean_norm:
-                    return DamageScalingType.PER_ENERGY_DISCARDED
-                return DamageScalingType.PER_ENERGY_ATTACHED_SELF
-            if "DAMAGE" in clean_norm:
-                if "TARGET" in clean_norm:
-                    return DamageScalingType.PER_DAMAGE_COUNTER_ON_TARGET
-                if "FRIENDLY" in clean_norm:
-                    return DamageScalingType.PER_DAMAGE_COUNTER_ON_FRIENDLY
-                return DamageScalingType.PER_DAMAGE_COUNTER_ON_SELF
-            matches = difflib.get_close_matches(clean_norm, [e.value for e in DamageScalingType], n=1, cutoff=0.5)
-            if matches:
-                return DamageScalingType(matches[0])
-        return None
-
-    @field_validator("specialCondition", mode="before")
-    @classmethod
-    def normalize_special_condition(cls, v: Any) -> Optional[SpecialConditionType]:
-        if v is None:
-            return None
-        if isinstance(v, SpecialConditionType):
-            return v
-        if isinstance(v, str):
-            clean = v.strip().upper()
-            if "POISON" in clean:
-                return SpecialConditionType.POISONED
-            if "BURN" in clean:
-                return SpecialConditionType.BURNED
-            if "CONFUS" in clean:
-                return SpecialConditionType.CONFUSED
-            if "PARALY" in clean:
-                return SpecialConditionType.PARALYZED
-            if "SLEEP" in clean or "ASLEEP" in clean:
-                return SpecialConditionType.ASLEEP
-            try:
-                return SpecialConditionType(clean)
-            except ValueError:
-                return None
-        return None
-
-    @field_validator("upTo", mode="before")
-    @classmethod
-    def normalize_up_to(cls, v: Any) -> bool:
-        if v is None:
-            return False
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        s = str(v).strip().lower()
-        if s in ("true", "1", "yes", "oui"):
-            return True
+def _coerce_bool(val: Any, default: bool = False) -> bool:
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return bool(val)
+    s = str(val).strip().lower()
+    if s in {"true", "1", "yes", "oui", "vrai"}:
+        return True
+    if s in {"false", "0", "no", "non", "faux", "none", "null", ""}:
         return False
+    return default
 
-    @field_validator("targetFilter", mode="before")
-    @classmethod
-    def normalize_effect_target_filter(cls, v: Any) -> Optional[Any]:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            s = v.strip()
-            if not s or s.lower() in ("none", "null", "n/a"):
-                return None
-            return {"specificCardName": s}
-        return v
 
-    @field_validator("count", mode="before")
-    @classmethod
-    def clamp_effect_count(cls, v: Any) -> int:
-        if v is None:
-            return 1
-        if isinstance(v, (int, float)):
-            return max(0, int(round(v)))
-        s = str(v).strip()
-        m = re.search(r"\d+", s)
-        if m:
-            return max(0, int(m.group()))
-        return 1
-
-    @field_validator("baseDamage", "damageScalingPerOpponentPrizeTaken", "damageScalingValue", mode="before")
-    @classmethod
-    def clamp_damage_vals(cls, v: Any) -> Optional[int]:
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return max(0, int(round(v)))
-        s = str(v).strip().lower()
-        if s in ("", "none", "null", "n/a", "na", "false", "undefined"):
-            return None
-        m = re.search(r"\d+", s)
-        if m:
-            return max(0, int(m.group()))
+def _coerce_optional_int(val: Any) -> Optional[int]:
+    if val is None or isinstance(val, bool):
         return None
-
-
-class PlayableAction(BaseModel):
-    """Action jouable complète (effet de carte Dresseur, Talent ou Attaque de Pokémon)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    actionId: str = Field(
-        ...,
-        description="Identifiant technique snake_case de l'action (ex: 'play_rare_candy', 'ability_quick_search', 'attack_burning_darkness').",
-    )
-    label: str = Field(
-        ...,
-        description="Nom officiel de l'action, du talent ou de l'attaque.",
-    )
-    sourceType: ActionSourceType = Field(
-        ...,
-        description="Type de source de l'action (TRAINER_PLAY, ABILITY_ACTIVATED, ABILITY_ON_EVOLVE, ABILITY_PASSIVE, ATTACK).",
-    )
-    timing: ActionTiming = Field(
-        ...,
-        description="Fréquence ou fenêtre d'activation autorisée (ONCE_PER_CARD, ONCE_PER_TURN_ABILITY, ONCE_PER_TURN_SUPPORTER, ONCE_PER_GAME_VSTAR, ON_EVOLVE_TRIGGER, END_OF_TURN_ATTACK).",
-    )
-    canUseTurn1GoingFirst: bool = Field(
-        ...,
-        description="True si utilisable au Tour 1 par le premier joueur (strictement False pour tout Supporter, toute Attaque et toute Évolution/Super Bonbon).",
-    )
-    canUseTurn1GoingSecond: bool = Field(
-        ...,
-        description="True si utilisable au Tour 1 par le second joueur (strictement False pour toute Évolution/Super Bonbon, True pour Supporter et Attaque).",
-    )
-    energyCost: List[str] = Field(
-        default_factory=list,
-        description="Liste exacte des énergies requises pour une attaque (ex: ['Électrique', 'Combat'], ['Feu', 'Feu'], ou [] sinon).",
-    )
-    preconditions: List[ActionPrecondition] = Field(
-        default_factory=list,
-        description="Liste des préconditions nécessaires pour déclarer l'action.",
-    )
-    costs: List[ActionCost] = Field(
-        default_factory=list,
-        description="Liste des coûts explicites de l'action (défausse de la main, etc.).",
-    )
-    effects: List[AtomicEffect] = Field(
-        default_factory=list,
-        description="Liste ordonnée des primitives d'effets résolues par l'action.",
-    )
-
-    @field_validator("sourceType", mode="before")
-    @classmethod
-    def normalize_source_type(cls, v: Any) -> ActionSourceType:
-        if isinstance(v, ActionSourceType):
-            return v
-        if not isinstance(v, str):
-            return ActionSourceType.ATTACK
-        raw = v.strip().upper()
-        for s in ActionSourceType:
-            if s.value == raw:
-                return s
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for s in ActionSourceType:
-            if s.value == clean:
-                return s
-        if "ATTACK" in clean:
-            return ActionSourceType.ATTACK
-        if "ABILITY" in clean or "TALENT" in clean:
-            return ActionSourceType.ABILITY_ACTIVATED
-        if "TRAINER" in clean or "ITEM" in clean or "SUPPORTER" in clean:
-            return ActionSourceType.TRAINER_PLAY
-        if "STADIUM" in clean:
-            return ActionSourceType.STADIUM_EFFECT
-        if "TOOL" in clean:
-            return ActionSourceType.TOOL_EFFECT
-        return ActionSourceType.ATTACK
-
-    @field_validator("timing", mode="before")
-    @classmethod
-    def normalize_timing(cls, v: Any) -> ActionTiming:
-        if isinstance(v, ActionTiming):
-            return v
-        if not isinstance(v, str):
-            return ActionTiming.END_OF_TURN_ATTACK
-        raw = v.strip().upper()
-        for t in ActionTiming:
-            if t.value == raw:
-                return t
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for t in ActionTiming:
-            if t.value == clean:
-                return t
-        if "ATTACK" in clean:
-            return ActionTiming.END_OF_TURN_ATTACK
-        if "SUPPORTER" in clean:
-            return ActionTiming.ONCE_PER_TURN_SUPPORTER
-        if "STADIUM" in clean:
-            return ActionTiming.ONCE_PER_TURN_STADIUM
-        if "EVOLVE" in clean:
-            return ActionTiming.ON_EVOLVE_TRIGGER
-        if "ABILITY" in clean or "TURN" in clean:
-            return ActionTiming.ONCE_PER_TURN_ABILITY
-        if "PASSIVE" in clean:
-            return ActionTiming.PASSIVE_CONTINUOUS
-        return ActionTiming.ONCE_PER_CARD
-
-    @field_validator("actionId", mode="before")
-    @classmethod
-    def normalize_action_id(cls, v: Any) -> str:
-        if v is None:
-            return "action_1"
-        s = str(v).strip()
-        return s if s else "action_1"
-
-    @field_validator("label", mode="before")
-    @classmethod
-    def normalize_action_label(cls, v: Any) -> str:
-        if v is None:
-            return "Action"
-        s = str(v).strip()
-        return s if s else "Action"
-
-    @field_validator("canUseTurn1GoingFirst", "canUseTurn1GoingSecond", mode="before")
-    @classmethod
-    def normalize_turn1_bool(cls, v: Any) -> bool:
-        if v is None or v == "":
-            return False
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        s = str(v).strip().lower()
-        return s in ("true", "1", "yes", "oui")
-
-    @field_validator("energyCost", mode="before")
-    @classmethod
-    def ensure_energy_cost_list(cls, v: Any) -> List[str]:
-        if v is None:
-            return []
-        if isinstance(v, str):
-            s = v.strip()
-            return [s] if s else []
-        if isinstance(v, list):
-            return [str(x) for x in v if x is not None and str(x).strip()]
-        return []
-
-    @field_validator("preconditions", "costs", mode="before")
-    @classmethod
-    def ensure_action_component_list(cls, v: Any) -> List[Any]:
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        if isinstance(v, dict):
-            return [v]
-        return []
-
-    @field_validator("effects", mode="before")
-    @classmethod
-    def ensure_effects_list(cls, v: Any) -> List[Any]:
-        if v is None:
-            return []
-        if isinstance(v, dict):
-            return [v]
-        if isinstance(v, list):
-            return v
-        return []
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_playable_action_dict(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        # 1. Remplissage ou déduction de `label`
-        if not data.get("label"):
-            data["label"] = data.get("name") or data.get("actionId") or "Action"
-
-        # 2. Déduction de `sourceType`
-        if not data.get("sourceType"):
-            act_id = str(data.get("actionId", "")).lower()
-            if "attack" in act_id:
-                data["sourceType"] = ActionSourceType.ATTACK
-            elif "ability" in act_id or "talent" in act_id:
-                data["sourceType"] = ActionSourceType.ABILITY_ACTIVATED
-            elif "stadium" in act_id:
-                data["sourceType"] = ActionSourceType.STADIUM_EFFECT
-            elif "tool" in act_id:
-                data["sourceType"] = ActionSourceType.TOOL_EFFECT
-            else:
-                data["sourceType"] = ActionSourceType.TRAINER_PLAY
-
-        # 3. Déduction de `timing`
-        if not data.get("timing"):
-            src = str(data.get("sourceType", "")).upper()
-            if "ATTACK" in src:
-                data["timing"] = ActionTiming.END_OF_TURN_ATTACK
-            elif "ABILITY" in src:
-                data["timing"] = ActionTiming.ONCE_PER_TURN_ABILITY
-            elif "SUPPORTER" in src:
-                data["timing"] = ActionTiming.ONCE_PER_TURN_SUPPORTER
-            else:
-                data["timing"] = ActionTiming.ONCE_PER_CARD
-
-        # 4. Déduction de `canUseTurn1GoingFirst` et `canUseTurn1GoingSecond`
-        src = str(data.get("sourceType", "")).upper()
-        act_id = str(data.get("actionId", "")).lower()
-        is_attack = "ATTACK" in src or "attack" in act_id
-        is_supporter = "SUPPORTER" in src or "supporter" in act_id
-        is_rare_candy = "candy" in act_id or "bonbon" in act_id
-
-        if "canUseTurn1GoingFirst" not in data or data["canUseTurn1GoingFirst"] is None:
-            if is_attack or is_supporter or is_rare_candy or "evolve" in act_id:
-                data["canUseTurn1GoingFirst"] = False
-            else:
-                data["canUseTurn1GoingFirst"] = True
-
-        if "canUseTurn1GoingSecond" not in data or data["canUseTurn1GoingSecond"] is None:
-            if is_rare_candy or "evolve" in act_id:
-                data["canUseTurn1GoingSecond"] = False
-            else:
-                data["canUseTurn1GoingSecond"] = True
-
-        # 5. Migration de `primitives` -> `effects` si le LLM a mis `primitives: [...]`
-        if "primitives" in data and ("effects" not in data or not data["effects"]):
-            raw_prims = data.pop("primitives")
-            effects = []
-            if isinstance(raw_prims, list):
-                for p in raw_prims:
-                    if isinstance(p, str):
-                        effects.append({"primitive": p, "count": 1})
-                    else:
-                        effects.append(p)
-            data["effects"] = effects
-
-        # 6. Normalisation de `preconditions` si ce sont des chaînes au lieu d'objets
-        raw_preconds = data.get("preconditions")
-        if isinstance(raw_preconds, list):
-            clean_preconds = []
-            for pc in raw_preconds:
-                if isinstance(pc, str):
-                    clean_preconds.append({
-                        "type": pc,
-                        "zone": "IN_PLAY_ALL" if "PLAY" in pc.upper() else ("HAND" if "HAND" in pc.upper() else "DECK"),
-                        "minCount": 1,
-                        "targetFilter": None,
-                    })
-                else:
-                    clean_preconds.append(pc)
-            data["preconditions"] = clean_preconds
-
-        # 7. Si le LLM a placé un coût en énergie dans `costs` au lieu de `energyCost`
-        raw_costs = data.get("costs")
-        if isinstance(raw_costs, list):
-            valid_costs = []
-            for c in raw_costs:
-                if isinstance(c, dict):
-                    if ("energyType" in c or "energy" in c) and "type" not in c:
-                        e_val = c.get("energyType") or c.get("energy")
-                        if e_val and isinstance(e_val, str):
-                            if "energyCost" not in data or not isinstance(data["energyCost"], list):
-                                data["energyCost"] = []
-                            count = c.get("count", 1)
-                            try:
-                                cnt = int(count)
-                            except Exception:
-                                cnt = 1
-                            for _ in range(max(1, cnt)):
-                                data["energyCost"].append(e_val)
-                        continue
-                valid_costs.append(c)
-            data["costs"] = valid_costs
-
-        return data
-
-
-class TurnPhaseWeights(BaseModel):
-    """Pondérations de l'impact stratégique de la carte selon le tour de jeu."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    turn1: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=2.0,
-        description="Coefficient d'utilité au Tour 1 (0.0 à 2.0).",
-    )
-    turn2: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=2.0,
-        description="Coefficient d'utilité au Tour 2 (0.0 à 2.0).",
-    )
-    turn3: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=2.0,
-        description="Coefficient d'utilité au Tour 3 (0.0 à 2.0).",
-    )
-    turn4Plus: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=2.0,
-        description="Coefficient d'utilité aux Tours 4 et suivants (0.0 à 2.0).",
-    )
-
-    @field_validator("turn1", "turn2", "turn3", "turn4Plus", mode="before")
-    @classmethod
-    def clamp_phase_weight(cls, v: Any) -> float:
-        if v is None:
-            return 1.0
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    s = str(val).strip()
+    if not s or s.lower() in {"none", "null", "n/a", "na", "-"}:
+        return None
+    m = re.search(r"-?\d+", s)
+    if m:
         try:
-            return max(0.0, min(2.0, float(v)))
-        except (ValueError, TypeError):
-            return 1.0
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_turn_phase_weights(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0}
-
-        cleaned = {}
-        for k, v in data.items():
-            try:
-                val = float(v)
-            except Exception:
-                continue
-            k_norm = str(k).lower().replace("_", "").replace("-", "")
-            if "turn1" in k_norm or "t1" in k_norm or "prep" in k_norm or "first" in k_norm:
-                cleaned["turn1"] = val
-            elif "turn2" in k_norm or "t2" in k_norm or "main1" in k_norm or "second" in k_norm:
-                cleaned["turn2"] = val
-            elif "turn3" in k_norm or "t3" in k_norm or "main2" in k_norm or "mid" in k_norm:
-                cleaned["turn3"] = val
-            elif "turn4" in k_norm or "t4" in k_norm or "end" in k_norm or "late" in k_norm or "plus" in k_norm:
-                cleaned["turn4Plus"] = val
-
-        def _safe_float(val: Any, default: float = 1.0) -> float:
-            if val is None:
-                return default
-            try:
-                return max(0.0, min(2.0, float(val)))
-            except (ValueError, TypeError):
-                return default
-
-        t1 = cleaned.get("turn1") if cleaned.get("turn1") is not None else data.get("turn1")
-        t2 = cleaned.get("turn2") if cleaned.get("turn2") is not None else data.get("turn2")
-        t3 = cleaned.get("turn3") if cleaned.get("turn3") is not None else data.get("turn3")
-        t4 = cleaned.get("turn4Plus") if cleaned.get("turn4Plus") is not None else data.get("turn4Plus", data.get("turn4"))
-
-        return {
-            "turn1": _safe_float(t1, 1.0),
-            "turn2": _safe_float(t2, 1.0),
-            "turn3": _safe_float(t3, 1.0),
-            "turn4Plus": _safe_float(t4, 1.0),
-        }
+            return int(m.group(0))
+        except ValueError:
+            return None
+    return None
 
 
-class SynergyRequirement(BaseModel):
-    """Condition de synergie de decklist pour l'évaluation statique et dynamique de la carte."""
+def _coerce_card_category(val: Any) -> CardCategory:
+    key = _clean_enum_key(val)
+    if "POK" in key:
+        return CardCategory.POKEMON
+    if "ENERG" in key:
+        return CardCategory.ENERGY
+    if key in {"TRAINER", "DRESSEUR", "SUPPORTER", "ITEM", "OBJET", "STADIUM", "STADE", "TOOL", "OUTIL"}:
+        return CardCategory.TRAINER
+    try:
+        return CardCategory(key)
+    except ValueError:
+        return CardCategory.POKEMON
+
+
+def _coerce_card_subcategory(val: Any) -> CardSubCategory:
+    key = _clean_enum_key(val)
+    mapping = {
+        "BASIC": CardSubCategory.BASIC,
+        "BASE": CardSubCategory.BASIC,
+        "STAGE_1": CardSubCategory.STAGE_1,
+        "STAGE1": CardSubCategory.STAGE_1,
+        "NIVEAU_1": CardSubCategory.STAGE_1,
+        "STAGE_2": CardSubCategory.STAGE_2,
+        "STAGE2": CardSubCategory.STAGE_2,
+        "NIVEAU_2": CardSubCategory.STAGE_2,
+        "SUPPORTER": CardSubCategory.SUPPORTER,
+        "ITEM": CardSubCategory.ITEM,
+        "OBJET": CardSubCategory.ITEM,
+        "STADIUM": CardSubCategory.STADIUM,
+        "STADE": CardSubCategory.STADIUM,
+        "TOOL": CardSubCategory.TOOL,
+        "POKEMON_TOOL": CardSubCategory.TOOL,
+        "OUTIL": CardSubCategory.TOOL,
+        "BASIC_ENERGY": CardSubCategory.BASIC_ENERGY,
+        "ENERGIE_DE_BASE": CardSubCategory.BASIC_ENERGY,
+        "SPECIAL_ENERGY": CardSubCategory.SPECIAL_ENERGY,
+        "ENERGIE_SPECIALE": CardSubCategory.SPECIAL_ENERGY,
+    }
+    if key in mapping:
+        return mapping[key]
+    try:
+        return CardSubCategory(key)
+    except ValueError:
+        return CardSubCategory.BASIC
+
+
+def _coerce_action_type(val: Any) -> ActionType:
+    key = _clean_enum_key(val)
+    mapping = {
+        "PLAY_FROM_HAND": ActionType.PLAY_FROM_HAND,
+        "TRAINER_PLAY": ActionType.PLAY_FROM_HAND,
+        "PLAY_CARD": ActionType.PLAY_FROM_HAND,
+        "PLAY_POKEMON": ActionType.PLAY_FROM_HAND,
+        "PLAY_TRAINER": ActionType.PLAY_FROM_HAND,
+        "STADIUM_EFFECT": ActionType.PLAY_FROM_HAND,
+        "TOOL_STATIC_MODIFIER": ActionType.PLAY_FROM_HAND,
+        "EVOLVE": ActionType.EVOLVE,
+        "EVOLVE_POKEMON": ActionType.EVOLVE,
+        "USE_ABILITY": ActionType.USE_ABILITY,
+        "ABILITY": ActionType.USE_ABILITY,
+        "ABILITY_ACTIVATED": ActionType.USE_ABILITY,
+        "ABILITY_ON_EVOLVE": ActionType.USE_ABILITY,
+        "ABILITY_ON_PLAY_FROM_HAND": ActionType.USE_ABILITY,
+        "ABILITY_PASSIVE": ActionType.USE_ABILITY,
+        "ABILITY_REACTIVE": ActionType.USE_ABILITY,
+        "ATTACH_ENERGY": ActionType.ATTACH_ENERGY,
+        "SPECIAL_ENERGY_EFFECT": ActionType.ATTACH_ENERGY,
+        "ENERGY_ATTACHMENT": ActionType.ATTACH_ENERGY,
+        "RETREAT": ActionType.RETREAT,
+        "RETREAT_ACTION": ActionType.RETREAT,
+        "ATTACK": ActionType.ATTACK,
+    }
+    if key in mapping:
+        return mapping[key]
+    if "ABILITY" in key or "TALENT" in key:
+        return ActionType.USE_ABILITY
+    if "ATTACK" in key or "ATTAQUE" in key:
+        return ActionType.ATTACK
+    if "EVOLV" in key:
+        return ActionType.EVOLVE
+    if "RETREAT" in key or "RETRAITE" in key:
+        return ActionType.RETREAT
+    if "ENERG" in key or "ATTACH" in key:
+        return ActionType.ATTACH_ENERGY
+    return ActionType.PLAY_FROM_HAND
+
+
+def _coerce_timing_phase(val: Any) -> TimingPhase:
+    key = _clean_enum_key(val)
+    mapping = {
+        "PREPARATION": TimingPhase.PREPARATION,
+        "SETUP": TimingPhase.PREPARATION,
+        "MAIN_PHASE_1": TimingPhase.MAIN_PHASE_1,
+        "MAIN_PHASE": TimingPhase.MAIN_PHASE_1,
+        "ONCE_PER_TURN_SUPPORTER": TimingPhase.MAIN_PHASE_1,
+        "ONCE_PER_TURN_ABILITY": TimingPhase.MAIN_PHASE_1,
+        "ONCE_PER_TURN_STADIUM": TimingPhase.MAIN_PHASE_1,
+        "ONCE_PER_CARD": TimingPhase.MAIN_PHASE_1,
+        "ON_EVOLVE_TRIGGER": TimingPhase.MAIN_PHASE_1,
+        "ON_PLAY_FROM_HAND_TRIGGER": TimingPhase.MAIN_PHASE_1,
+        "ON_ATTACH_TRIGGER": TimingPhase.MAIN_PHASE_1,
+        "PASSIVE_CONTINUOUS": TimingPhase.MAIN_PHASE_1,
+        "MAIN_PHASE_2": TimingPhase.MAIN_PHASE_2,
+        "BETWEEN_TURNS_CHECKUP": TimingPhase.MAIN_PHASE_2,
+        "ON_DAMAGED_OR_KO_TRIGGER": TimingPhase.ATTACK_PHASE,
+        "ATTACK_PHASE": TimingPhase.ATTACK_PHASE,
+        "END_OF_TURN_ATTACK": TimingPhase.ATTACK_PHASE,
+        "ATTACK": TimingPhase.ATTACK_PHASE,
+    }
+    if key in mapping:
+        return mapping[key]
+    if "ATTACK" in key:
+        return TimingPhase.ATTACK_PHASE
+    if "MAIN_PHASE_2" in key or "PHASE_2" in key:
+        return TimingPhase.MAIN_PHASE_2
+    if "PREP" in key:
+        return TimingPhase.PREPARATION
+    return TimingPhase.MAIN_PHASE_1
+
+
+def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
+    key = _clean_enum_key(val)
+    try:
+        return EffectPrimitive(key)
+    except ValueError:
+        pass
+
+    synonyms: Dict[str, EffectPrimitive] = {
+        # SEARCH_DECK
+        "SEARCH_DECK_TO_HAND": EffectPrimitive.SEARCH_DECK,
+        "SEARCH_DECK_TO_BENCH": EffectPrimitive.SEARCH_DECK,
+        "SEARCH_DECK_AND_PUT_ON_BENCH": EffectPrimitive.SEARCH_DECK,
+        "SEARCH_CARD": EffectPrimitive.SEARCH_DECK,
+        "SEARCH": EffectPrimitive.SEARCH_DECK,
+        "TUTOR": EffectPrimitive.SEARCH_DECK,
+        "LOOK_TOP_DECK": EffectPrimitive.SEARCH_DECK,
+        # DRAW_CARDS
+        "DRAW": EffectPrimitive.DRAW_CARDS,
+        "DRAW_CARD": EffectPrimitive.DRAW_CARDS,
+        "DRAW_UNTIL_HAND_SIZE": EffectPrimitive.DRAW_CARDS,
+        "DRAW_UNTIL": EffectPrimitive.DRAW_CARDS,
+        # DAMAGE_ACTIVE
+        "DEAL_DAMAGE_ACTIVE": EffectPrimitive.DAMAGE_ACTIVE,
+        "DEAL_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "ATTACK_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "COIN_FLIP_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "COIN_FLIP": EffectPrimitive.DAMAGE_ACTIVE,
+        "FLIP_COIN": EffectPrimitive.DAMAGE_ACTIVE,
+        "BONUS_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "EXTRA_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
+        "PASSIVE_DAMAGE_BOOST": EffectPrimitive.DAMAGE_ACTIVE,
+        # DAMAGE_BENCH
+        "DEAL_DAMAGE_BENCH": EffectPrimitive.DAMAGE_BENCH,
+        "PLACE_DAMAGE_COUNTERS": EffectPrimitive.DAMAGE_BENCH,
+        "PUT_DAMAGE_COUNTERS": EffectPrimitive.DAMAGE_BENCH,
+        "SNIPE_BENCH": EffectPrimitive.DAMAGE_BENCH,
+        "SPREAD_DAMAGE": EffectPrimitive.DAMAGE_BENCH,
+        # ATTACH_ENERGY
+        "ATTACH_ENERGY_FROM_HAND": EffectPrimitive.ATTACH_ENERGY,
+        "ATTACH_ENERGY_FROM_DISCARD": EffectPrimitive.ATTACH_ENERGY,
+        "ATTACH_ENERGY_FROM_DECK": EffectPrimitive.ATTACH_ENERGY,
+        "SEARCH_AND_ATTACH_ENERGY": EffectPrimitive.ATTACH_ENERGY,
+        "ACCELERATE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
+        "MOVE_ENERGY_BETWEEN_POKEMON": EffectPrimitive.ATTACH_ENERGY,
+        "MOVE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
+        "PROVIDE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
+        # DISCARD_CARDS
+        "DISCARD": EffectPrimitive.DISCARD_CARDS,
+        "DISCARD_FROM_HAND": EffectPrimitive.DISCARD_CARDS,
+        "DISCARD_HAND": EffectPrimitive.DISCARD_CARDS,
+        "DISCARD_ENERGY": EffectPrimitive.DISCARD_CARDS,
+        "DISCARD_STADIUM": EffectPrimitive.DISCARD_CARDS,
+        "DISCARD_TOOL": EffectPrimitive.DISCARD_CARDS,
+        # HEAL
+        "HEAL_DAMAGE": EffectPrimitive.HEAL,
+        "HEAL_POKEMON": EffectPrimitive.HEAL,
+        "REMOVE_DAMAGE_COUNTERS": EffectPrimitive.HEAL,
+        "PASSIVE_DAMAGE_REDUCTION": EffectPrimitive.HEAL,
+        "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS": EffectPrimitive.HEAL,
+        # SWITCH_ACTIVE
+        "SWITCH_ACTIVE_POKEMON": EffectPrimitive.SWITCH_ACTIVE,
+        "GUST_OPPONENT_BENCH_TO_ACTIVE": EffectPrimitive.SWITCH_ACTIVE,
+        "SWITCH_OPPONENT_ACTIVE": EffectPrimitive.SWITCH_ACTIVE,
+        "SWITCH": EffectPrimitive.SWITCH_ACTIVE,
+        "GUST": EffectPrimitive.SWITCH_ACTIVE,
+        "RETREAT": EffectPrimitive.SWITCH_ACTIVE,
+        "PASSIVE_RETREAT_COST_MOD": EffectPrimitive.SWITCH_ACTIVE,
+        # APPLY_SPECIAL_CONDITION
+        "SPECIAL_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "STATUS_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "POISON": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "BURN": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "SLEEP": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "PARALYZE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "CONFUSE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        "PASSIVE_ABILITY_OR_ITEM_LOCK": EffectPrimitive.APPLY_SPECIAL_CONDITION,
+        # EVOLVE_POKEMON
+        "EVOLVE_SKIP_STAGE_1": EffectPrimitive.EVOLVE_POKEMON,
+        "EVOLVE_FROM_HAND": EffectPrimitive.EVOLVE_POKEMON,
+        "EVOLVE_FROM_DECK": EffectPrimitive.EVOLVE_POKEMON,
+        "EVOLVE": EffectPrimitive.EVOLVE_POKEMON,
+        "USE_STAGE_2_CARD": EffectPrimitive.EVOLVE_POKEMON,
+        # SHUFFLE_HAND_DRAW
+        "SHUFFLE_HAND_AND_DRAW": EffectPrimitive.SHUFFLE_HAND_DRAW,
+        "SHUFFLE_AND_DRAW": EffectPrimitive.SHUFFLE_HAND_DRAW,
+        "RESET_HAND": EffectPrimitive.SHUFFLE_HAND_DRAW,
+        "IONO_EFFECT": EffectPrimitive.SHUFFLE_HAND_DRAW,
+        # RECOVER_FROM_DISCARD
+        "RECOVER_FROM_DISCARD_TO_HAND": EffectPrimitive.RECOVER_FROM_DISCARD,
+        "RECOVER_FROM_DISCARD_TO_DECK": EffectPrimitive.RECOVER_FROM_DISCARD,
+        "RECOVER_FROM_DISCARD_TO_BENCH": EffectPrimitive.RECOVER_FROM_DISCARD,
+        "RECOVER_CARDS": EffectPrimitive.RECOVER_FROM_DISCARD,
+        "RECOVER": EffectPrimitive.RECOVER_FROM_DISCARD,
+    }
+    if key in synonyms:
+        return synonyms[key]
+
+    if "SEARCH" in key and "ENERG" in key and "ATTACH" in key:
+        return EffectPrimitive.ATTACH_ENERGY
+    if "SEARCH" in key or "FIND" in key or "TUTOR" in key:
+        return EffectPrimitive.SEARCH_DECK
+    if "SHUFFLE" in key and "DRAW" in key:
+        return EffectPrimitive.SHUFFLE_HAND_DRAW
+    if "DRAW" in key or "PIOCH" in key:
+        return EffectPrimitive.DRAW_CARDS
+    if "BENCH" in key and ("DAMAGE" in key or "COUNTER" in key):
+        return EffectPrimitive.DAMAGE_BENCH
+    if "DAMAGE" in key or "DEGAT" in key or "ATTACK" in key:
+        return EffectPrimitive.DAMAGE_ACTIVE
+    if "ENERG" in key or "ATTACH" in key:
+        return EffectPrimitive.ATTACH_ENERGY
+    if "DISCARD" in key or "DEFAUSS" in key:
+        return EffectPrimitive.DISCARD_CARDS
+    if "HEAL" in key or "SOIN" in key or "SOIGN" in key:
+        return EffectPrimitive.HEAL
+    if "SWITCH" in key or "GUST" in key or "SWAP" in key:
+        return EffectPrimitive.SWITCH_ACTIVE
+    if "EVOLV" in key or "STAGE" in key:
+        return EffectPrimitive.EVOLVE_POKEMON
+    if "RECOVER" in key or "RETRIEVE" in key:
+        return EffectPrimitive.RECOVER_FROM_DISCARD
+    if "CONDITION" in key or "STATUS" in key or "LOCK" in key:
+        return EffectPrimitive.APPLY_SPECIAL_CONDITION
+
+    return EffectPrimitive.DRAW_CARDS
+
+
+def _coerce_ai_role(val: Any) -> AIRole:
+    key = _clean_enum_key(val)
+    try:
+        return AIRole(key)
+    except ValueError:
+        pass
+
+    synonyms: Dict[str, AIRole] = {
+        "MAIN_ATTACKER": AIRole.MAIN_ATTACKER,
+        "ATTACKER": AIRole.MAIN_ATTACKER,
+        "PRIMARY_ATTACKER": AIRole.MAIN_ATTACKER,
+        "SWEEPER": AIRole.MAIN_ATTACKER,
+        "SECONDARY_ATTACKER": AIRole.SECONDARY_ATTACKER,
+        "FINISHER": AIRole.SECONDARY_ATTACKER,
+        "BENCH_SNIPER": AIRole.SECONDARY_ATTACKER,
+        "SUB_ATTACKER": AIRole.SECONDARY_ATTACKER,
+        "DRAW_ENGINE": AIRole.DRAW_ENGINE,
+        "DRAW_SUPPORT": AIRole.DRAW_ENGINE,
+        "DRAW": AIRole.DRAW_ENGINE,
+        "ENERGY_ACCELERATOR": AIRole.ENERGY_ACCELERATOR,
+        "RESOURCE_ENERGY": AIRole.ENERGY_ACCELERATOR,
+        "ENERGY_PROVIDER": AIRole.ENERGY_ACCELERATOR,
+        "RAMP": AIRole.ENERGY_ACCELERATOR,
+        "GUEST_TECH": AIRole.GUEST_TECH,
+        "TECH": AIRole.GUEST_TECH,
+        "UTILITY": AIRole.GUEST_TECH,
+        "SUPPORT_UTILITY": AIRole.GUEST_TECH,
+        "PIVOT_MOBILITY": AIRole.GUEST_TECH,
+        "RECOVERY_UTILITY": AIRole.GUEST_TECH,
+        "STADIUM_CONTROL": AIRole.GUEST_TECH,
+        "DISRUPTION": AIRole.DISRUPTION,
+        "GUST_DISRUPTION": AIRole.DISRUPTION,
+        "HAND_DISRUPTION": AIRole.DISRUPTION,
+        "CONTROL_STALL": AIRole.DISRUPTION,
+        "CONTROL": AIRole.DISRUPTION,
+        "STALL": AIRole.DISRUPTION,
+        "STALL_WALL": AIRole.DISRUPTION,
+        "CONSISTENCY_BOOSTER": AIRole.CONSISTENCY_BOOSTER,
+        "BENCH_DEPLOYER": AIRole.CONSISTENCY_BOOSTER,
+        "CONSISTENCY_TUTOR": AIRole.CONSISTENCY_BOOSTER,
+        "EVOLUTION_ACCELERATOR": AIRole.CONSISTENCY_BOOSTER,
+        "TECH_UTILITY": AIRole.GUEST_TECH,
+        "CONSISTENCY_TUTOR": AIRole.CONSISTENCY_BOOSTER,
+        "EVOLUTION_ACCELERATOR": AIRole.CONSISTENCY_BOOSTER,
+        "SEARCH_ENGINE": AIRole.CONSISTENCY_BOOSTER,
+        "TUTOR": AIRole.CONSISTENCY_BOOSTER,
+        "SETUP": AIRole.CONSISTENCY_BOOSTER,
+    }
+    if key in synonyms:
+        return synonyms[key]
+
+    if "MAIN" in key or "ATTACK" in key:
+        return AIRole.MAIN_ATTACKER
+    if "SECOND" in key or "SNIP" in key or "FINISH" in key:
+        return AIRole.SECONDARY_ATTACKER
+    if "DRAW" in key:
+        return AIRole.DRAW_ENGINE
+    if "ENERG" in key:
+        return AIRole.ENERGY_ACCELERATOR
+    if "DISRUPT" in key or "GUST" in key or "STALL" in key or "CONTROL" in key:
+        return AIRole.DISRUPTION
+    if "CONSIST" in key or "TUTOR" in key or "EVOLV" in key or "SEARCH" in key:
+        return AIRole.CONSISTENCY_BOOSTER
+    return AIRole.GUEST_TECH
+
+
+# ============================================================================
+# B. STRUCTURE DE EngineCardModel (MODÈLE FINAL)
+# ============================================================================
+
+
+class TypeModifier(BaseModel):
+    """Modificateur de faiblesse ou de résistance d'un Pokémon."""
 
     model_config = ConfigDict(extra="ignore")
 
-    requiredFilter: CardFilter = Field(
-        ...,
-        description="Filtre des cartes devant être présentes dans la decklist (ex: STAGE_2 pour Super Bonbon, BASIC <= 70 PV pour Poffin Pote-Pote).",
-    )
-    minCountInDeck: int = Field(
-        default=1,
-        ge=1,
-        description="Nombre minimal d'exemplaires correspondants attendus dans le deck.",
-    )
-    ifMissingSetValueToZero: bool = Field(
-        default=False,
-        description="True si l'absence totale de cartes correspondantes dans le deck annule complètement la valeur de cette carte (ex: Super Bonbon sans aucun STAGE_2).",
-    )
-    bonusWeightPerCopy: float = Field(
-        default=0.0,
-        ge=0.0,
-        description="Bonus de score attribué par exemplaire compatible présent dans le deck.",
-    )
+    type: str = Field(description="Type d'énergie (ex: 'Combat', 'Feu', 'Métal')")
+    value: str = Field(default="×2", description="Valeur du modificateur (ex: '×2', '-30')")
 
     @model_validator(mode="before")
     @classmethod
-    def sanitize_synergy_input(cls, data: Any) -> Any:
+    def _coerce_from_scalar_or_dict(cls, data: Any) -> Any:
         if isinstance(data, str):
-            subcat = None
-            cat = "POKEMON"
-            item_upper = data.strip().upper()
-            if "STAGE_2" in item_upper or "STAGE2" in item_upper:
-                subcat = "STAGE_2"
-            elif "STAGE_1" in item_upper or "STAGE1" in item_upper:
-                subcat = "STAGE_1"
-            elif "BASIC" in item_upper or "BASE" in item_upper:
-                subcat = "BASIC"
-            elif "ENERGY" in item_upper:
-                cat = "ENERGY"
-            elif "TRAINER" in item_upper or "ITEM" in item_upper:
-                cat = "TRAINER"
-                subcat = "ITEM"
-            return {
-                "requiredFilter": {
-                    "category": cat,
-                    "subCategory": subcat,
-                    "maxHp": None,
-                    "energyType": None,
-                    "specificCardName": None,
-                },
-                "minCountInDeck": 1,
-                "ifMissingSetValueToZero": False,
-                "bonusWeightPerCopy": 10.0,
-            }
+            return {"type": data.strip(), "value": "×2"}
         if isinstance(data, dict):
-            if "requiredFilter" not in data and ("category" in data or "subCategory" in data):
-                return {
-                    "requiredFilter": {
-                        "category": data.get("category", "POKEMON"),
-                        "subCategory": data.get("subCategory"),
-                        "maxHp": data.get("maxHp"),
-                        "energyType": data.get("energyType"),
-                        "specificCardName": data.get("specificCardName"),
-                    },
-                    "minCountInDeck": data.get("minCountInDeck", 1),
-                    "ifMissingSetValueToZero": data.get("ifMissingSetValueToZero", False),
-                    "bonusWeightPerCopy": data.get("bonusWeightPerCopy", 10.0),
-                }
+            t = str(data.get("type") or "Incolore").strip()
+            v = data.get("value")
+            v_str = str(v).strip() if v is not None else "×2"
+            return {"type": t, "value": v_str}
         return data
-
-    @field_validator("minCountInDeck", mode="before")
-    @classmethod
-    def clamp_min_count(cls, v: Any) -> int:
-        if v is None:
-            return 1
-        if isinstance(v, (int, float)):
-            return max(1, int(round(v)))
-        s = str(v).strip()
-        m = re.search(r"\d+", s)
-        if m:
-            return max(1, int(m.group()))
-        return 1
-
-    @field_validator("ifMissingSetValueToZero", mode="before")
-    @classmethod
-    def normalize_missing_zero(cls, v: Any) -> bool:
-        if v is None or v == "":
-            return False
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        s = str(v).strip().lower()
-        return s in ("true", "1", "yes", "oui")
-
-    @field_validator("bonusWeightPerCopy", mode="before")
-    @classmethod
-    def clamp_bonus_weight(cls, v: Any) -> float:
-        if v is None:
-            return 0.0
-        try:
-            return max(0.0, float(v))
-        except (ValueError, TypeError):
-            return 0.0
-
-
-class DeadCardCondition(BaseModel):
-    """Condition dynamique en cours de partie rendant la carte injouable ou inutile (carte morte)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    reason: DeadCardReason = Field(
-        ...,
-        description="Motif normalisé de carte morte (NO_VALID_TARGET_IN_DECK, NO_STAGE2_LEFT_IN_DECK_OR_HAND, NO_BASE_POKEMON_LINE_LEFT, BENCH_ALREADY_FULL, NOT_BEHIND_ON_PRIZES, DISCARD_PILE_EMPTY).",
-    )
-    zonesToCheck: List[ZoneType] = Field(
-        ...,
-        description="Zones du jeu à vérifier pour déterminer si la carte est devenue morte (ex: [DECK], [DECK, HAND], [BENCH]).",
-    )
-    targetFilter: Optional[CardFilter] = Field(
-        default=None,
-        description="Filtre des cartes cibles dont l'absence dans zonesToCheck déclenche l'état de carte morte, ou null.",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_dead_condition_input(cls, data: Any) -> Any:
-        if isinstance(data, str):
-            return {
-                "reason": data.strip().upper(),
-                "zonesToCheck": [ZoneType.DECK, ZoneType.HAND],
-                "targetFilter": None,
-            }
-        return data
-
-    @field_validator("reason", mode="before")
-    @classmethod
-    def normalize_dead_card_reason(cls, v: Any) -> DeadCardReason:
-        if isinstance(v, DeadCardReason):
-            return v
-        if not isinstance(v, str):
-            return DeadCardReason.NO_VALID_TARGET_IN_DECK
-        raw = v.strip().upper()
-        for r in DeadCardReason:
-            if r.value == raw:
-                return r
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for r in DeadCardReason:
-            if r.value == clean:
-                return r
-
-        REASON_SYNONYMS: Dict[str, DeadCardReason] = {
-            "BENCH_FULL": DeadCardReason.BENCH_ALREADY_FULL,
-            "BENCH_IS_FULL": DeadCardReason.BENCH_ALREADY_FULL,
-            "FULL_BENCH": DeadCardReason.BENCH_ALREADY_FULL,
-            "NO_TARGET": DeadCardReason.NO_VALID_TARGET_IN_DECK,
-            "NO_TARGETS": DeadCardReason.NO_VALID_TARGET_IN_DECK,
-            "NO_TARGET_IN_DECK": DeadCardReason.NO_VALID_TARGET_IN_DECK,
-            "DECK_EMPTY": DeadCardReason.NO_VALID_TARGET_IN_DECK,
-            "NO_CARDS_IN_DECK": DeadCardReason.NO_VALID_TARGET_IN_DECK,
-            "NO_STAGE2": DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND,
-            "NO_STAGE_2": DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND,
-            "NO_BASIC": DeadCardReason.NO_BASE_POKEMON_LINE_LEFT,
-            "NO_BASE": DeadCardReason.NO_BASE_POKEMON_LINE_LEFT,
-            "NOT_BEHIND": DeadCardReason.NOT_BEHIND_ON_PRIZES,
-            "AHEAD_ON_PRIZES": DeadCardReason.NOT_BEHIND_ON_PRIZES,
-            "DISCARD_EMPTY": DeadCardReason.DISCARD_PILE_EMPTY,
-            "NO_DISCARD": DeadCardReason.DISCARD_PILE_EMPTY,
-            "NO_TERA": DeadCardReason.NO_TERA_POKEMON_IN_PLAY,
-            "HAND_FULL": DeadCardReason.HAND_ALREADY_FULL_OR_AT_LIMIT,
-            "NO_DAMAGE": DeadCardReason.NO_DAMAGE_ON_OWN_POKEMON,
-            "NO_KO": DeadCardReason.NO_KO_LAST_TURN,
-            "STADIUM_IN_PLAY": DeadCardReason.STADIUM_ALREADY_IN_PLAY_SAME_NAME,
-        }
-        if clean in REASON_SYNONYMS:
-            return REASON_SYNONYMS[clean]
-
-        matches = difflib.get_close_matches(clean, [e.value for e in DeadCardReason], n=1, cutoff=0.5)
-        if matches:
-            return DeadCardReason(matches[0])
-
-        if "BENCH" in clean:
-            return DeadCardReason.BENCH_ALREADY_FULL
-        if "STAGE" in clean:
-            return DeadCardReason.NO_STAGE2_LEFT_IN_DECK_OR_HAND
-        if "BASIC" in clean or "BASE" in clean:
-            return DeadCardReason.NO_BASE_POKEMON_LINE_LEFT
-        if "PRIZE" in clean:
-            return DeadCardReason.NOT_BEHIND_ON_PRIZES
-        if "DISCARD" in clean:
-            return DeadCardReason.DISCARD_PILE_EMPTY
-        if "TERA" in clean:
-            return DeadCardReason.NO_TERA_POKEMON_IN_PLAY
-        if "HAND" in clean:
-            return DeadCardReason.HAND_ALREADY_FULL_OR_AT_LIMIT
-        if "DAMAGE" in clean:
-            return DeadCardReason.NO_DAMAGE_ON_OWN_POKEMON
-        if "KO" in clean:
-            return DeadCardReason.NO_KO_LAST_TURN
-        if "STADIUM" in clean:
-            return DeadCardReason.STADIUM_ALREADY_IN_PLAY_SAME_NAME
-
-        return DeadCardReason.NO_VALID_TARGET_IN_DECK
-
-    @field_validator("zonesToCheck", mode="before")
-    @classmethod
-    def sanitize_zones_to_check(cls, v: Any) -> List[ZoneType]:
-        if not isinstance(v, list):
-            return [ZoneType.DECK]
-        res: List[ZoneType] = []
-        for z in v:
-            if isinstance(z, ZoneType):
-                res.append(z)
-            elif isinstance(z, str):
-                z_clean = z.strip().upper()
-                if z_clean in {"BOARD", "FIELD", "PLAY", "IN_PLAY"}:
-                    res.append(ZoneType.IN_PLAY_ALL)
-                elif z_clean in {"GRAVEYARD", "TRASH", "DISCARD_PILE"}:
-                    res.append(ZoneType.DISCARD)
-                else:
-                    try:
-                        res.append(ZoneType(z_clean))
-                    except ValueError:
-                        res.append(ZoneType.DECK)
-        return res or [ZoneType.DECK]
-
-
-class StrategicEvaluator(BaseModel):
-    """Évaluateur stratégique heuristique pour le moteur de décision Pokémon TCG."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    primaryRole: StrategicRole = Field(
-        ...,
-        description="Rôle stratégique principal de la carte.",
-    )
-    intrinsicBaseScore: int = Field(
-        ...,
-        ge=0,
-        le=100,
-        description="Score de valeur intrinsèque de base entre 0 et 100.",
-    )
-    turnPhaseWeights: TurnPhaseWeights = Field(
-        ...,
-        description="Poids d'importance stratégique par phase de tour (turn1, turn2, turn3, turn4Plus).",
-    )
-    decklistSynergyRequirements: List[SynergyRequirement] = Field(
-        default_factory=list,
-        description="Liste des synergies requises dans la decklist pour valoriser la carte.",
-    )
-    inGameDeadCardConditions: List[DeadCardCondition] = Field(
-        default_factory=list,
-        description="Liste des conditions rendant la carte morte en cours de partie.",
-    )
-    discardPriorityWhenDead: int = Field(
-        ...,
-        ge=0,
-        le=100,
-        description="Priorité (0 à 100) pour défausser cette carte via un coût (ex: Hyper Ball) lorsqu'elle est morte.",
-    )
-    holdForNextTurnBonus: int = Field(
-        ...,
-        ge=0,
-        le=50,
-        description="Bonus (0 à 50) récompensant la conservation de la carte en main pour le tour suivant (T+1).",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_strategic_evaluator_dict(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        # 1. Normalisation de decklistSynergyRequirements si ce sont des strings
-        raw_synergies = data.get("decklistSynergyRequirements")
-        if isinstance(raw_synergies, list):
-            clean_synergies = []
-            for item in raw_synergies:
-                if isinstance(item, str):
-                    subcat = None
-                    cat = "POKEMON"
-                    item_upper = item.strip().upper()
-                    if "STAGE_2" in item_upper or "STAGE2" in item_upper:
-                        subcat = "STAGE_2"
-                    elif "STAGE_1" in item_upper or "STAGE1" in item_upper:
-                        subcat = "STAGE_1"
-                    elif "BASIC" in item_upper or "BASE" in item_upper:
-                        subcat = "BASIC"
-                    elif "ENERGY" in item_upper:
-                        cat = "ENERGY"
-                    elif "TRAINER" in item_upper or "ITEM" in item_upper:
-                        cat = "TRAINER"
-                        subcat = "ITEM"
-                    clean_synergies.append({
-                        "requiredFilter": {
-                            "category": cat,
-                            "subCategory": subcat,
-                            "maxHp": None,
-                            "energyType": None,
-                            "specificCardName": None,
-                        },
-                        "minCountInDeck": 1,
-                        "ifMissingSetValueToZero": False,
-                        "bonusWeightPerCopy": 10.0,
-                    })
-                else:
-                    clean_synergies.append(item)
-            data["decklistSynergyRequirements"] = clean_synergies
-
-        # 2. Normalisation de inGameDeadCardConditions si ce sont des strings
-        raw_dead = data.get("inGameDeadCardConditions")
-        if isinstance(raw_dead, list):
-            clean_dead = []
-            for item in raw_dead:
-                if isinstance(item, str):
-                    clean_dead.append({
-                        "reason": item.strip().upper(),
-                        "zonesToCheck": [ZoneType.DECK, ZoneType.HAND],
-                        "targetFilter": None,
-                    })
-                else:
-                    clean_dead.append(item)
-            data["inGameDeadCardConditions"] = clean_dead
-
-        # 3. Valeurs par défaut si scores manquants
-        if "intrinsicBaseScore" not in data or data["intrinsicBaseScore"] is None:
-            data["intrinsicBaseScore"] = 50
-        if "discardPriorityWhenDead" not in data or data["discardPriorityWhenDead"] is None:
-            data["discardPriorityWhenDead"] = 50
-        if "holdForNextTurnBonus" not in data or data["holdForNextTurnBonus"] is None:
-            data["holdForNextTurnBonus"] = 0
-
-        # 4. turnPhaseWeights si manquant
-        if "turnPhaseWeights" not in data or not isinstance(data["turnPhaseWeights"], dict):
-            data["turnPhaseWeights"] = {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0}
-
-        return data
-
-    @field_validator("decklistSynergyRequirements", mode="before")
-    @classmethod
-    def ensure_synergies_list(cls, v: Any) -> List[Any]:
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        if isinstance(v, (dict, str)):
-            return [v]
-        return []
-
-    @field_validator("inGameDeadCardConditions", mode="before")
-    @classmethod
-    def sanitize_dead_card_conditions(cls, v: Any) -> List[Any]:
-        if v is None or not isinstance(v, list):
-            return []
-        filtered: List[Any] = []
-        for item in v:
-            if not isinstance(item, dict):
-                filtered.append(item)
-                continue
-            reason = item.get("reason")
-            if reason is None:
-                continue
-            if isinstance(reason, str):
-                r_clean = reason.strip().upper()
-                if r_clean in {
-                    "NONE", "NOT_APPLICABLE", "N/A", "NA", "NULL",
-                    "NO_CONDITION", "NO_CONDITIONS", "NEANT", "AUCUNE",
-                    "NO_DEAD_CARD", "NO_DEAD_CARD_CONDITION", ""
-                }:
-                    continue
-            zones = item.get("zonesToCheck")
-            if not zones or not isinstance(zones, list):
-                item["zonesToCheck"] = ["DECK"]
-            filtered.append(item)
-        return filtered
-
-    @field_validator("primaryRole", mode="before")
-    @classmethod
-    def normalize_primary_role(cls, v: Any) -> StrategicRole:
-        if isinstance(v, StrategicRole):
-            return v
-        if not isinstance(v, str):
-            return StrategicRole.MAIN_ATTACKER
-        raw = v.strip().upper()
-        for r in StrategicRole:
-            if r.value == raw:
-                return r
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        for r in StrategicRole:
-            if r.value == clean:
-                return r
-        ROLE_MAP: Dict[str, StrategicRole] = {
-            "ATTACKER": StrategicRole.MAIN_ATTACKER,
-            "MAIN": StrategicRole.MAIN_ATTACKER,
-            "PRIMARY_ATTACKER": StrategicRole.MAIN_ATTACKER,
-            "SECONDARY": StrategicRole.SECONDARY_ATTACKER,
-            "SNIPER": StrategicRole.SNIPER_BENCH_ATTACKER,
-            "DRAW": StrategicRole.DRAW_ENGINE_POKEMON,
-            "DRAW_ENGINE": StrategicRole.DRAW_ENGINE_POKEMON,
-            "TUTOR": StrategicRole.TUTOR_ENGINE_POKEMON,
-            "TUTOR_ENGINE": StrategicRole.TUTOR_ENGINE_POKEMON,
-            "CONSISTENCY_BOOSTER": StrategicRole.CONSISTENCY_TUTOR,
-            "CONSISTENCY": StrategicRole.CONSISTENCY_TUTOR,
-            "ENERGY_ACCEL": StrategicRole.ENERGY_ACCELERATOR,
-            "ACCELERATOR": StrategicRole.ENERGY_ACCELERATOR,
-            "BENCH": StrategicRole.BENCH_DEPLOYER,
-            "DEPLOYER": StrategicRole.BENCH_DEPLOYER,
-            "GUST": StrategicRole.GUST_BOSS_EFFECT,
-            "BOSS": StrategicRole.GUST_BOSS_EFFECT,
-            "SWITCH": StrategicRole.MOBILITY_SWITCH,
-            "MOBILITY": StrategicRole.MOBILITY_SWITCH,
-            "TANK": StrategicRole.DEFENSIVE_TANK_WALL,
-            "WALL": StrategicRole.DEFENSIVE_TANK_WALL,
-            "HEALER": StrategicRole.HEALER_SUPPORT,
-            "SUPPORT": StrategicRole.HEALER_SUPPORT,
-            "TECH": StrategicRole.TECH_UTILITY,
-            "UTILITY": StrategicRole.TECH_UTILITY,
-        }
-        if clean in ROLE_MAP:
-            return ROLE_MAP[clean]
-        matches = difflib.get_close_matches(clean, [e.value for e in StrategicRole], n=1, cutoff=0.5)
-        if matches:
-            return StrategicRole(matches[0])
-        return StrategicRole.MAIN_ATTACKER
-
-    @field_validator("intrinsicBaseScore", "discardPriorityWhenDead", mode="before")
-    @classmethod
-    def clamp_score_100(cls, v: Any) -> int:
-        try:
-            return max(0, min(100, int(round(float(v)))))
-        except (ValueError, TypeError):
-            return 50
-
-    @field_validator("holdForNextTurnBonus", mode="before")
-    @classmethod
-    def clamp_hold_bonus(cls, v: Any) -> int:
-        try:
-            return max(0, min(50, int(round(float(v)))))
-        except (ValueError, TypeError):
-            return 0
-
-
-# ============================================================================
-# C. SORTIE CONTRAINTE DU LLM (GBNF) ET MODÈLE CONSOLIDÉ FINAL
-# ============================================================================
-
-
-class LLMCompiledCardPart(BaseModel):
-    """Schéma strict utilisé directement dans `response_format` de `llama-cpp-python` (Constrained Decoding GBNF)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    reasoningAnalysis: str = Field(
-        ...,
-        description=(
-            "Analyse obligatoire étape par étape avant de remplir le JSON : "
-            "1) Catégorie et Rôle de la carte. "
-            "2) Coûts explicites exigés par le texte ('vous ne pouvez utiliser cette carte que si vous défaussez...'). "
-            "3) Filtres exacts (PV max, type d'énergie précis comme Feu, sous-catégorie). "
-            "4) Conditions où la carte est morte en main ou inutile dans le deck."
-        ),
-    )
-    category: CardCategory = Field(
-        ...,
-        description="Catégorie principale de la carte (POKEMON, TRAINER, ENERGY).",
-    )
-    subCategory: CardSubCategory = Field(
-        ...,
-        description="Sous-catégorie exacte de la carte (BASIC, STAGE_1, STAGE_2, ITEM, SUPPORTER, TOOL, STADIUM, BASIC_ENERGY, SPECIAL_ENERGY).",
-    )
-    playableActions: List[PlayableAction] = Field(
-        ...,
-        description="Actions jouables de la carte traduites en préconditions, coûts et effets atomiques.",
-    )
-    strategicEvaluator: StrategicEvaluator = Field(
-        ...,
-        description="Profil d'évaluation stratégique dynamique de la carte.",
-    )
-
-    @field_validator("reasoningAnalysis", mode="before")
-    @classmethod
-    def normalize_reasoning_analysis(cls, v: Any) -> str:
-        if v is None:
-            return "Analyse déterministe générée par compilateur."
-        s = str(v).strip()
-        return s if s else "Analyse déterministe générée par compilateur."
-
-    @field_validator("playableActions", mode="before")
-    @classmethod
-    def ensure_playable_actions_list(cls, v: Any) -> List[Any]:
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        if isinstance(v, dict):
-            return [v]
-        return []
-
-    @field_validator("strategicEvaluator", mode="before")
-    @classmethod
-    def ensure_strategic_evaluator(cls, v: Any) -> Any:
-        if v is None or not isinstance(v, dict):
-            return {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "discardPriorityWhenDead": 50,
-                "holdForNextTurnBonus": 0,
-            }
-        return v
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def normalize_category(cls, v: Any) -> CardCategory:
-        if isinstance(v, CardCategory):
-            return v
-        if not isinstance(v, str):
-            return CardCategory.POKEMON
-        raw = v.strip().upper()
-        if "POK" in raw:
-            return CardCategory.POKEMON
-        if "TRAIN" in raw or "DRESS" in raw:
-            return CardCategory.TRAINER
-        if "ENERG" in raw:
-            return CardCategory.ENERGY
-        try:
-            return CardCategory(raw)
-        except ValueError:
-            return CardCategory.POKEMON
-
-    @field_validator("subCategory", mode="before")
-    @classmethod
-    def normalize_sub_category(cls, v: Any) -> CardSubCategory:
-        if isinstance(v, CardSubCategory):
-            return v
-        if not isinstance(v, str):
-            return CardSubCategory.BASIC
-        raw = v.strip().upper()
-        SUB_MAP: Dict[str, CardSubCategory] = {
-            "BASE": CardSubCategory.BASIC,
-            "BASIC": CardSubCategory.BASIC,
-            "STAGE_1": CardSubCategory.STAGE_1,
-            "STAGE1": CardSubCategory.STAGE_1,
-            "NIVEAU_1": CardSubCategory.STAGE_1,
-            "NIVEAU1": CardSubCategory.STAGE_1,
-            "STAGE_2": CardSubCategory.STAGE_2,
-            "STAGE2": CardSubCategory.STAGE_2,
-            "NIVEAU_2": CardSubCategory.STAGE_2,
-            "NIVEAU2": CardSubCategory.STAGE_2,
-            "ITEM": CardSubCategory.ITEM,
-            "OBJET": CardSubCategory.ITEM,
-            "SUPPORTER": CardSubCategory.SUPPORTER,
-            "TOOL": CardSubCategory.TOOL,
-            "OUTIL": CardSubCategory.TOOL,
-            "STADIUM": CardSubCategory.STADIUM,
-            "STADE": CardSubCategory.STADIUM,
-            "BASIC_ENERGY": CardSubCategory.BASIC_ENERGY,
-            "SPECIAL_ENERGY": CardSubCategory.SPECIAL_ENERGY,
-        }
-        clean = re.sub(r"[^A-Z0-9]+", "_", raw).strip("_")
-        if clean in SUB_MAP:
-            return SUB_MAP[clean]
-        try:
-            return CardSubCategory(clean)
-        except ValueError:
-            return CardSubCategory.BASIC
-
-
-def build_fallback_compiled_part(
-    bundle: Any,
-    reasoning_text: Optional[str] = None,
-) -> LLMCompiledCardPart:
-    """Construit un modèle `LLMCompiledCardPart` valide et déterministe en cas de défaillance totale du LLM."""
-    identity = getattr(bundle, "identity", None)
-    if identity:
-        cat = identity.category
-        subcat = identity.subCategory
-        name = identity.nameFr or "Carte"
-        card_id = getattr(bundle, "card_id", "inconnue")
-    else:
-        cat = CardCategory.POKEMON
-        subcat = CardSubCategory.BASIC
-        name = "Carte"
-        card_id = "inconnue"
-
-    txt = (reasoning_text or "").strip()
-    if not txt:
-        txt = f"Modélisation de secours déterministe pour {name} ({card_id})."
-
-    raw_fr = getattr(bundle, "raw_fr", {}) or {}
-    raw_en = getattr(bundle, "raw_en", {}) or {}
-
-    actions: List[PlayableAction] = []
-    if cat == CardCategory.POKEMON:
-        attacks = raw_fr.get("attacks") or raw_en.get("attacks") or []
-        for idx, atk in enumerate(attacks, start=1):
-            atk_name = atk.get("name") or f"Attaque {idx}"
-            dmg_str = str(atk.get("damage") or "")
-            dmg_match = re.search(r"\d+", dmg_str)
-            dmg_val = int(dmg_match.group()) if dmg_match else None
-            cost_raw = atk.get("cost") or []
-            actions.append(
-                PlayableAction(
-                    actionId=f"attack_{idx}",
-                    label=atk_name,
-                    sourceType=ActionSourceType.ATTACK,
-                    timing=ActionTiming.END_OF_TURN_ATTACK,
-                    canUseTurn1GoingFirst=False,
-                    canUseTurn1GoingSecond=True,
-                    energyCost=[str(c) for c in cost_raw],
-                    effects=[
-                        AtomicEffect(
-                            primitive=EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-                            baseDamage=dmg_val,
-                            count=1,
-                            upTo=False,
-                        )
-                    ],
-                )
-            )
-        if not actions:
-            actions.append(
-                PlayableAction(
-                    actionId="attack_1",
-                    label="Attaque",
-                    sourceType=ActionSourceType.ATTACK,
-                    timing=ActionTiming.END_OF_TURN_ATTACK,
-                    canUseTurn1GoingFirst=False,
-                    canUseTurn1GoingSecond=True,
-                    energyCost=[],
-                    effects=[
-                        AtomicEffect(
-                            primitive=EffectPrimitive.DEAL_DAMAGE_ACTIVE,
-                            baseDamage=10,
-                            count=1,
-                            upTo=False,
-                        )
-                    ],
-                )
-            )
-    else:
-        is_supp = (subcat == CardSubCategory.SUPPORTER)
-        actions.append(
-            PlayableAction(
-                actionId="play_trainer",
-                label=name,
-                sourceType=ActionSourceType.TRAINER_PLAY,
-                timing=ActionTiming.ONCE_PER_TURN_SUPPORTER if is_supp else ActionTiming.ONCE_PER_CARD,
-                canUseTurn1GoingFirst=False if is_supp else True,
-                canUseTurn1GoingSecond=True,
-                effects=[
-                    AtomicEffect(
-                        primitive=EffectPrimitive.SEARCH_DECK_TO_HAND,
-                        count=1,
-                        upTo=False,
-                    )
-                ],
-            )
-        )
-
-    role = StrategicRole.MAIN_ATTACKER if cat == CardCategory.POKEMON else StrategicRole.CONSISTENCY_TUTOR
-    evaluator = StrategicEvaluator(
-        primaryRole=role,
-        intrinsicBaseScore=60,
-        turnPhaseWeights=TurnPhaseWeights(turn1=1.0, turn2=1.0, turn3=1.0, turn4Plus=1.0),
-        decklistSynergyRequirements=[],
-        inGameDeadCardConditions=[],
-        discardPriorityWhenDead=50,
-        holdForNextTurnBonus=10,
-    )
-
-    return LLMCompiledCardPart(
-        reasoningAnalysis=txt,
-        category=cat,
-        subCategory=subcat,
-        playableActions=actions,
-        strategicEvaluator=evaluator,
-    )
 
 
 class CardIdentity(BaseModel):
-    """Métadonnées déterministes extraites directement depuis l'API TCGdex."""
+    """Identité déterministe complète de la carte extraite depuis TCGdex."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    cardId: str = Field(..., description="Identifiant unique TCGdex (ex: 'sv04-125').")
-    nameFr: str = Field(..., description="Nom officiel français de la carte.")
-    nameEn: Optional[str] = Field(default=None, description="Nom officiel anglais de la carte (secours/référence).")
-    setId: str = Field(..., description="Identifiant de l'extension TCGdex (ex: 'sv04').")
-    setName: Optional[str] = Field(default=None, description="Nom complet de l'extension.")
-    localId: str = Field(..., description="Numéro local de la carte dans l'extension.")
-    category: CardCategory = Field(..., description="Catégorie déterministe de la carte.")
-    subCategory: CardSubCategory = Field(..., description="Sous-catégorie déterministe de la carte.")
-    regulationMark: Optional[str] = Field(default=None, description="Marque de régulation officielle (ex: 'G', 'H').")
-    legalStandard: bool = Field(default=True, description="Légalité au format Standard.")
-    legalExpanded: bool = Field(default=True, description="Légalité au format Étendu.")
-    rarity: Optional[str] = Field(default=None, description="Rareté officielle de la carte.")
-    imageUrl: Optional[str] = Field(default=None, description="URL de l'image haute résolution TCGdex.")
-    isAceSpec: bool = Field(
-        default=False,
-        description="True si la carte est une carte HIGH-TECH / ACE SPEC (limite de 1 par deck).",
-    )
-    isAncient: bool = Field(
-        default=False,
-        description="True si la carte possède la mécanique Temps passé (Ancient).",
-    )
-    isFuture: bool = Field(
-        default=False,
-        description="True si la carte possède la mécanique Temps futur (Future).",
-    )
-    isTechnicalMachine: bool = Field(
-        default=False,
-        description="True si la carte Outil est une Capsule Technique (Technical Machine).",
-    )
-    rawRulesText: List[str] = Field(
-        default_factory=list,
-        description="Textes complets des effets, talents et attaques issus de TCGdex (FR + EN).",
-    )
+    cardId: str = Field(description="Identifiant unique TCGdex (ex: 'me01-104', 'sv03-125')")
+    nameFr: str = Field(description="Nom officiel en français")
+    nameEn: Optional[str] = Field(default=None, description="Nom officiel en anglais")
+    setId: str = Field(default="", description="Code de l'extension (ex: 'me01', 'sv03')")
+    setName: Optional[str] = Field(default=None, description="Nom de l'extension")
+    category: CardCategory = Field(description="Catégorie principale (POKEMON, TRAINER, ENERGY)")
+    subCategory: CardSubCategory = Field(description="Sous-catégorie précise")
+    isRuleBox: bool = Field(default=False, description="Possède un encadré Règle (ex, V, VSTAR, VMAX, Radieux)")
+    prizeCardsGiven: int = Field(default=1, ge=1, le=3, description="Nombre de cartes Récompense données si mis K.O. (1, 2 ou 3)")
+    isAceSpec: bool = Field(default=False, description="Carte HIGH-TECH / ACE SPEC (max 1 par deck)")
+    isAncient: bool = Field(default=False, description="Carte Temps passé (Ancient)")
+    isFuture: bool = Field(default=False, description="Carte Temps futur (Future)")
+    isTera: bool = Field(default=False, description="Pokémon Téracristal (immunisé aux dégâts d'attaques sur le Banc)")
+    legalStandard: bool = Field(default=True, description="Légal au format Standard")
+    legalExpanded: bool = Field(default=True, description="Légal au format Étendu")
+
+    # Champs de métadonnées complémentaires optionnels (rétrocompatibilité)
+    localId: Optional[str] = Field(default=None, description="Numéro local dans l'extension")
+    regulationMark: Optional[str] = Field(default=None, description="Marque de régulation (G, H, I...)")
+    rarity: Optional[str] = Field(default=None, description="Rareté officielle")
+    imageUrl: Optional[str] = Field(default=None, description="URL de l'image haute résolution")
+    isTechnicalMachine: bool = Field(default=False, description="Outil Capsule Technique (CT / TM)")
+    rawRulesText: List[str] = Field(default_factory=list, description="Textes bruts FR/EN consolidés")
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _val_category(cls, v: Any) -> CardCategory:
+        return _coerce_card_category(v)
+
+    @field_validator("subCategory", mode="before")
+    @classmethod
+    def _val_subcategory(cls, v: Any) -> CardSubCategory:
+        return _coerce_card_subcategory(v)
+
+    @field_validator("prizeCardsGiven", mode="before")
+    @classmethod
+    def _val_prizes(cls, v: Any) -> int:
+        parsed = _coerce_optional_int(v)
+        if parsed is None:
+            return 1
+        return max(1, min(3, parsed))
 
 
 class PokemonStats(BaseModel):
-    """Statistiques déterministes et lignée d'évolution pour les cartes de catégorie POKEMON."""
+    """Statistiques déterministes d'une carte Pokémon."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    hp: int = Field(..., ge=0, description="Points de vie (PV / HP) du Pokémon.")
-    types: List[str] = Field(default_factory=list, description="Types élémentaires du Pokémon.")
-    dexId: List[int] = Field(
-        default_factory=list,
-        description="Numéros de Pokédex national issus de TCGdex.",
-    )
-    stage: Optional[str] = Field(default=None, description="Stade d'évolution brut TCGdex.")
-    evolvesFrom: Optional[str] = Field(default=None, description="Nom du Pokémon pré-évolué direct.")
-    rootBasicName: Optional[str] = Field(
+    hp: int = Field(default=0, ge=0, description="Points de Vie (PV)")
+    types: List[str] = Field(default_factory=list, description="Types du Pokémon (ex: ['Incolore'], ['Feu'])")
+    stage: str = Field(default="Base", description="Stade d'évolution ('Base', 'Niveau 1', 'Niveau 2')")
+    evolvesFrom: Optional[str] = Field(default=None, description="Nom du Pokémon pré-évolution direct")
+    rootBasicName: str = Field(default="", description="Nom du Pokémon de Base racine de la lignée")
+    evolutionChain: List[str] = Field(default_factory=list, description="Chaîne complète d'évolution")
+    retreatCost: int = Field(default=0, ge=0, description="Coût de retraite en Énergies Incolores")
+    weaknesses: List[TypeModifier] = Field(default_factory=list, description="Faiblesses typées")
+    resistances: List[TypeModifier] = Field(default_factory=list, description="Résistances typées")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_pokemon_stats(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+
+        # Normalisation de stage
+        raw_stage = str(out.get("stage") or "Base").strip()
+        low_stage = raw_stage.lower()
+        if "2" in low_stage:
+            out["stage"] = "Niveau 2"
+        elif "1" in low_stage or "vmax" in low_stage or "vstar" in low_stage:
+            out["stage"] = "Niveau 1"
+        else:
+            out["stage"] = "Base"
+
+        # Normalisation de rootBasicName
+        if not out.get("rootBasicName"):
+            evo_chain = out.get("evolutionChain")
+            if isinstance(evo_chain, list) and evo_chain:
+                out["rootBasicName"] = str(evo_chain[0])
+            elif out.get("evolvesFrom"):
+                out["rootBasicName"] = str(out["evolvesFrom"])
+            else:
+                out["rootBasicName"] = ""
+
+        # Normalisation de weaknesses / resistances si fournis sous forme de listes de strings
+        weak_mult = str(out.get("weaknessMultiplier") or "×2")
+        raw_w = out.get("weaknesses")
+        if isinstance(raw_w, list):
+            norm_w = []
+            for item in raw_w:
+                if isinstance(item, str):
+                    norm_w.append({"type": item, "value": weak_mult})
+                elif isinstance(item, (dict, TypeModifier)):
+                    norm_w.append(item)
+            out["weaknesses"] = norm_w
+        elif raw_w is None:
+            out["weaknesses"] = []
+
+        res_mod = out.get("resistanceModifier", "-30")
+        res_mod_str = str(res_mod) if res_mod is not None else "-30"
+        raw_r = out.get("resistances")
+        if isinstance(raw_r, list):
+            norm_r = []
+            for item in raw_r:
+                if isinstance(item, str):
+                    norm_r.append({"type": item, "value": res_mod_str})
+                elif isinstance(item, (dict, TypeModifier)):
+                    norm_r.append(item)
+            out["resistances"] = norm_r
+        elif raw_r is None:
+            out["resistances"] = []
+
+        return out
+
+
+class AtomicEffect(BaseModel):
+    """Effet atomique normalisé exécuté par une action."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    primitive: EffectPrimitive = Field(description="Primitive d'effet normalisée")
+    target: Optional[str] = Field(
         default=None,
-        description="Nom du Pokémon de Base à la racine de la lignée d'évolution (ex: 'Salamèche' pour 'Dracaufeu ex').",
+        description="Cible de l'effet (ex: 'SELF', 'OPPONENT_ACTIVE', 'OPPONENT_BENCH', 'OWN_BENCH', 'OWN_POKEMON_ANY', 'PLAYER')",
     )
-    evolutionChain: List[str] = Field(
+    value: Optional[int] = Field(
+        default=None,
+        description="Valeur numérique de l'effet (ex: 200 pour les dégâts ou le soin)",
+    )
+    count: Optional[int] = Field(
+        default=None,
+        description="Nombre d'éléments affectés (ex: 2 cartes à piocher ou chercher)",
+    )
+    zone: Optional[str] = Field(
+        default=None,
+        description="Zone impliquée (ex: 'DECK', 'HAND', 'DISCARD', 'BENCH', 'ACTIVE')",
+    )
+    filter: Optional[str] = Field(
+        default=None,
+        description="Filtre normalisé (ex: 'CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70', 'CATEGORY:ENERGY|TYPE:Feu')",
+    )
+    upTo: bool = Field(default=False, description="Indique si le nombre est un maximum ('jusqu'à X')")
+    optional: bool = Field(default=False, description="Indique si l'effet est facultatif ('vous pouvez')")
+
+    @property
+    def baseDamage(self) -> Optional[int]:
+        """Propriété de rétrocompatibilité pointant sur `value`."""
+        return self.value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_atomic_effect(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"primitive": _coerce_effect_primitive(data)}
+        if not isinstance(data, dict):
+            return data
+
+        out = dict(data)
+        out["primitive"] = _coerce_effect_primitive(
+            out.get("primitive") or out.get("type") or out.get("effect") or "DRAW_CARDS"
+        )
+
+        # Compatibilité value <-> baseDamage / amount / damage / heal
+        if out.get("value") is None:
+            for alt_key in ("baseDamage", "damage", "amount", "heal", "damageScalingValue"):
+                if out.get(alt_key) is not None:
+                    out["value"] = out.get(alt_key)
+                    break
+        out["value"] = _coerce_optional_int(out.get("value"))
+
+        # Compatibilité count
+        out["count"] = _coerce_optional_int(out.get("count"))
+
+        # Compatibilité target
+        if out.get("target") is not None and not isinstance(out.get("target"), str):
+            out["target"] = str(out["target"]).strip().upper()
+        elif isinstance(out.get("target"), str):
+            out["target"] = out["target"].strip() or None
+
+        # Compatibilité zone <-> sourceZone / targetZone
+        if out.get("zone") is None:
+            src_z = out.get("sourceZone") or out.get("targetZone")
+            if src_z is not None:
+                out["zone"] = str(getattr(src_z, "value", src_z)).strip().upper()
+        elif not isinstance(out.get("zone"), str):
+            out["zone"] = str(out["zone"]).strip().upper()
+
+        # Compatibilité filter <-> targetFilter
+        raw_filter = out.get("filter") if out.get("filter") is not None else out.get("targetFilter")
+        if isinstance(raw_filter, dict):
+            parts = []
+            for k, v in raw_filter.items():
+                if v is not None and v != "":
+                    val_str = getattr(v, "value", v)
+                    parts.append(f"{str(k).upper()}:{val_str}")
+            out["filter"] = "|".join(parts) if parts else None
+        elif isinstance(raw_filter, BaseModel):
+            dumped = raw_filter.model_dump(exclude_none=True)
+            parts = [f"{str(k).upper()}:{getattr(v, 'value', v)}" for k, v in dumped.items()]
+            out["filter"] = "|".join(parts) if parts else None
+        elif raw_filter is not None:
+            s_filt = str(raw_filter).strip()
+            out["filter"] = s_filt if s_filt and s_filt.lower() not in {"none", "null"} else None
+        else:
+            out["filter"] = None
+
+        out["upTo"] = _coerce_bool(out.get("upTo"), default=False)
+        out["optional"] = _coerce_bool(out.get("optional"), default=False)
+        return out
+
+
+class PlayableAction(BaseModel):
+    """Action jouable complète d'une carte Pokémon TCG."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    actionId: str = Field(description="Identifiant unique de l'action (ex: 'play_from_hand', 'ability_0', 'attack_0', 'retreat')")
+    label: str = Field(description="Nom lisible de l'action (ex: 'Course Fructueuse', 'Combo en Rafale')")
+    actionType: ActionType = Field(description="Type d'action normalisé")
+    timingPhase: TimingPhase = Field(default=TimingPhase.MAIN_PHASE_1, description="Phase du tour où l'action est exécutée")
+    canUseTurn1GoingFirst: bool = Field(default=True, description="Autorisé au Tour 1 du joueur qui commence")
+    canUseTurn1GoingSecond: bool = Field(default=True, description="Autorisé au Tour 1 du joueur qui joue en second")
+    cost: Dict[str, int] = Field(default_factory=dict, description="Coût en énergie agrégé (ex: {'Feu': 2, 'Incolore': 1} ou {})")
+    preconditions: List[str] = Field(
         default_factory=list,
-        description="Lignée complète d'évolution depuis le Pokémon de Base jusqu'à cette carte.",
+        description="Conditions formelles normalisées (ex: ['SELF_IS_ACTIVE'], ['BENCH_HAS_EMPTY_SLOT'])",
     )
-    retreatCost: int = Field(default=0, ge=0, description="Coût de retraite du Pokémon.")
-    weaknesses: List[str] = Field(default_factory=list, description="Types de faiblesse du Pokémon.")
-    weaknessMultiplier: str = Field(
-        default="×2",
-        description="Multiplicateur ou modificateur de faiblesse (ex: '×2').",
+    effects: List[AtomicEffect] = Field(default_factory=list, description="Séquence d'effets atomiques")
+    deadCardCondition: Optional[str] = Field(
+        default=None,
+        description="Condition rendant l'action/carte morte en main (ex: 'NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY')",
     )
-    resistances: List[str] = Field(default_factory=list, description="Types de résistance du Pokémon.")
-    resistanceModifier: int = Field(
-        default=-30,
-        description="Modificateur de résistance (ex: -30).",
+
+    @property
+    def sourceType(self) -> ActionType:
+        """Propriété de rétrocompatibilité pointant sur `actionType`."""
+        return self.actionType
+
+    @property
+    def timing(self) -> TimingPhase:
+        """Propriété de rétrocompatibilité pointant sur `timingPhase`."""
+        return self.timingPhase
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_playable_action(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        out = dict(data)
+        action_id = str(out.get("actionId") or out.get("id") or "action_0").strip()
+        out["actionId"] = action_id
+        out["label"] = str(out.get("label") or out.get("name") or action_id).strip()
+
+        raw_atype = out.get("actionType") or out.get("sourceType") or out.get("type")
+        if raw_atype is None:
+            if action_id.startswith("attack"):
+                raw_atype = ActionType.ATTACK
+            elif action_id.startswith("ability"):
+                raw_atype = ActionType.USE_ABILITY
+            elif action_id.startswith("retreat"):
+                raw_atype = ActionType.RETREAT
+            elif action_id.startswith("evolve"):
+                raw_atype = ActionType.EVOLVE
+            elif action_id.startswith("attach"):
+                raw_atype = ActionType.ATTACH_ENERGY
+            else:
+                raw_atype = ActionType.PLAY_FROM_HAND
+        atype = _coerce_action_type(raw_atype)
+        out["actionType"] = atype
+
+        raw_timing = out.get("timingPhase") or out.get("timing")
+        if raw_timing is None:
+            raw_timing = TimingPhase.ATTACK_PHASE if atype == ActionType.ATTACK else TimingPhase.MAIN_PHASE_1
+        out["timingPhase"] = _coerce_timing_phase(raw_timing)
+
+        out["canUseTurn1GoingFirst"] = _coerce_bool(
+            out.get("canUseTurn1GoingFirst"),
+            default=(atype not in {ActionType.ATTACK, ActionType.EVOLVE}),
+        )
+        out["canUseTurn1GoingSecond"] = _coerce_bool(
+            out.get("canUseTurn1GoingSecond"),
+            default=(atype != ActionType.EVOLVE),
+        )
+
+        # Normalisation de cost (Dict[str, int])
+        raw_cost = out.get("cost")
+        if raw_cost is None and out.get("energyCost") is not None:
+            raw_cost = out.get("energyCost")
+        cost_dict: Dict[str, int] = {}
+        if isinstance(raw_cost, dict):
+            for k, v in raw_cost.items():
+                iv = _coerce_optional_int(v)
+                if iv is not None and iv > 0:
+                    cost_dict[str(k).strip()] = iv
+        elif isinstance(raw_cost, list):
+            for item in raw_cost:
+                if isinstance(item, str) and item.strip():
+                    k = item.strip()
+                    cost_dict[k] = cost_dict.get(k, 0) + 1
+                elif isinstance(item, dict):
+                    k = str(item.get("type") or "Incolore").strip()
+                    iv = _coerce_optional_int(item.get("count", 1)) or 1
+                    cost_dict[k] = cost_dict.get(k, 0) + iv
+        out["cost"] = cost_dict
+
+        # Normalisation de preconditions (List[str])
+        raw_pre = out.get("preconditions")
+        pre_list: List[str] = []
+        if isinstance(raw_pre, list):
+            for p in raw_pre:
+                if isinstance(p, str) and p.strip():
+                    pre_list.append(p.strip())
+                elif isinstance(p, dict):
+                    ptype = str(p.get("type") or p.get("condition") or "").strip()
+                    if ptype:
+                        pre_list.append(ptype)
+                elif hasattr(p, "type"):
+                    pre_list.append(str(getattr(p.type, "value", p.type)))
+        elif isinstance(raw_pre, str) and raw_pre.strip():
+            pre_list.append(raw_pre.strip())
+        out["preconditions"] = pre_list
+
+        # Normalisation de effects (List[AtomicEffect])
+        raw_effs = out.get("effects")
+        if raw_effs is None and isinstance(out.get("primitives"), list):
+            raw_effs = [{"primitive": p} for p in out["primitives"]]
+        if not isinstance(raw_effs, list):
+            raw_effs = []
+        out["effects"] = raw_effs
+
+        # Normalisation de deadCardCondition
+        dead_cond = out.get("deadCardCondition")
+        if isinstance(dead_cond, list):
+            dead_cond = "|".join(str(x).strip() for x in dead_cond if str(x).strip()) or None
+        elif isinstance(dead_cond, dict):
+            dead_cond = str(dead_cond.get("reason") or dead_cond.get("condition") or "").strip() or None
+        elif dead_cond is not None:
+            dead_cond = str(dead_cond).strip() or None
+            if dead_cond and dead_cond.lower() in {"none", "null", "n/a"}:
+                dead_cond = None
+        out["deadCardCondition"] = dead_cond
+
+        return out
+
+
+class TurnPhaseWeights(BaseModel):
+    """Poids stratégiques par phase de la partie (bornés strictement entre 0.0 et 1.0)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    turn1: float = Field(default=0.8, ge=0.0, le=1.0, description="Poids stratégique au Tour 1 (0.0 à 1.0)")
+    turn2: float = Field(default=0.8, ge=0.0, le=1.0, description="Poids stratégique au Tour 2 (0.0 à 1.0)")
+    turn3: float = Field(default=0.8, ge=0.0, le=1.0, description="Poids stratégique au Tour 3 (0.0 à 1.0)")
+    turn4Plus: float = Field(default=0.8, ge=0.0, le=1.0, description="Poids stratégique au Tour 4 et + (0.0 à 1.0)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp_and_normalize_weights(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return {"turn1": 0.8, "turn2": 0.8, "turn3": 0.8, "turn4Plus": 0.8}
+
+        def _extract_clamped(keys: List[str], default: float = 0.8) -> float:
+            for k in keys:
+                if k in data and data[k] is not None:
+                    try:
+                        val = float(data[k])
+                        return round(max(0.0, min(1.0, val)), 4)
+                    except (TypeError, ValueError):
+                        continue
+            return default
+
+        return {
+            "turn1": _extract_clamped(["turn1", "turn_1", "T1", "PREPARATION", "earlyGame"], 0.8),
+            "turn2": _extract_clamped(["turn2", "turn_2", "T2", "MAIN_PHASE_1", "midGame"], 0.8),
+            "turn3": _extract_clamped(["turn3", "turn_3", "T3", "MAIN_PHASE_2"], 0.8),
+            "turn4Plus": _extract_clamped(["turn4Plus", "turn4_plus", "turn4", "T4", "END_PHASE", "lateGame"], 0.8),
+        }
+
+
+class StrategicEvaluator(BaseModel):
+    """Profil d'évaluation stratégique de la carte pour le moteur heuristique / MCTS."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    aiRole: AIRole = Field(default=AIRole.GUEST_TECH, description="Rôle stratégique principal de la carte")
+    turnPhaseWeights: TurnPhaseWeights = Field(
+        default_factory=TurnPhaseWeights,
+        description="Poids d'importance selon l'avancement de la partie (bornés entre 0.0 et 1.0)",
     )
-    prizeCardsGiven: int = Field(
-        default=1,
-        ge=1,
-        le=3,
-        description="Nombre de cartes Récompense offertes à l'adversaire lors d'un KO (2 pour un Pokémon ex/V, 1 sinon).",
+    decklistSynergyRequirements: List[str] = Field(
+        default_factory=list,
+        description="Exigences de synergie de deck (ex: ['requires_energy_type:Feu', 'requires_evolution_line:Salamèche'])",
     )
-    isRuleBox: bool = Field(
-        default=False,
-        description="True si le Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Radieux).",
+
+    @property
+    def primaryRole(self) -> AIRole:
+        """Propriété de rétrocompatibilité pointant sur `aiRole`."""
+        return self.aiRole
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_strategic_evaluator(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return {
+                "aiRole": AIRole.GUEST_TECH,
+                "turnPhaseWeights": TurnPhaseWeights(),
+                "decklistSynergyRequirements": [],
+            }
+        out = dict(data)
+        raw_role = out.get("aiRole") or out.get("primaryRole") or out.get("role") or AIRole.GUEST_TECH
+        out["aiRole"] = _coerce_ai_role(raw_role)
+
+        if not isinstance(out.get("turnPhaseWeights"), (dict, TurnPhaseWeights)):
+            out["turnPhaseWeights"] = {}
+
+        raw_syn = out.get("decklistSynergyRequirements")
+        syn_list: List[str] = []
+        if isinstance(raw_syn, list):
+            for item in raw_syn:
+                if isinstance(item, str) and item.strip():
+                    syn_list.append(item.strip())
+                elif isinstance(item, dict):
+                    rf = item.get("requiredFilter") or {}
+                    if isinstance(rf, dict):
+                        if rf.get("energyType"):
+                            syn_list.append(f"requires_energy_type:{rf['energyType']}")
+                        elif rf.get("specificCardName"):
+                            syn_list.append(f"requires_evolution_line:{rf['specificCardName']}")
+                        elif rf.get("subCategory"):
+                            syn_list.append(f"requires_subcategory:{rf['subCategory']}")
+                        elif rf.get("category"):
+                            syn_list.append(f"requires_category:{rf['category']}")
+        out["decklistSynergyRequirements"] = list(dict.fromkeys(syn_list))
+        return out
+
+
+# ============================================================================
+# C. LE SCHÉMA MICRO-CIBLÉ POUR L'IA (LLMCompiledPayload)
+# ============================================================================
+
+
+class LLMTranslatedSlot(BaseModel):
+    """Traduction formelle d'un slot d'effet individuel par l'IA de Passe 2."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    slotId: str = Field(
+        description="Identifiant exact du slot fourni en entrée (ex: 'ability_0', 'attack_0', 'trainer_0')"
     )
-    isTera: bool = Field(
-        default=False,
-        description="True si le Pokémon est Téracristal (immunisé aux dégâts d'attaques sur le Banc).",
+    preconditions: List[str] = Field(
+        default_factory=list,
+        description="Conditions requises dans le texte pour activer cet effet",
     )
-    isAncient: bool = Field(
-        default=False,
-        description="True si le Pokémon est Temps passé (Ancient).",
+    effects: List[AtomicEffect] = Field(
+        default_factory=list,
+        description="Séquence ordonnée de primitives atomiques traduisant l'effet",
     )
-    isFuture: bool = Field(
-        default=False,
-        description="True si le Pokémon est Temps futur (Future).",
+    deadCardCondition: Optional[str] = Field(
+        default=None,
+        description="Condition rendant cette action/carte morte en main",
     )
-    hasAbility: bool = Field(
-        default=False,
-        description="True si le Pokémon possède au moins un Talent (Ability).",
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_slot(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        out["slotId"] = str(out.get("slotId") or out.get("actionId") or out.get("id") or "slot_0").strip()
+
+        raw_pre = out.get("preconditions")
+        pre_list: List[str] = []
+        if isinstance(raw_pre, list):
+            for p in raw_pre:
+                if isinstance(p, str) and p.strip():
+                    pre_list.append(p.strip())
+                elif isinstance(p, dict):
+                    ptype = str(p.get("type") or p.get("condition") or "").strip()
+                    if ptype:
+                        pre_list.append(ptype)
+        elif isinstance(raw_pre, str) and raw_pre.strip():
+            pre_list.append(raw_pre.strip())
+        out["preconditions"] = pre_list
+
+        raw_effs = out.get("effects")
+        if raw_effs is None and isinstance(out.get("primitives"), list):
+            raw_effs = [{"primitive": p} for p in out["primitives"]]
+        if not isinstance(raw_effs, list):
+            raw_effs = []
+        out["effects"] = raw_effs
+
+        dead_cond = out.get("deadCardCondition")
+        if isinstance(dead_cond, list):
+            dead_cond = "|".join(str(x).strip() for x in dead_cond if str(x).strip()) or None
+        elif dead_cond is not None:
+            dead_cond = str(dead_cond).strip() or None
+            if dead_cond and dead_cond.lower() in {"none", "null", "n/a"}:
+                dead_cond = None
+        out["deadCardCondition"] = dead_cond
+        return out
+
+
+class LLMCompiledPayload(BaseModel):
+    """Schéma micro-ciblé unique généré par l'IA de Passe 2 via Constrained Decoding."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    translatedSlots: List[LLMTranslatedSlot] = Field(
+        default_factory=list,
+        description="Liste des slots d'effets traduits en primitives atomiques",
     )
+    aiRole: AIRole = Field(
+        default=AIRole.GUEST_TECH,
+        description="Rôle stratégique principal de la carte",
+    )
+    turnPhaseWeights: TurnPhaseWeights = Field(
+        default_factory=TurnPhaseWeights,
+        description="Poids d'intérêt stratégique par tour (bornés entre 0.0 et 1.0)",
+    )
+    additionalSynergyTags: List[str] = Field(
+        default_factory=list,
+        description="Tags de synergie complémentaires, ex: 'requires_stage_2_pokemon', 'requires_basic_hp_lte_70'",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_llm_payload(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+
+        # Tolérance si l'IA renvoie playableActions ou un effet isolé au lieu de translatedSlots
+        if "translatedSlots" not in out or out["translatedSlots"] is None:
+            if isinstance(out.get("playableActions"), list):
+                out["translatedSlots"] = [
+                    {
+                        "slotId": act.get("slotId") or act.get("actionId") or f"slot_{idx}",
+                        "preconditions": act.get("preconditions") or [],
+                        "effects": act.get("effects") or act.get("primitives") or [],
+                        "deadCardCondition": act.get("deadCardCondition"),
+                    }
+                    for idx, act in enumerate(out["playableActions"])
+                    if isinstance(act, dict)
+                ]
+            elif isinstance(out.get("slots"), list):
+                out["translatedSlots"] = out["slots"]
+            elif "primitive" in out:
+                out["translatedSlots"] = [
+                    {
+                        "slotId": out.get("slotId") or "attack_0",
+                        "preconditions": [],
+                        "effects": [dict(out)],
+                        "deadCardCondition": None,
+                    }
+                ]
+            elif "actionId" in out and "effects" in out:
+                out["translatedSlots"] = [
+                    {
+                        "slotId": out.get("actionId") or "attack_0",
+                        "preconditions": out.get("preconditions") or [],
+                        "effects": out.get("effects") or [],
+                        "deadCardCondition": out.get("deadCardCondition"),
+                    }
+                ]
+            else:
+                out["translatedSlots"] = []
+
+        # Tolérance si aiRole / turnPhaseWeights / additionalSynergyTags sont dans strategicEvaluator
+        strat = out.get("strategicEvaluator")
+        if isinstance(strat, dict):
+            if "aiRole" not in out:
+                out["aiRole"] = strat.get("aiRole") or strat.get("primaryRole") or AIRole.GUEST_TECH
+            if "turnPhaseWeights" not in out and "turnPhaseWeights" in strat:
+                out["turnPhaseWeights"] = strat["turnPhaseWeights"]
+            if "additionalSynergyTags" not in out and "decklistSynergyRequirements" in strat:
+                out["additionalSynergyTags"] = strat["decklistSynergyRequirements"]
+
+        out["aiRole"] = _coerce_ai_role(out.get("aiRole") or out.get("primaryRole") or AIRole.GUEST_TECH)
+
+        if not isinstance(out.get("turnPhaseWeights"), (dict, TurnPhaseWeights)):
+            out["turnPhaseWeights"] = {}
+
+        raw_tags = out.get("additionalSynergyTags")
+        if isinstance(raw_tags, list):
+            out["additionalSynergyTags"] = [str(t).strip() for t in raw_tags if str(t).strip()]
+        else:
+            out["additionalSynergyTags"] = []
+
+        return out
+
+
+# Alias mentionné dans la description d'architecture et rétrocompatibilité
+LLMCompiledEffectsAndStrategy = LLMCompiledPayload
+LLMCompiledCardPart = LLMCompiledPayload
+
+
+# ============================================================================
+# D. MÉTADONNÉES ET MODÈLE CONSOLIDÉ FINAL (EngineCardModel)
+# ============================================================================
 
 
 class CompilationMetadata(BaseModel):
-    """Informations de traçabilité sur la compilation LLM de la carte."""
+    """Métadonnées techniques de télémétrie sur la compilation de la carte."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    modelRepoId: str = Field(..., description="Dépôt Hugging Face du modèle GGUF utilisé.")
-    modelFilename: str = Field(..., description="Nom du fichier GGUF utilisé.")
-    compilationTimeSeconds: float = Field(..., ge=0.0, description="Temps total de compilation en secondes.")
-    compiledAtIso: str = Field(..., description="Date/heure ISO 8601 de génération.")
-    completionTokens: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Nombre total de tokens générés lors de la complétion.",
-    )
-    tokensPerSecond: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        description="Débit moyen de génération en tokens par seconde (t/s) calculé sur le temps effectif de génération des tokens.",
-    )
-    generationTimeSeconds: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        description="Temps effectif de génération de tokens en secondes (hors délai TTFT avant premier token).",
-    )
-    timeToFirstTokenSeconds: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        description="Délai avant le premier token (Time To First Token) en secondes.",
-    )
+    modelRepoId: str = Field(description="Identifiant du dépôt ou modèle utilisé")
+    modelFilename: str = Field(description="Nom du fichier ou backend de poids")
+    compilationTimeSeconds: float = Field(ge=0.0, description="Durée totale de compilation en secondes")
+    compiledAtIso: str = Field(description="Horodatage ISO 8601 UTC")
+    completionTokens: Optional[int] = Field(default=None, ge=0, description="Nombre de tokens générés")
+    tokensPerSecond: Optional[float] = Field(default=None, ge=0.0, description="Vitesse moyenne (tokens/s)")
+    generationTimeSeconds: Optional[float] = Field(default=None, ge=0.0, description="Temps pur de génération")
+    timeToFirstTokenSeconds: Optional[float] = Field(default=None, ge=0.0, description="Latence du premier token")
 
 
 class EngineCardModel(BaseModel):
-    """Modèle final complet d'une carte Pokémon TCG prêt pour le moteur de simulation."""
+    """Modèle de carte Pokémon TCG final complet et validé."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    cardId: str = Field(..., description="Identifiant unique TCGdex de la carte.")
-    identity: CardIdentity = Field(..., description="Identité déterministe extraite de TCGdex.")
+    cardId: str = Field(description="Identifiant unique TCGdex (ex: 'me01-104')")
+    identity: CardIdentity = Field(description="Identité déterministe complète de la carte")
     pokemonStats: Optional[PokemonStats] = Field(
         default=None,
-        description="Statistiques Pokémon et lignée d'évolution (null pour les cartes Dresseur et Énergie).",
+        description="Statistiques Pokémon déterministes (`null` si Dresseur ou Énergie)",
     )
-    category: CardCategory = Field(..., description="Catégorie principale de la carte.")
-    subCategory: CardSubCategory = Field(..., description="Sous-catégorie de la carte.")
+    category: CardCategory = Field(description="Catégorie principale")
+    subCategory: CardSubCategory = Field(description="Sous-catégorie")
     playableActions: List[PlayableAction] = Field(
-        ...,
-        description="Actions jouables compilées sous contrainte de schéma GBNF.",
+        default_factory=list,
+        description="Liste ordonnée des actions jouables",
     )
     strategicEvaluator: StrategicEvaluator = Field(
-        ...,
-        description="Évaluateur stratégique compilé sous contrainte de schéma GBNF.",
+        default_factory=StrategicEvaluator,
+        description="Profil d'évaluation stratégique",
     )
     compilationMetadata: Optional[CompilationMetadata] = Field(
         default=None,
-        description="Métadonnées d'exécution du compilateur.",
+        description="Métadonnées de compilation IA / déterministe",
     )
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _val_cat(cls, v: Any) -> CardCategory:
+        return _coerce_card_category(v)
+
+    @field_validator("subCategory", mode="before")
+    @classmethod
+    def _val_subcat(cls, v: Any) -> CardSubCategory:
+        return _coerce_card_subcategory(v)

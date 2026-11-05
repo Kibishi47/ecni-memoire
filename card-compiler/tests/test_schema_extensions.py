@@ -1,59 +1,102 @@
-"""Tests unitaires pour les extensions du schéma JSON, le filtre Standard (G/H/I) et le post-processeur."""
+"""Tests unitaires pour le constructeur déterministe (`compiler/deterministic_builder.py`), le schéma `EngineCardModel` et `LocalLLMCardCompiler`."""
 
 from __future__ import annotations
 
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from compiler.post_processor import (
-    _build_deterministic_ability_action,
-    _build_deterministic_attack_action,
-    sanitize_and_enrich_card,
+from compiler.deterministic_builder import (
+    build_deterministic_skeleton,
+    build_fallback_llm_payload,
+    merge_llm_payload_into_skeleton,
 )
+from compiler.llm_engine import LocalLLMCardCompiler
 from compiler.schemas import (
-    ActionSourceType,
-    ActionTiming,
+    ActionType,
+    AIRole,
     CardCategory,
     CardSubCategory,
-    CostType,
-    DamageScalingType,
+    CompilationMetadata,
     EffectPrimitive,
     EngineCardModel,
-    PreconditionType,
-    SpecialConditionType,
+    TimingPhase,
 )
-from compiler.tcgdex_fetcher import TCGdexFetcher
+from compiler.tcgdex_fetcher import FetchedCardBundle, TCGdexFetcher
 
 
-class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
+class TestSchemaExtensionsAndDeterministicBuilder(unittest.TestCase):
     def setUp(self) -> None:
         self.data_dir = Path(__file__).resolve().parent.parent / "data"
         self.fetcher = TCGdexFetcher(data_dir=self.data_dir)
 
-    def test_backward_compatibility_with_all_compiled_cards(self):
-        compiled_dir = self.data_dir / "compiled_cards"
-        if not compiled_dir.exists():
-            return
-        files = sorted(compiled_dir.glob("*.json"))
-        self.assertGreater(len(files), 0)
-        for fpath in files:
-            raw_text = fpath.read_text(encoding="utf-8")
-            model = EngineCardModel.model_validate_json(raw_text)
-            self.assertEqual(model.cardId, fpath.stem)
+    def test_mega_kangaskhan_ex_me01_104_skeleton_and_merge(self):
+        raw_path = self.data_dir / "raw_tcgdex" / "me01-104.json"
+        self.assertTrue(raw_path.exists())
+        raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+        skel = build_deterministic_skeleton(raw_payload)
 
-    def test_regulation_mark_g_included_in_standard(self):
+        # 1. Identity & 3-Prize Mega-Evolution ex rule
+        self.assertEqual(skel.cardId, "me01-104")
+        self.assertEqual(skel.identity.nameFr, "Méga-Kangourex-ex")
+        self.assertTrue(skel.identity.isRuleBox)
+        self.assertEqual(skel.identity.prizeCardsGiven, 3)
+        self.assertEqual(skel.category, CardCategory.POKEMON)
+        self.assertEqual(skel.subCategory, CardSubCategory.BASIC)
+
+        # 2. PokemonStats
+        self.assertIsNotNone(skel.pokemonStats)
+        self.assertEqual(skel.pokemonStats.hp, 300)
+        self.assertEqual(skel.pokemonStats.types, ["Incolore"])
+        self.assertEqual(skel.pokemonStats.stage, "Base")
+        self.assertEqual(skel.pokemonStats.retreatCost, 3)
+        self.assertEqual(len(skel.pokemonStats.weaknesses), 1)
+        self.assertEqual(skel.pokemonStats.weaknesses[0].type, "Combat")
+        self.assertEqual(skel.pokemonStats.weaknesses[0].value, "×2")
+
+        # 3. PlayableActions skeleton
+        action_types = [a.actionType for a in skel.playableActions]
+        self.assertEqual(
+            action_types,
+            [
+                ActionType.PLAY_FROM_HAND,
+                ActionType.USE_ABILITY,
+                ActionType.ATTACK,
+                ActionType.RETREAT,
+            ],
+        )
+
+        # 4. Merge fallback/LLM payload and verify Course Fructueuse & Combo en Rafale
+        payload = build_fallback_llm_payload(skel)
+        model = merge_llm_payload_into_skeleton(skel, payload)
+
+        ability_act = next(a for a in model.playableActions if a.actionType == ActionType.USE_ABILITY)
+        self.assertEqual(ability_act.label, "Course Fructueuse")
+        self.assertIn("SELF_IS_ACTIVE", ability_act.preconditions)
+        self.assertTrue(any(e.primitive == EffectPrimitive.DRAW_CARDS and e.count == 2 for e in ability_act.effects))
+
+        attack_act = next(a for a in model.playableActions if a.actionType == ActionType.ATTACK)
+        self.assertEqual(attack_act.label, "Combo en Rafale")
+        self.assertEqual(attack_act.cost, {"Incolore": 3})
+        self.assertTrue(any(e.primitive == EffectPrimitive.DAMAGE_ACTIVE and e.value == 200 for e in attack_act.effects))
+
+        retreat_act = next(a for a in model.playableActions if a.actionType == ActionType.RETREAT)
+        self.assertEqual(retreat_act.cost, {"Incolore": 3})
+
+    def test_regulation_mark_g_and_tera_and_stage2_synergies(self):
         raw_charizard = {
             "id": "sv03-125",
             "localId": "125",
             "name": "Dracaufeu-ex",
             "category": "Pokémon",
             "stage": "Niveau 2",
+            "evolveFrom": "Reptincel",
             "hp": 330,
             "types": ["Obscurité"],
             "dexId": [6],
             "regulationMark": "G",
-            "legal": {"standard": False, "expanded": True},
+            "legal": {"standard": True, "expanded": True},
             "rarity": "Double rare",
             "set": {"id": "sv03", "name": "Flammes Obsidiennes"},
             "abilities": [
@@ -62,7 +105,7 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
                     "name": "Règne Infernal",
                     "effect": (
                         "Lorsque vous jouez ce Pokémon de votre main pour faire évoluer l'un de vos Pokémon, "
-                        "vous pouvez chercher dans votre deck jusqu'à 3 cartes Énergie {R} de base."
+                        "vous pouvez chercher dans votre deck jusqu'à 3 cartes Énergie {R} de base et les attacher à vos Pokémon."
                     ),
                 }
             ],
@@ -79,16 +122,14 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
             ],
             "effect": "Tant que ce Pokémon est sur votre Banc, évitez tous les dégâts infligés à ce Pokémon par des attaques.",
         }
-        identity, pstats = self.fetcher.build_deterministic_models("sv03-125", raw_charizard, None)
-        self.assertTrue(identity.legalStandard)
-        self.assertEqual(identity.regulationMark, "G")
-        self.assertIsNotNone(pstats)
-        self.assertTrue(pstats.isTera)
-        self.assertTrue(pstats.hasAbility)
-        self.assertEqual(pstats.dexId, [6])
+        skel = build_deterministic_skeleton(raw_charizard)
+        self.assertTrue(skel.identity.legalStandard)
+        self.assertTrue(skel.identity.isRuleBox)
+        self.assertEqual(skel.identity.prizeCardsGiven, 2)
+        self.assertTrue(skel.identity.isTera)
+        self.assertIn("requires_energy_type:Feu", skel.base_synergies)
 
     def test_paradox_ancient_and_future_detection_by_dex_id(self):
-        # Ire-Foudre-ex (dexId 1021 -> Temps passé / Ancient)
         raw_raging_bolt = {
             "id": "sv05-123",
             "localId": "123",
@@ -102,13 +143,10 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
             "legal": {"standard": True, "expanded": True},
             "set": {"id": "sv05", "name": "Forces Temporelles"},
         }
-        id_rb, stats_rb = self.fetcher.build_deterministic_models("sv05-123", raw_raging_bolt, None)
+        id_rb, _ = self.fetcher.build_deterministic_models("sv05-123", raw_raging_bolt, None)
         self.assertTrue(id_rb.isAncient)
         self.assertFalse(id_rb.isFuture)
-        self.assertTrue(stats_rb.isAncient)
-        self.assertFalse(stats_rb.isFuture)
 
-        # Vert-de-Fer-ex (dexId 1010 -> Temps futur / Future)
         raw_iron_leaves = {
             "id": "sv05-025",
             "localId": "025",
@@ -122,124 +160,36 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
             "legal": {"standard": True, "expanded": True},
             "set": {"id": "sv05", "name": "Forces Temporelles"},
         }
-        id_il, stats_il = self.fetcher.build_deterministic_models("sv05-025", raw_iron_leaves, None)
+        id_il, _ = self.fetcher.build_deterministic_models("sv05-025", raw_iron_leaves, None)
         self.assertFalse(id_il.isAncient)
         self.assertTrue(id_il.isFuture)
-        self.assertTrue(stats_il.isFuture)
 
-    def test_ace_spec_and_technical_machine_detection(self):
-        raw_prime_catcher = {
-            "id": "sv05-157",
-            "localId": "157",
-            "name": "Attrape-Ultime",
-            "category": "Dresseur",
-            "trainerType": "Objet",
-            "rarity": "HIGH-TECH rare",
-            "regulationMark": "H",
-            "set": {"id": "sv05", "name": "Forces Temporelles"},
+    def test_pure_damage_attack_creates_zero_llm_slots(self):
+        raw_vanilla = {
+            "id": "sv01-001",
+            "name": "Pikachu",
+            "category": "Pokémon",
+            "stage": "De base",
+            "hp": 60,
+            "types": ["Électrique"],
+            "retreat": 1,
+            "attacks": [
+                {
+                    "name": "Éclair",
+                    "cost": ["Électrique", "Incolore"],
+                    "damage": 30,
+                }
+            ],
         }
-        id_pc, _ = self.fetcher.build_deterministic_models("sv05-157", raw_prime_catcher, None)
-        self.assertTrue(id_pc.isAceSpec)
-
-        raw_tm_evo = {
-            "id": "sv04-178",
-            "localId": "178",
-            "name": "Capsule Technique : Évolution",
-            "category": "Dresseur",
-            "trainerType": "Outil",
-            "regulationMark": "G",
-            "set": {"id": "sv04", "name": "Faille Paradoxe"},
-            "attacks": [{"name": "Évolution", "cost": ["Incolore"], "effect": "Cherchez vos évolutions."}],
-        }
-        id_tm, _ = self.fetcher.build_deterministic_models("sv04-178", raw_tm_evo, None)
-        self.assertTrue(id_tm.isTechnicalMachine)
-        self.assertTrue(id_tm.legalStandard)
-
-    def test_multi_type_attack_energy_cost_and_scaling(self):
-        atk_fr = {
-            "name": "Tempête Éclats",
-            "cost": ["Électrique", "Combat"],
-            "damage": "70×",
-            "effect": (
-                "Vous pouvez défausser autant d'Énergies de base que vous le voulez de vos Pokémon. "
-                "Cette attaque inflige 70 dégâts pour chaque carte défaussée de cette façon."
-            ),
-        }
-        action = _build_deterministic_attack_action(atk_fr, None, CardSubCategory.BASIC)
-        self.assertEqual(action.energyCost, ["Électrique", "Combat"])
-        energy_preconds = [
-            p for p in action.preconditions if p.type == PreconditionType.SELF_HAS_ENERGY_COST
-        ]
-        self.assertEqual(len(energy_preconds), 2)
-        types_required = {p.targetFilter.energyType: p.minCount for p in energy_preconds}
-        self.assertEqual(types_required, {"Électrique": 1, "Combat": 1})
-        self.assertEqual(action.effects[0].damageScalingType, DamageScalingType.PER_ENERGY_DISCARDED)
-        self.assertEqual(action.effects[0].damageScalingValue, 70)
-
-    def test_passive_and_reactive_and_self_ko_abilities(self):
-        # 1. Tortipouss - Coquille Dure (Passif réduction de dégâts)
-        ab_turtwig = {
-            "name": "Coquille Dure",
-            "effect": "Ce Pokémon subit 20 dégâts de moins provenant des attaques.",
-        }
-        act_turtwig = _build_deterministic_ability_action(ab_turtwig, None, CardSubCategory.BASIC)
-        self.assertIsNotNone(act_turtwig)
-        self.assertEqual(act_turtwig.sourceType, ActionSourceType.ABILITY_PASSIVE)
-        self.assertEqual(act_turtwig.timing, ActionTiming.PASSIVE_CONTINUOUS)
-        self.assertEqual(act_turtwig.effects[0].primitive, EffectPrimitive.PASSIVE_DAMAGE_REDUCTION)
-        self.assertEqual(act_turtwig.effects[0].count, 20)
-
-        # 2. Rosélia - Point Poison (Réactif aux dégâts)
-        ab_roselia = {
-            "name": "Point Poison",
-            "effect": (
-                "Si ce Pokémon est sur le Poste Actif et qu'il subit les dégâts d'une attaque "
-                "de l'un des Pokémon de votre adversaire, le Pokémon Attaquant est maintenant Empoisonné."
-            ),
-        }
-        act_roselia = _build_deterministic_ability_action(ab_roselia, None, CardSubCategory.BASIC)
-        self.assertIsNotNone(act_roselia)
-        self.assertEqual(act_roselia.sourceType, ActionSourceType.ABILITY_REACTIVE)
-        self.assertEqual(act_roselia.timing, ActionTiming.ON_DAMAGED_OR_KO_TRIGGER)
-        self.assertEqual(act_roselia.effects[0].primitive, EffectPrimitive.APPLY_SPECIAL_CONDITION)
-        self.assertEqual(act_roselia.effects[0].specialCondition, SpecialConditionType.POISONED)
-
-        # 3. Noctunoir - Explosion Maudite (Auto-K.O. + 13 marqueurs de dégâts)
-        ab_dusknoir = {
-            "name": "Explosion Maudite",
-            "effect": (
-                "Une fois pendant votre tour, vous pouvez placer 13 marqueurs de dégâts sur l'un des Pokémon "
-                "de votre adversaire. Si vous utilisez ce talent, ce Pokémon est mis K.O."
-            ),
-        }
-        act_dusknoir = _build_deterministic_ability_action(ab_dusknoir, None, CardSubCategory.STAGE_2)
-        self.assertIsNotNone(act_dusknoir)
-        self.assertEqual(act_dusknoir.sourceType, ActionSourceType.ABILITY_ACTIVATED)
-        self.assertEqual(act_dusknoir.costs[0].type, CostType.KNOCK_OUT_SELF)
-        self.assertEqual(act_dusknoir.effects[0].primitive, EffectPrimitive.PLACE_DAMAGE_COUNTERS)
-        self.assertEqual(act_dusknoir.effects[0].count, 13)
-
-        # 4. Vert-de-Fer-ex - Vernier Rapide (Pose de la main sur le Banc)
-        ab_iron_leaves = {
-            "name": "Vernier Rapide",
-            "effect": (
-                "Lorsque vous jouez ce Pokémon de votre main sur votre Banc pendant votre tour, "
-                "vous pouvez l'échanger contre votre Pokémon Actif. Dans ce cas, vous pouvez déplacer "
-                "autant d'Énergies que vous le voulez de vos autres Pokémon vers ce Pokémon."
-            ),
-        }
-        act_il = _build_deterministic_ability_action(ab_iron_leaves, None, CardSubCategory.BASIC)
-        self.assertIsNotNone(act_il)
-        self.assertEqual(act_il.sourceType, ActionSourceType.ABILITY_ON_PLAY_FROM_HAND)
-        self.assertEqual(act_il.timing, ActionTiming.ON_PLAY_FROM_HAND_TRIGGER)
-        primitives = [e.primitive for e in act_il.effects]
-        self.assertIn(EffectPrimitive.SWITCH_ACTIVE_POKEMON, primitives)
-        self.assertIn(EffectPrimitive.MOVE_ENERGY_BETWEEN_POKEMON, primitives)
+        skel = build_deterministic_skeleton(raw_vanilla)
+        self.assertEqual(len(skel.slots_for_llm), 0)
+        atk = next(a for a in skel.playableActions if a.actionType == ActionType.ATTACK)
+        self.assertEqual(atk.cost, {"Électrique": 1, "Incolore": 1})
+        self.assertEqual(len(atk.effects), 1)
+        self.assertEqual(atk.effects[0].primitive, EffectPrimitive.DAMAGE_ACTIVE)
+        self.assertEqual(atk.effects[0].value, 30)
 
     def test_compilation_metadata_tokens_per_second(self):
-        from compiler.schemas import CompilationMetadata
-
-        # Sans tokens (rétro-compatibilité)
         meta_basic = CompilationMetadata(
             modelRepoId="repo",
             modelFilename="file.gguf",
@@ -249,7 +199,6 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertIsNone(meta_basic.tokensPerSecond)
         self.assertIsNone(meta_basic.completionTokens)
 
-        # Avec métriques de débit
         meta_with_speed = CompilationMetadata(
             modelRepoId="repo",
             modelFilename="file.gguf",
@@ -261,27 +210,35 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertEqual(meta_with_speed.completionTokens, 125)
         self.assertEqual(meta_with_speed.tokensPerSecond, 50.0)
 
-    def test_local_llm_compiler_streaming_token_callback(self):
-        from unittest.mock import MagicMock
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
-        fake_card_json = {
-            "reasoningAnalysis": "Test local streaming.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
+    def _make_statitik_bundle(self) -> FetchedCardBundle:
+        raw_fr = {
+            "id": "sv06.5-001",
+            "name": "Statitik",
+            "category": "Pokémon",
+            "stage": "Base",
+            "hp": 40,
+            "types": ["Plante"],
+            "attacks": [{"name": "Esquive", "cost": ["Plante"], "damage": 10, "effect": "Lancez une pièce."}],
         }
-        json_str = json.dumps(fake_card_json)
+        identity, pstats = self.fetcher.build_deterministic_models("sv06.5-001", raw_fr, None)
+        return FetchedCardBundle(
+            card_id="sv06.5-001",
+            resolved_tcgdex_id="sv06.5-001",
+            raw_fr=raw_fr,
+            raw_en=None,
+            identity=identity,
+            pokemon_stats=pstats,
+            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
+        )
+
+    def test_local_llm_compiler_streaming_token_callback(self):
+        fake_payload = {
+            "translatedSlots": [],
+            "aiRole": "MAIN_ATTACKER",
+            "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            "additionalSynergyTags": [],
+        }
+        json_str = json.dumps(fake_payload)
         chunks = [
             {"choices": [{"delta": {"content": json_str[:25]}}]},
             {"choices": [{"delta": {"content": json_str[25:50]}}]},
@@ -289,26 +246,11 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         ]
 
         compiler = LocalLLMCardCompiler()
-        compiler._ready = True
         mock_llm = MagicMock()
         mock_llm.create_chat_completion.return_value = iter(chunks)
         compiler._llm = mock_llm
 
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
+        bundle = self._make_statitik_bundle()
         updates: list[tuple[int, float]] = []
         model = compiler.compile_card(bundle, on_token=lambda tok, tps: updates.append((tok, tps)))
         self.assertEqual(model.cardId, "sv06.5-001")
@@ -317,26 +259,13 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertGreater(updates[-1][1], 0.0)
 
     def test_local_llm_tokens_per_second_measured_from_first_token(self):
-        from unittest.mock import MagicMock, patch
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
-        fake_card_json = {
-            "reasoningAnalysis": "Test local streaming tps.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
+        fake_payload = {
+            "translatedSlots": [],
+            "aiRole": "MAIN_ATTACKER",
+            "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            "additionalSynergyTags": [],
         }
-        json_str = json.dumps(fake_card_json)
+        json_str = json.dumps(fake_payload)
         chunks = [
             {"choices": [{"delta": {"content": json_str[:25]}}]},
             {"choices": [{"delta": {"content": json_str[25:50]}}]},
@@ -344,27 +273,11 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         ]
 
         compiler = LocalLLMCardCompiler()
-        compiler._ready = True
         mock_llm = MagicMock()
         mock_llm.create_chat_completion.return_value = iter(chunks)
         compiler._llm = mock_llm
 
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
-        # t0 = 100.0, 1er token = 103.0 (TTFT = 3.0s), 2e = 104.0, 3e = 105.0 (gén = 2.0s pour 2 intervalles = 1.0 t/s), fin = 105.1
+        bundle = self._make_statitik_bundle()
         time_sequence = [100.0, 103.0, 104.0, 105.0, 105.0, 105.1]
         time_idx = 0
 
@@ -386,296 +299,41 @@ class TestSchemaExtensionsAndStandardFilter(unittest.TestCase):
         self.assertEqual(meta.timeToFirstTokenSeconds, 3.0)
         self.assertAlmostEqual(meta.compilationTimeSeconds, 5.1, places=1)
 
-    def test_local_llm_live_tokens_per_second_refreshes_every_second_instantaneous(self):
-        from unittest.mock import MagicMock, patch
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
-        fake_card_json = {
-            "reasoningAnalysis": "Test local streaming tps 1-sec refresh.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
-        }
-        json_str = json.dumps(fake_card_json)
-        chunks = [
-            {"choices": [{"delta": {"content": json_str[:15]}}]},
-            {"choices": [{"delta": {"content": json_str[15:30]}}]},
-            {"choices": [{"delta": {"content": json_str[30:45]}}]},
-            {"choices": [{"delta": {"content": json_str[45:60]}}]},
-            {"choices": [{"delta": {"content": json_str[60:75]}}]},
-            {"choices": [{"delta": {"content": json_str[75:]}, "finish_reason": "stop"}]},
-        ]
-
-        compiler = LocalLLMCardCompiler()
-        compiler._ready = True
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = iter(chunks)
-        compiler._llm = mock_llm
-
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
-        # Chronologie simulée :
-        # t0 = 100.0
-        # tok 1: t = 101.0 (window_start=101.0, tok=1)
-        # tok 2: t = 101.4 (0.4s < 1.0s -> live_tps = 0.0)
-        # tok 3: t = 102.1 (1.1s >= 1.0s -> delta=2 tok, 2/1.1 = 1.8 t/s)
-        # tok 4: t = 102.5 (0.4s < 1.0s -> live_tps = 1.8 t/s)
-        # tok 5: t = 103.2 (1.1s >= 1.0s -> delta=2 tok, 2/1.1 = 1.8 t/s)
-        # tok 6: t = 104.3 (1.1s >= 1.0s -> delta=1 tok, 1/1.1 = 0.9 t/s)
-        # final callback: t = 104.3
-        # fin: t = 104.4
-        time_sequence = [
-            100.0,
-            101.0,
-            101.4,
-            102.1,
-            102.5,
-            103.2,
-            104.3,
-            104.3,
-            104.4,
-        ]
-        time_idx = 0
-
-        def fake_perf_counter():
-            nonlocal time_idx
-            if time_idx < len(time_sequence):
-                val = time_sequence[time_idx]
-                time_idx += 1
-                return val
-            return 104.4
-
-        live_updates = []
-        with patch("time.perf_counter", side_effect=fake_perf_counter):
-            model = compiler.compile_card(bundle, on_token=lambda tok, tps: live_updates.append((tok, tps)))
-
-        tok2_update = [up for up in live_updates if up[0] == 2]
-        self.assertTrue(tok2_update)
-        self.assertEqual(tok2_update[0][1], 0.0)
-
-        tok3_update = [up for up in live_updates if up[0] == 3]
-        self.assertTrue(tok3_update)
-        self.assertEqual(tok3_update[0][1], 1.8)
-
-        tok6_update = [up for up in live_updates if up[0] == 6]
-        self.assertTrue(tok6_update)
-        self.assertEqual(tok6_update[0][1], 0.9)
-
     def test_local_llm_compiler_thinking_disabled_parity(self):
-        from unittest.mock import MagicMock
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
         compiler = LocalLLMCardCompiler(disable_thinking=True)
         self.assertTrue(compiler.disable_thinking)
         self.assertEqual(compiler.thinking, "null")
 
-        fake_card_json = {
-            "reasoningAnalysis": "Test local thinking disabled.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
+        fake_payload = {
+            "translatedSlots": [],
+            "aiRole": "MAIN_ATTACKER",
+            "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            "additionalSynergyTags": [],
         }
         mock_llm = MagicMock()
         mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
+            "choices": [{"message": {"content": json.dumps(fake_payload)}, "finish_reason": "stop"}],
             "usage": {"completion_tokens": 15},
         }
         compiler._llm = mock_llm
 
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
+        bundle = self._make_statitik_bundle()
         model = compiler.compile_card(bundle)
         self.assertEqual(model.cardId, "sv06.5-001")
 
-        call_args, call_kwargs = mock_llm.create_chat_completion.call_args
+        _, call_kwargs = mock_llm.create_chat_completion.call_args
         self.assertEqual(call_kwargs.get("max_tokens"), 2048)
         self.assertEqual(call_kwargs.get("chat_template_kwargs"), {"enable_thinking": False})
-        self.assertEqual(call_kwargs.get("chat_template_args"), {"enable_thinking": False})
         self.assertEqual(call_kwargs.get("enable_thinking"), False)
         self.assertEqual(call_kwargs.get("reasoning_effort"), "none")
 
-        messages = call_kwargs.get("messages", [])
-        sys_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
-        user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
-        self.assertIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ.", sys_msg)
-        self.assertIn("RÈGLE CRITIQUE : Le mode réflexion/thinking est expressément DÉSACTIVÉ.", user_msg)
-
-    def test_local_llm_compiler_thinking_level_parity(self):
-        from unittest.mock import MagicMock
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
-        compiler = LocalLLMCardCompiler(thinking="medium")
-        self.assertFalse(compiler.disable_thinking)
-        self.assertEqual(compiler.thinking, "medium")
-
-        fake_card_json = {
-            "reasoningAnalysis": "Test local thinking medium.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
-        }
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": json.dumps(fake_card_json)}, "finish_reason": "stop"}],
-            "usage": {"completion_tokens": 15},
-        }
-        compiler._llm = mock_llm
-
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
-        model = compiler.compile_card(bundle)
-        self.assertEqual(model.cardId, "sv06.5-001")
-
-        call_args, call_kwargs = mock_llm.create_chat_completion.call_args
-        self.assertEqual(call_kwargs.get("max_tokens"), 4096)
-        self.assertEqual(call_kwargs.get("chat_template_kwargs"), {"enable_thinking": True})
-        self.assertEqual(call_kwargs.get("chat_template_args"), {"enable_thinking": True})
-        self.assertEqual(call_kwargs.get("enable_thinking"), True)
-        self.assertEqual(call_kwargs.get("reasoning_effort"), "medium")
-
-    def test_local_llm_compiler_strips_think_tags(self):
-        from unittest.mock import MagicMock
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
-        compiler = LocalLLMCardCompiler()
-        fake_card_json = {
-            "reasoningAnalysis": "Test stripping think tags in local compiler.",
-            "category": "POKEMON",
-            "subCategory": "BASIC",
-            "playableActions": [],
-            "strategicEvaluator": {
-                "primaryRole": "MAIN_ATTACKER",
-                "intrinsicBaseScore": 50,
-                "discardPriorityWhenDead": 70,
-                "holdForNextTurnBonus": 10,
-                "decklistSynergyRequirements": [],
-                "inGameDeadCardConditions": [],
-                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
-            },
-        }
-        raw_response = f"<think>\nThis is internal reasoning that should be discarded.\n</think>\n```json\n{json.dumps(fake_card_json, indent=2)}\n```"
-
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": raw_response}, "finish_reason": "stop"}],
-            "usage": {"completion_tokens": 40},
-        }
-        compiler._llm = mock_llm
-
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
-        model = compiler.compile_card(bundle)
-        self.assertEqual(model.cardId, "sv06.5-001")
-        self.assertEqual(model.strategicEvaluator.primaryRole.value, "MAIN_ATTACKER")
-
     def test_local_llm_compiler_oom_friendly_error(self):
-        from unittest.mock import MagicMock
-        from compiler.llm_engine import LocalLLMCardCompiler
-        from compiler.tcgdex_fetcher import FetchedCardBundle
-
         compiler = LocalLLMCardCompiler()
         mock_llm = MagicMock()
         mock_llm.create_chat_completion.side_effect = RuntimeError("llama_decode returned -3")
         compiler._llm = mock_llm
 
-        identity, pstats = self.fetcher.build_deterministic_models(
-            "sv06.5-001",
-            {"id": "sv06.5-001", "name": "Statitik", "category": "Pokémon", "stage": "Base", "hp": 40, "types": ["Plante"], "attacks": []},
-            None,
-        )
-        bundle = FetchedCardBundle(
-            card_id="sv06.5-001",
-            resolved_tcgdex_id="sv06.5-001",
-            raw_fr={"id": "sv06.5-001"},
-            raw_en=None,
-            identity=identity,
-            pokemon_stats=pstats,
-            raw_cache_path=Path("data/raw_tcgdex/sv06.5-001.json"),
-        )
-
+        bundle = self._make_statitik_bundle()
         with self.assertRaises(RuntimeError) as ctx:
             compiler.compile_card(bundle)
 

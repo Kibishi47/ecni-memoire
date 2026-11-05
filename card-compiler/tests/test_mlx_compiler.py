@@ -54,7 +54,7 @@ def create_fake_card_bundle(
         "id": card_id,
         "name": name_fr,
         "category": "Pokemon",
-        "attacks": [{"name": "Éclair", "cost": ["Électrique"], "damage": "20"}],
+        "attacks": [{"name": "Éclair", "cost": ["Électrique"], "damage": "20", "effect": "Lancez une pièce."}],
     }
     return FetchedCardBundle(
         card_id=card_id,
@@ -219,9 +219,10 @@ class TestMLXCompiler(unittest.TestCase):
 
         self.assertIsInstance(card, EngineCardModel)
         self.assertEqual(card.cardId, "sv01-001")
-        self.assertEqual(len(card.playableActions), 1)
-        self.assertTrue(card.playableActions[0].actionId.startswith("attack_"))
-        self.assertEqual(card.playableActions[0].label, "Éclair")
+        self.assertEqual(len(card.playableActions), 3)
+        attack_actions = [a for a in card.playableActions if a.actionId.startswith("attack_")]
+        self.assertEqual(len(attack_actions), 1)
+        self.assertEqual(attack_actions[0].label, "Éclair")
         self.assertIsNotNone(card.compilationMetadata)
         self.assertEqual(card.compilationMetadata.completionTokens, 90)
         self.assertIn("uqer1244/Qwen3.8-27B-GSQ-RCO-MLX", card.compilationMetadata.modelRepoId)

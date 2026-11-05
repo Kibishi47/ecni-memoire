@@ -75,7 +75,7 @@ def make_test_bundle(
         "id": card_id,
         "name": name_fr,
         "category": "Pokemon",
-        "attacks": [{"name": "Roulade", "cost": ["Incolore"], "damage": "10"}],
+        "attacks": [{"name": "Roulade", "cost": ["Incolore"], "damage": "10", "effect": "Lancez une pièce."}],
     }
     return FetchedCardBundle(
         card_id=card_id,
@@ -405,7 +405,7 @@ class TestCliTwoPassCommands(unittest.TestCase):
 
     def test_coding_output_auto_healing_resilience(self) -> None:
         """Vérifie que les variations de format générées par l'IA de coding (ex: Rare Candy sv04-125) sont auto-corrigées."""
-        from compiler.schemas import LLMCompiledCardPart, StrategicRole, ActionSourceType
+        from compiler.schemas import AIRole, EffectPrimitive, LLMCompiledPayload
 
         raw_llm_dict = {
             "reasoningAnalysis": "Super Bonbon permet d'évoluer directement un Pokémon de base en Niveau 2.",
@@ -413,13 +413,14 @@ class TestCliTwoPassCommands(unittest.TestCase):
             "subCategory": "ITEM",
             "playableActions": [
                 {
-                    "actionId": "play_rare_candy",
+                    "actionId": "trainer_0",
                     "preconditions": [
                         "NOT_FIRST_TURN",
                         "BASIC_POKEMON_IN_PLAY",
-                        "STAGE_2_CARD_IN_HAND"
+                        "STAGE_2_CARD_IN_HAND",
                     ],
-                    "primitives": ["EVOLVE_POKEMON", "USE_STAGE_2_CARD"]
+                    "primitives": ["EVOLVE_POKEMON"],
+                    "deadCardCondition": "NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY",
                 }
             ],
             "strategicEvaluator": {
@@ -427,36 +428,31 @@ class TestCliTwoPassCommands(unittest.TestCase):
                 "turnPhaseWeights": {
                     "PREPARATION": 0.0,
                     "MAIN_PHASE_1": 0.0,
-                    "MAIN_PHASE_2": 1.5,
-                    "END_PHASE": 2.0
+                    "MAIN_PHASE_2": 0.8,
+                    "END_PHASE": 1.5,
                 },
                 "decklistSynergyRequirements": [
                     "BASIC_POKEMON",
-                    "STAGE_2_EVOLUTION"
+                    "STAGE_2_EVOLUTION",
                 ],
                 "inGameDeadCardConditions": [
                     "NO_STAGE_2_EVOLUTION_IN_HAND",
-                    "ALL_BASIC_POKEMON_EVOLVED_OR_NO_STAGE_2"
-                ]
-            }
+                ],
+            },
         }
 
-        part = LLMCompiledCardPart.model_validate(raw_llm_dict)
-        self.assertEqual(part.category.value, "TRAINER")
-        self.assertEqual(part.subCategory.value, "ITEM")
-        self.assertEqual(len(part.playableActions), 1)
-        action = part.playableActions[0]
-        self.assertEqual(action.label, "play_rare_candy")
-        self.assertEqual(action.sourceType, ActionSourceType.TRAINER_PLAY)
-        self.assertFalse(action.canUseTurn1GoingFirst)
-        self.assertFalse(action.canUseTurn1GoingSecond)
-        self.assertEqual(len(action.effects), 2)
-        self.assertEqual(len(action.preconditions), 3)
-        self.assertEqual(part.strategicEvaluator.primaryRole, StrategicRole.EVOLUTION_ACCELERATOR)
-        self.assertEqual(part.strategicEvaluator.turnPhaseWeights.turn1, 0.0)
-        self.assertEqual(part.strategicEvaluator.turnPhaseWeights.turn4Plus, 2.0)
-        self.assertEqual(len(part.strategicEvaluator.decklistSynergyRequirements), 2)
-        self.assertEqual(len(part.strategicEvaluator.inGameDeadCardConditions), 2)
+        payload = LLMCompiledPayload.model_validate(raw_llm_dict)
+        self.assertEqual(len(payload.translatedSlots), 1)
+        slot = payload.translatedSlots[0]
+        self.assertEqual(slot.slotId, "trainer_0")
+        self.assertEqual(len(slot.effects), 1)
+        self.assertEqual(slot.effects[0].primitive, EffectPrimitive.EVOLVE_POKEMON)
+        self.assertEqual(len(slot.preconditions), 3)
+        self.assertEqual(slot.deadCardCondition, "NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY")
+        self.assertEqual(payload.aiRole, AIRole.CONSISTENCY_BOOSTER)
+        self.assertEqual(payload.turnPhaseWeights.turn1, 0.0)
+        self.assertEqual(payload.turnPhaseWeights.turn4Plus, 1.0)
+        self.assertEqual(len(payload.additionalSynergyTags), 2)
 
 
 if __name__ == "__main__":

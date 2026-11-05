@@ -16,13 +16,19 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from compiler.schemas import (
+    AIRole,
+    ActionType,
+    AtomicEffect,
     CardCategory,
     CardIdentity,
     CardSubCategory,
     CompilationMetadata,
+    EffectPrimitive,
     EngineCardModel,
+    PlayableAction,
     StrategicEvaluator,
     StrategicRole,
+    TimingPhase,
     TurnPhaseWeights,
 )
 from compiler.tcgdex_fetcher import FetchedCardBundle
@@ -285,9 +291,30 @@ def build_basic_energy_model(
             rawRulesText=[],
         )
 
+    playable_actions = [
+        PlayableAction(
+            actionId="attach_energy",
+            label=f"Attacher {deterministic_identity.nameFr}",
+            actionType=ActionType.ATTACH_ENERGY,
+            timingPhase=TimingPhase.MAIN_PHASE_1,
+            canUseTurn1GoingFirst=True,
+            canUseTurn1GoingSecond=True,
+            cost={},
+            preconditions=[],
+            effects=[
+                AtomicEffect(
+                    primitive=EffectPrimitive.ATTACH_ENERGY,
+                    target="OWN_POKEMON_ANY",
+                    count=1,
+                    zone="HAND",
+                )
+            ],
+            deadCardCondition=None,
+        )
+    ]
+
     evaluator = StrategicEvaluator(
-        primaryRole=StrategicRole.RESOURCE_ENERGY,
-        intrinsicBaseScore=50,
+        aiRole=AIRole.ENERGY_ACCELERATOR,
         turnPhaseWeights=TurnPhaseWeights(
             turn1=1.0,
             turn2=1.0,
@@ -295,9 +322,6 @@ def build_basic_energy_model(
             turn4Plus=1.0,
         ),
         decklistSynergyRequirements=[],
-        inGameDeadCardConditions=[],
-        discardPriorityWhenDead=15,
-        holdForNextTurnBonus=25,
     )
 
     metadata = CompilationMetadata(
@@ -313,7 +337,7 @@ def build_basic_energy_model(
         pokemonStats=None,
         category=CardCategory.ENERGY,
         subCategory=CardSubCategory.BASIC_ENERGY,
-        playableActions=[],
+        playableActions=playable_actions,
         strategicEvaluator=evaluator,
         compilationMetadata=metadata,
     )

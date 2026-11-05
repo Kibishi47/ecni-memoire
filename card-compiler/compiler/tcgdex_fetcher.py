@@ -47,7 +47,7 @@ class FetcherProvider(str, Enum):
     sdk = "sdk"
     rest = "rest"
 
-# Liste officielle des 13 cartes stratégiques et énergies de référence du mode --test
+# Liste officielle des 14 cartes stratégiques et énergies de référence du mode --test
 TEST_CARD_IDS: List[str] = [
     "sv04-125",  # Super Bonbon (Rare Candy)
     "sv05-144",  # Poffin Copain-Copain (Buddy-Buddy Poffin)
@@ -60,6 +60,7 @@ TEST_CARD_IDS: List[str] = [
     "sv04-160",  # Attrape-Riposte (Counter Catcher)
     "sv05-123",  # Ire-Foudre-ex (Raging Bolt ex)
     "sv06.5-038",  # Favianos-ex (Fezandipiti ex)
+    "me01-104",  # Méga-Kangourex-ex (Mega Kangaskhan ex)
     "sve-002",  # Énergie Feu (Fire Energy) - Court-circuit statique
     "sve-004",  # Énergie Électrique (Lightning Energy) - Court-circuit statique
 ]
@@ -121,6 +122,11 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "expected_name_fr": "Favianos",
         "expected_name_en": "Fezandipiti",
         "fallback_tcgdex_id": "sv06.5-038",
+    },
+    "me01-104": {
+        "expected_name_fr": "Kangourex",
+        "expected_name_en": "Kangaskhan",
+        "fallback_tcgdex_id": "me01-104",
     },
     "sve-002": {
         "expected_name_fr": "Énergie Feu",
@@ -320,24 +326,15 @@ def extract_raw_rules_text(
     return lines
 
 
+from compiler.deterministic_builder import (
+    build_identity_and_stats_from_raw,
+    detect_rule_box_and_prizes as _det_rule_box_and_prizes,
+)
+
+
 def detect_rule_box_and_prizes(name_fr: str, name_en: Optional[str], raw_fr: Dict[str, Any]) -> Tuple[bool, int]:
-    """Détermine si un Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Radieux) et le nombre de Récompenses."""
-    combined_name = f"{name_fr} {name_en or ''}"
-    suffix = str(raw_fr.get("suffix") or "").lower()
-
-    if re.search(r"\bvmax\b", combined_name, flags=re.IGNORECASE) or "vmax" in suffix:
-        return True, 3
-
-    if (
-        re.search(r"(?:\b|-)(ex|v|vstar|gx)\b", combined_name, flags=re.IGNORECASE)
-        or suffix in {"ex", "v", "vstar", "gx"}
-    ):
-        return True, 2
-
-    if re.search(r"\b(radieux|radiant)\b", combined_name, flags=re.IGNORECASE):
-        return True, 1
-
-    return False, 1
+    """Détermine si un Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Méga-ex, Radieux) et le nombre de Récompenses."""
+    return _det_rule_box_and_prizes(name_fr, name_en, raw_fr)
 
 
 class TCGdexFetcher:
@@ -583,188 +580,12 @@ class TCGdexFetcher:
         evolution_info: Optional[Tuple[Optional[str], Optional[str], List[str]]] = None,
     ) -> Tuple[CardIdentity, Optional[PokemonStats]]:
         """Construit `CardIdentity` et `PokemonStats` à partir des données brutes TCGdex."""
-        category, sub_category = infer_category_and_subcategory(raw_fr, raw_en)
-        name_fr = str(raw_fr.get("name") or requested_card_id).strip()
-        name_en = str(raw_en.get("name")).strip() if raw_en and raw_en.get("name") else None
-
-        set_obj = raw_fr.get("set") if isinstance(raw_fr.get("set"), dict) else {}
-        set_id = str(set_obj.get("id") or requested_card_id.split("-")[0]).strip()
-        set_name = str(set_obj.get("name")).strip() if set_obj.get("name") else None
-        local_id = str(raw_fr.get("localId") or requested_card_id.split("-")[-1]).strip()
-
-        reg_mark = raw_fr.get("regulationMark") or (raw_en or {}).get("regulationMark")
-        reg_mark_norm = str(reg_mark).strip().upper() if reg_mark else None
-
-        legal_obj = raw_fr.get("legal") if isinstance(raw_fr.get("legal"), dict) else {}
-        # Inclusion des marques de régulation G, H, I au format Standard (bloc sv01 à sv08.5) + Énergies de Base
-        legal_standard = bool(
-            legal_obj.get("standard", False)
-            or (reg_mark_norm in {"G", "H", "I"})
-            or (sub_category == CardSubCategory.BASIC_ENERGY)
+        return build_identity_and_stats_from_raw(
+            requested_card_id=requested_card_id,
+            raw_fr=raw_fr,
+            raw_en=raw_en,
+            evolution_info=evolution_info,
         )
-        legal_expanded = bool(legal_obj.get("expanded", False) or legal_standard)
-
-        rarity_val = raw_fr.get("rarity") or (raw_en or {}).get("rarity")
-        rarity_lower = str(rarity_val or "").lower()
-        raw_rules_text = extract_raw_rules_text(raw_fr, raw_en)
-        rules_joined_lower = " ".join(raw_rules_text).lower()
-        name_and_rules_lower = f"{name_fr} {name_en or ''} {rules_joined_lower}".lower()
-
-        # Extraction des dexId pour les Pokémon (détection déterministe des Pokémon Paradoxe Temps passé / Temps futur)
-        raw_dex_ids = raw_fr.get("dexId") or (raw_en or {}).get("dexId") or []
-        dex_ids: List[int] = []
-        if isinstance(raw_dex_ids, list):
-            for d in raw_dex_ids:
-                try:
-                    dex_ids.append(int(d))
-                except (TypeError, ValueError):
-                    pass
-
-        ancient_paradox_dex = {984, 985, 986, 987, 988, 989, 1005, 1009, 1020, 1021}
-        future_paradox_dex = {990, 991, 992, 993, 994, 995, 1006, 1010, 1022, 1023}
-
-        is_rule_box, prize_cards = (
-            detect_rule_box_and_prizes(name_fr, name_en, raw_fr)
-            if category == CardCategory.POKEMON
-            else (False, 1)
-        )
-
-        is_ace_spec = (
-            "high-tech" in rarity_lower
-            or "ace spec" in rarity_lower
-            or "high-tech" in rules_joined_lower
-            or "ace spec" in rules_joined_lower
-        )
-
-        if category == CardCategory.POKEMON:
-            is_ancient = (
-                any(d in ancient_paradox_dex for d in dex_ids)
-                or (1007 in dex_ids and set_id.lower() != "sv01" and not is_rule_box)
-                or "temps passé" in name_fr.lower()
-                or "ancient" in (name_en or "").lower()
-            )
-            is_future = (
-                any(d in future_paradox_dex for d in dex_ids)
-                or (1008 in dex_ids and set_id.lower() != "sv01" and not is_rule_box)
-                or "temps futur" in name_fr.lower()
-                or "future" in (name_en or "").lower()
-            )
-        else:
-            is_ancient = (
-                "temps passé" in name_and_rules_lower
-                or "professeure olim" in name_fr.lower()
-                or "professor sada" in (name_en or "").lower()
-                or "tambour éveil" in name_fr.lower()
-                or "awakening drum" in (name_en or "").lower()
-            )
-            is_future = (
-                "temps futur" in name_and_rules_lower
-                or "professeur turum" in name_fr.lower()
-                or "professor turo" in (name_en or "").lower()
-                or "techno-radar" in name_fr.lower()
-                or "techno radar" in (name_en or "").lower()
-                or "capsule de redémarrage" in name_fr.lower()
-                or "reboot pod" in (name_en or "").lower()
-            )
-
-        is_technical_machine = sub_category == CardSubCategory.TOOL and (
-            "capsule technique" in name_fr.lower()
-            or "technical machine" in (name_en or "").lower()
-            or bool(raw_fr.get("attacks") or (raw_en or {}).get("attacks"))
-        )
-
-        identity = CardIdentity(
-            cardId=requested_card_id,
-            nameFr=name_fr,
-            nameEn=name_en,
-            setId=set_id,
-            setName=set_name,
-            localId=local_id,
-            category=category,
-            subCategory=sub_category,
-            regulationMark=reg_mark,
-            legalStandard=legal_standard,
-            legalExpanded=legal_expanded,
-            rarity=rarity_val,
-            imageUrl=raw_fr.get("image") or (raw_en or {}).get("image"),
-            isAceSpec=is_ace_spec,
-            isAncient=is_ancient,
-            isFuture=is_future,
-            isTechnicalMachine=is_technical_machine,
-            rawRulesText=raw_rules_text,
-        )
-
-        pokemon_stats: Optional[PokemonStats] = None
-        if category == CardCategory.POKEMON:
-            hp_raw = raw_fr.get("hp") if raw_fr.get("hp") is not None else (raw_en or {}).get("hp")
-            try:
-                hp = int(hp_raw) if hp_raw is not None else 0
-            except (TypeError, ValueError):
-                hp = 0
-
-            types_list = [str(t) for t in (raw_fr.get("types") or (raw_en or {}).get("types") or [])]
-            stage_str = raw_fr.get("stage") or (raw_en or {}).get("stage")
-
-            if evolution_info is not None:
-                evolves_from, root_basic, evo_chain = evolution_info
-            else:
-                evo_from_raw = raw_fr.get("evolveFrom") or raw_fr.get("evolvesFrom")
-                evolves_from = str(evo_from_raw).strip() if evo_from_raw else None
-                root_basic = evolves_from or name_fr
-                evo_chain = [evolves_from, name_fr] if evolves_from else [name_fr]
-
-            retreat_raw = raw_fr.get("retreat") if raw_fr.get("retreat") is not None else (raw_en or {}).get("retreat")
-            try:
-                retreat_cost = int(retreat_raw) if retreat_raw is not None else 0
-            except (TypeError, ValueError):
-                retreat_cost = 0
-
-            raw_weaknesses = [w for w in (raw_fr.get("weaknesses") or []) if isinstance(w, dict)]
-            weaknesses = [str(w.get("type")) for w in raw_weaknesses if w.get("type")]
-            weakness_mult = "×2"
-            if raw_weaknesses and raw_weaknesses[0].get("value"):
-                weakness_mult = str(raw_weaknesses[0].get("value")).strip()
-
-            raw_resistances = [r for r in (raw_fr.get("resistances") or []) if isinstance(r, dict)]
-            resistances = [str(r.get("type")) for r in raw_resistances if r.get("type")]
-            resistance_mod = -30
-            if raw_resistances and raw_resistances[0].get("value"):
-                try:
-                    resistance_mod = int(str(raw_resistances[0].get("value")).strip())
-                except (TypeError, ValueError):
-                    resistance_mod = -30
-
-            is_tera = (
-                "téracristal" in rules_joined_lower
-                or "pokémon téracristal" in rules_joined_lower
-                or "tera pokémon" in rules_joined_lower
-                or "tant que ce pokémon est sur votre banc, évitez tous les dégâts" in rules_joined_lower
-                or "as long as this pokémon is on your bench, prevent all damage" in rules_joined_lower
-            )
-            has_ability = bool(raw_fr.get("abilities") or (raw_en or {}).get("abilities"))
-
-            pokemon_stats = PokemonStats(
-                hp=hp,
-                types=types_list,
-                dexId=dex_ids,
-                stage=stage_str,
-                evolvesFrom=evolves_from,
-                rootBasicName=root_basic,
-                evolutionChain=evo_chain,
-                retreatCost=retreat_cost,
-                weaknesses=weaknesses,
-                weaknessMultiplier=weakness_mult,
-                resistances=resistances,
-                resistanceModifier=resistance_mod,
-                prizeCardsGiven=prize_cards,
-                isRuleBox=is_rule_box,
-                isTera=is_tera,
-                isAncient=is_ancient,
-                isFuture=is_future,
-                hasAbility=has_ability,
-            )
-
-        return identity, pokemon_stats
 
     async def fetch_card_by_id(
         self,
@@ -826,6 +647,16 @@ class TCGdexFetcher:
                     raw_fr = fb_fr
                     resolved_id = fb_resolved or fallback_id
                     raw_en, _ = await self._get_card_json_with_variants(client, "en", resolved_id)
+
+        if raw_fr is None and cache_path.exists():
+            try:
+                cached_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(cached_payload, dict) and "fr" in cached_payload:
+                    raw_fr = cached_payload["fr"]
+                    raw_en = cached_payload.get("en")
+                    resolved_id = cached_payload.get("resolvedTcgdexId", safe_id)
+            except Exception:
+                pass
 
         if raw_fr is None:
             raise RuntimeError(
