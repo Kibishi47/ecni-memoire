@@ -40,14 +40,176 @@ export function hasCompiledCardData(): boolean {
   return getCompiledCardsCount() > 0
 }
 
+const normNameCache = new Map<string, string>()
+
 export function normalizeCardNameForMatch(name: string): string {
-  return name
+  if (!name) return ''
+  const cached = normNameCache.get(name)
+  if (cached !== undefined) return cached
+  const normalized = name
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[-']/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+  normNameCache.set(name, normalized)
+  return normalized
+}
+
+export interface CardFastMeta {
+  numericId: number
+  normNameFr: string
+  normNameEn: string
+  normCombinedName: string
+  normRootBasicName: string
+  normEvolvesFrom: string
+  normPokeTypes: string[]
+  energyUnitKind: 'DOUBLE_TURBO' | 'WILDCARD' | 'SINGLE'
+  energyProvidedType: string
+  canAttackTwiceStatic: boolean
+  isBraveryCharm: boolean
+  isAreaZeroStadium: boolean
+  hasAbilityFlag: boolean
+}
+
+const cardFastMetaMap = new WeakMap<EngineCardModel, CardFastMeta>()
+const cardKeyToNumericId = new Map<string, number>()
+let nextCardNumericId = 1
+
+function normalizeEnergyTypeInternal(raw: string): string {
+  const norm = normalizeCardNameForMatch(raw)
+  if (norm === 'feu' || norm === 'fire' || norm === 'r') return 'feu'
+  if (norm === 'eau' || norm === 'water' || norm === 'w') return 'eau'
+  if (norm === 'plante' || norm === 'grass' || norm === 'g') return 'plante'
+  if (norm === 'electrique' || norm === 'electrik' || norm === 'lightning' || norm === 'l') return 'electrique'
+  if (norm === 'psy' || norm === 'psychic' || norm === 'p') return 'psy'
+  if (norm === 'combat' || norm === 'fighting' || norm === 'f') return 'combat'
+  if (norm === 'obscurite' || norm === 'darkness' || norm === 'dark' || norm === 'd') return 'obscurite'
+  if (norm === 'metal' || norm === 'm') return 'metal'
+  if (norm === 'fee' || norm === 'fairy' || norm === 'y') return 'fee'
+  return 'incolore'
+}
+
+export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
+  const existing = cardFastMetaMap.get(card)
+  if (existing !== undefined) return existing
+
+  const normNameFr = normalizeCardNameForMatch(card.identity?.nameFr || '')
+  const normNameEn = card.identity?.nameEn ? normalizeCardNameForMatch(card.identity.nameEn) : ''
+  const normCombinedName = normNameEn ? `${normNameFr} ${normNameEn}` : normNameFr
+  const cardKey = `${card.cardId || ''}::${normNameFr}`
+  let numericId = cardKeyToNumericId.get(cardKey)
+  if (numericId === undefined) {
+    numericId = nextCardNumericId++
+    cardKeyToNumericId.set(cardKey, numericId)
+  }
+
+  const normRootBasicName = card.pokemonStats?.rootBasicName
+    ? normalizeCardNameForMatch(card.pokemonStats.rootBasicName)
+    : ''
+  const normEvolvesFrom = card.pokemonStats?.evolvesFrom
+    ? normalizeCardNameForMatch(card.pokemonStats.evolvesFrom)
+    : ''
+  const normPokeTypes = (card.pokemonStats?.types || []).map((t) => normalizeCardNameForMatch(t))
+
+  let energyUnitKind: 'DOUBLE_TURBO' | 'WILDCARD' | 'SINGLE' = 'SINGLE'
+  let energyProvidedType = 'incolore'
+
+  if (card.category === 'ENERGY') {
+    if (normCombinedName.includes('double turbo')) {
+      energyUnitKind = 'DOUBLE_TURBO'
+      energyProvidedType = 'incolore'
+    } else if (normCombinedName.includes('lumineuse') || normCombinedName.includes('luminous')) {
+      energyUnitKind = 'WILDCARD'
+      energyProvidedType = 'WILDCARD'
+    } else {
+      const basic =
+        detectBasicEnergy(card.identity?.nameFr || '') ||
+        detectBasicEnergy(card.identity?.nameEn || '')
+      if (basic) {
+        energyProvidedType = normalizeEnergyTypeInternal(basic.energyTypeFr)
+      } else {
+        const raw = normalizeCardNameForMatch((card.identity?.rawRulesText || []).join(' '))
+        const found = [
+          'feu',
+          'eau',
+          'plante',
+          'electrique',
+          'psy',
+          'combat',
+          'obscurite',
+          'metal',
+          'fee',
+        ].find((t) => normCombinedName.includes(t) || raw.includes(t))
+        energyProvidedType = found ? normalizeEnergyTypeInternal(found) : 'incolore'
+      }
+    }
+  }
+
+  let canAttackTwiceStatic = Boolean(card.pokemonStats?.canAttackTwice)
+  if (!canAttackTwiceStatic && Array.isArray(card.playableActions)) {
+    for (const act of card.playableActions) {
+      if (act.canAttackTwice) {
+        canAttackTwiceStatic = true
+        break
+      }
+      if (
+        (act.actionType === 'USE_ABILITY' || act.sourceType === 'ABILITY_PASSIVE') &&
+        /festival_lead|fete_battante|fête battante|attack_twice|deux fois|2 fois/i.test(
+          `${act.actionId} ${act.label}`,
+        )
+      ) {
+        canAttackTwiceStatic = true
+        break
+      }
+    }
+  }
+  if (!canAttackTwiceStatic && card.identity?.rawRulesText?.length) {
+    const rulesText = card.identity.rawRulesText.join(' ')
+    if (
+      /fête battante|festival lead|attaquer.*deuxième fois|utiliser une attaque une deuxième fois|use an attack a second time|attack twice/i.test(
+        rulesText,
+      )
+    ) {
+      canAttackTwiceStatic = true
+    }
+  }
+
+  const isBraveryCharm =
+    card.cardId === 'sv02-173' ||
+    normNameFr.includes('amulette bravoure') ||
+    normNameEn.includes('bravery charm')
+
+  const isAreaZeroStadium =
+    card.cardId === 'sv07-131' ||
+    normCombinedName.includes('abime zero') ||
+    normCombinedName.includes('area zero')
+
+  const hasAbilityFlag = Boolean(
+    card.pokemonStats?.hasAbility ||
+      (Array.isArray(card.playableActions) &&
+        card.playableActions.some((a) => a.actionType === 'USE_ABILITY')),
+  )
+
+  const meta: CardFastMeta = {
+    numericId,
+    normNameFr,
+    normNameEn,
+    normCombinedName,
+    normRootBasicName,
+    normEvolvesFrom,
+    normPokeTypes,
+    energyUnitKind,
+    energyProvidedType,
+    canAttackTwiceStatic,
+    isBraveryCharm,
+    isAreaZeroStadium,
+    hasAbilityFlag,
+  }
+
+  cardFastMetaMap.set(card, meta)
+  return meta
 }
 
 // Catalogue consolidé : la SEULE source de vérité autorisée est `cards_database.json`
@@ -287,12 +449,21 @@ function synthesizeFallbackModel(params: {
   return normalizeCardModel(rawModel)
 }
 
-/**
- * Vérifie si un `EngineCardModel` satisfait un `CardFilter`.
- */
-export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | null): boolean {
-  if (!filter) return true
+const cardFilterCache = new WeakMap<CardFilter, WeakMap<EngineCardModel, boolean>>()
 
+const TYPE_ALIASES_MAP: Record<string, string[]> = {
+  feu: ['fire', 'feu'],
+  plante: ['grass', 'plante'],
+  eau: ['water', 'eau'],
+  electrique: ['lightning', 'electrik', 'electrique'],
+  psy: ['psychic', 'psy'],
+  combat: ['fighting', 'combat'],
+  obscurite: ['darkness', 'obscurite'],
+  metal: ['metal'],
+  fee: ['fairy', 'fee'],
+}
+
+function evaluateMatchesCardFilter(card: EngineCardModel, filter: CardFilter): boolean {
   if (filter.category && card.category !== filter.category) {
     return false
   }
@@ -309,41 +480,24 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
       return false
     }
   }
+  const meta = getCardFastMeta(card)
   if (filter.energyType) {
     const reqType = normalizeCardNameForMatch(filter.energyType)
     if (reqType !== 'incolore' && reqType !== 'colorless') {
       if (card.category === 'ENERGY') {
-        const cardNameNorm = normalizeCardNameForMatch(card.identity.nameFr + ' ' + (card.identity.nameEn || ''))
-        const isLuminous = card.subCategory === 'SPECIAL_ENERGY' && cardNameNorm.includes('lumineuse')
+        const isLuminous = card.subCategory === 'SPECIAL_ENERGY' && meta.energyUnitKind === 'WILDCARD'
         if (!isLuminous) {
-          const basic = detectBasicEnergy(card.identity.nameFr) || detectBasicEnergy(card.identity.nameEn || '')
-          const cardTypeNorm = basic
-            ? normalizeCardNameForMatch(basic.energyTypeFr)
-            : normalizeCardNameForMatch(cardNameNorm)
-          const targetTypeNorm = normalizeCardNameForMatch(reqType)
-
-          const typeAliases: Record<string, string[]> = {
-            feu: ['fire', 'feu'],
-            plante: ['grass', 'plante'],
-            eau: ['water', 'eau'],
-            electrique: ['lightning', 'electrik', 'electrique'],
-            psy: ['psychic', 'psy'],
-            combat: ['fighting', 'combat'],
-            obscurite: ['darkness', 'obscurite'],
-            metal: ['metal'],
-            fee: ['fairy', 'fee'],
-          }
-          const targetAliases = typeAliases[targetTypeNorm] || [targetTypeNorm]
+          const cardTypeNorm = meta.energyProvidedType
+          const targetAliases = TYPE_ALIASES_MAP[reqType] || [reqType]
           const matches = targetAliases.some(
-            (al) => cardTypeNorm.includes(al) || cardNameNorm.includes(al),
+            (al) => cardTypeNorm.includes(al) || meta.normCombinedName.includes(al),
           )
           if (!matches) {
             return false
           }
         }
       } else if (card.pokemonStats) {
-        const pokeTypes = card.pokemonStats.types.map((t) => normalizeCardNameForMatch(t))
-        if (!pokeTypes.includes(reqType)) {
+        if (!meta.normPokeTypes.includes(reqType)) {
           return false
         }
       }
@@ -351,17 +505,12 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
   }
   if (filter.specificCardName) {
     const targetNorm = normalizeCardNameForMatch(filter.specificCardName)
-    const frNorm = normalizeCardNameForMatch(card.identity.nameFr)
-    const enNorm = card.identity.nameEn ? normalizeCardNameForMatch(card.identity.nameEn) : ''
-    const rootNorm = card.pokemonStats?.rootBasicName
-      ? normalizeCardNameForMatch(card.pokemonStats.rootBasicName)
-      : ''
     if (
-      frNorm !== targetNorm &&
-      enNorm !== targetNorm &&
-      rootNorm !== targetNorm &&
-      !frNorm.includes(targetNorm) &&
-      !enNorm.includes(targetNorm)
+      meta.normNameFr !== targetNorm &&
+      meta.normNameEn !== targetNorm &&
+      meta.normRootBasicName !== targetNorm &&
+      !meta.normNameFr.includes(targetNorm) &&
+      !meta.normNameEn.includes(targetNorm)
     ) {
       return false
     }
@@ -401,11 +550,7 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
     }
   }
   if (filter.hasAbility !== null && filter.hasAbility !== undefined) {
-    const hasAbil = Boolean(
-      card.pokemonStats?.hasAbility ||
-        card.playableActions.some((a) => a.actionType === 'USE_ABILITY'),
-    )
-    if (hasAbil !== filter.hasAbility) {
+    if (meta.hasAbilityFlag !== filter.hasAbility) {
       return false
     }
   }
@@ -416,6 +561,24 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
   }
 
   return true
+}
+
+/**
+ * Vérifie si un `EngineCardModel` satisfait un `CardFilter`.
+ */
+export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | null): boolean {
+  if (!filter) return true
+  let inner = cardFilterCache.get(filter)
+  if (inner) {
+    const cached = inner.get(card)
+    if (cached !== undefined) return cached
+  } else {
+    inner = new WeakMap<EngineCardModel, boolean>()
+    cardFilterCache.set(filter, inner)
+  }
+  const result = evaluateMatchesCardFilter(card, filter)
+  inner.set(card, result)
+  return result
 }
 
 /**

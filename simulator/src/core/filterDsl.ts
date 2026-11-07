@@ -7,7 +7,33 @@ import type { EngineCardModel } from '../types/cardModel'
 
 export type ParsedDslFilter = Record<string, string>
 
+interface CompiledDslSegment {
+  key: string
+  val: string
+  valUpper: string
+  valNorm: string
+  valNum: number
+}
+
 const parsedFilterCache = new Map<string, ParsedDslFilter>()
+const compiledSegmentsCache = new Map<string, CompiledDslSegment[]>()
+const dslMatchCache = new Map<string, WeakMap<EngineCardModel, boolean>>()
+const normStrCache = new Map<string, string>()
+
+function normalizeStr(str: string): string {
+  if (!str) return ''
+  const cached = normStrCache.get(str)
+  if (cached !== undefined) return cached
+  const normalized = str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  normStrCache.set(str, normalized)
+  return normalized
+}
 
 /**
  * Convertit un ancien objet targetFilter (ou un dictionnaire) en chaîne DSL standardisée.
@@ -107,6 +133,7 @@ export function parseDslFilter(filterStr: string): ParsedDslFilter {
   if (cached) return cached
 
   const result: ParsedDslFilter = {}
+  const compiled: CompiledDslSegment[] = []
   const segments = trimmed.split('|')
   for (const seg of segments) {
     const colonIdx = seg.indexOf(':')
@@ -114,36 +141,34 @@ export function parseDslFilter(filterStr: string): ParsedDslFilter {
       const rawKey = seg.slice(0, colonIdx).trim().toUpperCase()
       const val = seg.slice(colonIdx + 1).trim()
       result[rawKey] = val
+      compiled.push({
+        key: rawKey,
+        val,
+        valUpper: val.toUpperCase(),
+        valNorm: normalizeStr(val),
+        valNum: parseInt(val, 10),
+      })
     }
   }
 
   parsedFilterCache.set(trimmed, result)
+  compiledSegmentsCache.set(trimmed, compiled)
   return result
 }
 
-function normalizeStr(str: string): string {
-  return str
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[-']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+function getCompiledSegments(trimmed: string): CompiledDslSegment[] {
+  const cached = compiledSegmentsCache.get(trimmed)
+  if (cached) return cached
+  parseDslFilter(trimmed)
+  return compiledSegmentsCache.get(trimmed) || []
 }
 
-/**
- * Évalue si une carte satisfait le filtre DSL donné.
- */
-export function matchesDslFilter(
+function evaluateMatchesDslFilter(
   card: EngineCardModel,
-  filterStr: string | null | undefined,
+  segments: CompiledDslSegment[],
 ): boolean {
-  if (!filterStr || !filterStr.trim()) return true
-
-  const filter = parseDslFilter(filterStr)
-
-  for (const [key, val] of Object.entries(filter)) {
-    const valUpper = val.toUpperCase()
+  for (let i = 0; i < segments.length; i++) {
+    const { key, valUpper, valNorm, valNum } = segments[i]!
 
     switch (key) {
       case 'CATEGORY': {
@@ -176,34 +201,31 @@ export function matchesDslFilter(
 
       case 'TYPE':
       case 'ENERGYTYPE': {
-        // Types can match pokemon types or basic energy name/type
         const pokeTypes = card.pokemonStats?.types || []
         const matchPoke = pokeTypes.some(
-          (t) => normalizeStr(t) === normalizeStr(val) || t.toUpperCase() === valUpper,
+          (t) => normalizeStr(t) === valNorm || t.toUpperCase() === valUpper,
         )
         const matchName =
-          normalizeStr(card.identity.nameFr).includes(normalizeStr(val)) ||
-          normalizeStr(card.identity.nameEn || '').includes(normalizeStr(val))
+          normalizeStr(card.identity.nameFr).includes(valNorm) ||
+          normalizeStr(card.identity.nameEn || '').includes(valNorm)
         if (!matchPoke && !matchName) return false
         break
       }
 
       case 'MAX_HP':
       case 'MAXHP': {
-        const hpLimit = parseInt(val, 10)
-        if (!isNaN(hpLimit)) {
+        if (!isNaN(valNum)) {
           const cardHp = card.pokemonStats?.hp ?? 0
-          if (cardHp <= 0 || cardHp > hpLimit) return false
+          if (cardHp <= 0 || cardHp > valNum) return false
         }
         break
       }
 
       case 'MIN_HP':
       case 'MINHP': {
-        const hpMin = parseInt(val, 10)
-        if (!isNaN(hpMin)) {
+        if (!isNaN(valNum)) {
           const cardHp = card.pokemonStats?.hp ?? 0
-          if (cardHp < hpMin) return false
+          if (cardHp < valNum) return false
         }
         break
       }
@@ -211,12 +233,10 @@ export function matchesDslFilter(
       case 'NAME':
       case 'CARDNAME':
       case 'SPECIFICCARDNAME': {
-        const targetNorm = normalizeStr(val)
         const nameFrNorm = normalizeStr(card.identity.nameFr)
         const nameEnNorm = normalizeStr(card.identity.nameEn || '')
-        if (nameFrNorm !== targetNorm && nameEnNorm !== targetNorm) {
-          // Allow substring for evolution line, e.g. "Salamèche" matches "Salamèche"
-          if (!nameFrNorm.includes(targetNorm) && !nameEnNorm.includes(targetNorm)) {
+        if (nameFrNorm !== valNorm && nameEnNorm !== valNorm) {
+          if (!nameFrNorm.includes(valNorm) && !nameEnNorm.includes(valNorm)) {
             return false
           }
         }
@@ -259,10 +279,35 @@ export function matchesDslFilter(
       }
 
       default:
-        // Ignore unrecognized filter keys gracefully
         break
     }
   }
 
   return true
+}
+
+/**
+ * Évalue si une carte satisfait le filtre DSL donné.
+ */
+export function matchesDslFilter(
+  card: EngineCardModel,
+  filterStr: string | null | undefined,
+): boolean {
+  if (!filterStr) return true
+  const trimmed = filterStr.trim()
+  if (!trimmed) return true
+
+  let inner = dslMatchCache.get(trimmed)
+  if (inner) {
+    const cached = inner.get(card)
+    if (cached !== undefined) return cached
+  } else {
+    inner = new WeakMap<EngineCardModel, boolean>()
+    dslMatchCache.set(trimmed, inner)
+  }
+
+  const segments = getCompiledSegments(trimmed)
+  const result = evaluateMatchesDslFilter(card, segments)
+  inner.set(card, result)
+  return result
 }
