@@ -1241,7 +1241,6 @@ export function checkActionPreconditions(
     const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
     const minCount = typeof rawPre === 'object' ? (rawPre as any).minCount ?? 1 : 1
     const targetFilter = typeof rawPre === 'object' ? (rawPre as any).targetFilter : null
-    const zone = typeof rawPre === 'object' ? (rawPre as any).zone || 'DECK' : 'DECK'
 
     if (preType === 'BENCH_HAS_EMPTY_SLOTS' || preType === 'BENCH_HAS_EMPTY_SLOT') {
       const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
@@ -1345,16 +1344,22 @@ export function checkActionPreconditions(
       }
     } else if (preType === 'ZONE_HAS_MATCHING_CARD') {
       const effectWithFilter = action.effects.find((e) => e.filter || e.targetFilter)
-      if (zone === 'HAND' && handIndexIfFromHand !== undefined) {
+      const targetZone =
+        (typeof rawPre === 'object' && (rawPre as any).zone) ||
+        effectWithFilter?.zone ||
+        (effectWithFilter as any)?.sourceZone ||
+        'DECK'
+      if (targetZone === 'HAND') {
         const matchingInRest = activeBoard.hand.filter((c, idx) => {
-          if (idx === handIndexIfFromHand) return false
+          if (handIndexIfFromHand !== undefined && idx === handIndexIfFromHand) return false
+          if (handIndexIfFromHand === undefined && c === sourceCard) return false
           if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
           if (targetFilter) return matchesCardFilter(c, targetFilter)
           return true
         })
         if (matchingInRest.length < minCount) return false
       } else {
-        const cardsInZone = zone === 'DISCARD' ? activeBoard.discard : activeBoard.deck
+        const cardsInZone = targetZone === 'DISCARD' ? activeBoard.discard : activeBoard.deck
         const matching = cardsInZone.filter((c) => {
           if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
           if (targetFilter) return matchesCardFilter(c, targetFilter)
@@ -3340,9 +3345,12 @@ function resolveAtomicEffect(
       break
     }
 
-    case 'PASSIVE_DAMAGE_BOOST': {
-      const boostAmount = eff.baseDamage ?? (eff.count ? eff.count * 10 : 60)
-      activeBoard.turnDamageBoost = (activeBoard.turnDamageBoost || 0) + boostAmount
+    case 'PASSIVE_DAMAGE_BOOST':
+    case 'DAMAGE_ACTIVE': {
+      if ((eff.primitive as string) === 'PASSIVE_DAMAGE_BOOST' || action.type === 'PLAY_TRAINER' || eff.target === 'SELF') {
+        const boostAmount = eff.value ?? eff.baseDamage ?? (eff.count ? eff.count * 10 : 60)
+        activeBoard.turnDamageBoost = (activeBoard.turnDamageBoost || 0) + boostAmount
+      }
       break
     }
 

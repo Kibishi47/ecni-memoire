@@ -12,7 +12,7 @@ describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
     expect(UNIFIED_CARD_REGISTRY['sv03-164']?.identity.nameFr).toBe('Roucarnage-ex')
     expect(UNIFIED_CARD_REGISTRY['sv05-123']?.identity.nameFr).toBe('Ire-Foudre-ex')
     expect(UNIFIED_CARD_REGISTRY['sv06.5-038']?.identity.nameFr).toBe('Favianos-ex')
-    expect(getCompiledCardsCount()).toBe(11)
+    expect(getCompiledCardsCount()).toBe(853)
   })
 
   it('valide le deck de test 100 % compatible à 60 cartes avec énergies natives', () => {
@@ -68,7 +68,7 @@ Total Cards: 60`
   it('bloque strictement la simulation si au moins une carte hors énergie de base est absente de cards_database.json', () => {
     const textWithMissing = `Pokémon: 6
 4 Ire-Foudre-ex TEF 123
-2 Salamèche MEW 4
+2 Carte Inconnue XXX 999
 
 Dresseurs: 28
 4 Pepper SVI 166
@@ -88,10 +88,10 @@ Total Cards: 60`
     const parsed = parsePtcglDecklist(textWithMissing)
     expect(parsed.totalCards).toBe(60)
     expect(parsed.isFullyResolved).toBe(false)
-    expect(parsed.isValid60).toBe(false) // Bloqué car Salamèche n'est pas dans cards_database.json !
+    expect(parsed.isValid60).toBe(false) // Bloqué car la carte n'est pas dans cards_database.json !
     expect(parsed.unresolvedCount).toBe(2)
     expect(parsed.unresolvedCards.length).toBe(1)
-    expect(parsed.unresolvedCards[0]!.name).toBe('Salamèche')
+    expect(parsed.unresolvedCards[0]!.name).toBe('Carte Inconnue')
     expect(parsed.warnings.some((w) => w.message.includes('Simulation impossible'))).toBe(true)
   })
 
