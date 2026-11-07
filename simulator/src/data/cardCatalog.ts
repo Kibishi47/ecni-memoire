@@ -1,8 +1,7 @@
 /**
  * Table de résolution et catalogue unifié des cartes (`cardCatalog.ts`).
- * Combine `cards_database.json` (11 cartes compilées de référence) et `fallbackCardModels.ts`,
- * avec résolution intelligente par ID (`sv03-125`), variante non-paddée (`sv03.5-4`),
- * alias d'extension (ex: `sv01-191` <-> `sv04-125` pour Super Bonbon) et nom FR/EN normalisé.
+ * Chargeur universel supportant Array (EngineCardModel[]) et Record ({ cards: { ... } }),
+ * avec normalisation déterministe, alias d'extensions et résolution intelligente.
  */
 
 import rawDatabase from './cards_database.json'
@@ -10,14 +9,28 @@ import type {
   CardCategory,
   CardFilter,
   CardSubCategory,
-  ConsolidatedCardsDatabase,
   EngineCardModel,
 } from '../types/cardModel'
+import { normalizeCardModel } from './cardNormalizer'
 import { BASIC_ENERGIES, createNativeBasicEnergyModel, detectBasicEnergy, isEnergyCardName } from '../utils/energy'
 
-const compiledDb = (rawDatabase || {}) as unknown as ConsolidatedCardsDatabase
-const compiledCards: Record<string, EngineCardModel> =
-  compiledDb && typeof compiledDb === 'object' && compiledDb.cards ? compiledDb.cards : {}
+// Chargeur universel : gère aussi bien un tableau JSON qu'un objet avec clé `cards`
+const rawList: any[] = Array.isArray(rawDatabase)
+  ? (rawDatabase as any[])
+  : rawDatabase && typeof rawDatabase === 'object' && 'cards' in rawDatabase && (rawDatabase as any).cards
+  ? Object.values((rawDatabase as any).cards)
+  : []
+
+const compiledCards: Record<string, EngineCardModel> = {}
+
+for (const rawCard of rawList) {
+  try {
+    const normalized = normalizeCardModel(rawCard)
+    compiledCards[normalized.cardId] = normalized
+  } catch (err) {
+    console.warn(`[cardCatalog] Impossible de normaliser la carte:`, err)
+  }
+}
 
 export function getCompiledCardsCount(): number {
   return Object.keys(compiledCards).length
@@ -64,7 +77,7 @@ for (const model of Object.values(compiledCards)) {
   }
 }
 
-// Synonymes bilingues courants ciblant exclusivement les modèles compilés
+// Synonymes bilingues courants ciblant les modèles compilés
 const NAME_SYNONYMS: Record<string, string> = {
   'poffin pote pote': 'sv05-144',
   'poffin copain copain': 'sv05-144',
@@ -107,12 +120,12 @@ export function resolveCardModel(params: {
   const { cardId, unpaddedCardId, rawName } = params
 
   // 1. Correspondance directe par ID dans `cards_database.json`
-  if (compiledDb.cards && compiledDb.cards[cardId]) {
-    return { model: structuredClone(compiledDb.cards[cardId]!), source: 'compiled_db' }
+  if (compiledCards[cardId]) {
+    return { model: structuredClone(compiledCards[cardId]!), source: 'compiled_db' }
   }
   const aliasedId = CARD_ID_ALIASES[cardId] || (unpaddedCardId ? CARD_ID_ALIASES[unpaddedCardId] : undefined)
-  if (aliasedId && compiledDb.cards && compiledDb.cards[aliasedId]) {
-    return { model: structuredClone(compiledDb.cards[aliasedId]!), source: 'compiled_db' }
+  if (aliasedId && compiledCards[aliasedId]) {
+    return { model: structuredClone(compiledCards[aliasedId]!), source: 'compiled_db' }
   }
 
   // 2. Exception native absolue pour les Énergies de Base (pas besoin d'être dans cards_database.json)
@@ -125,8 +138,8 @@ export function resolveCardModel(params: {
   // 3. Recherche par synonyme direct dans cards_database.json
   const normName = normalizeCardNameForMatch(rawName)
   const synTargetId = NAME_SYNONYMS[normName]
-  if (synTargetId && compiledDb.cards && compiledDb.cards[synTargetId]) {
-    return { model: structuredClone(compiledDb.cards[synTargetId]!), source: 'compiled_db' }
+  if (synTargetId && compiledCards[synTargetId]) {
+    return { model: structuredClone(compiledCards[synTargetId]!), source: 'compiled_db' }
   }
 
   // 4. Recherche par nom FR / EN normalisé dans cards_database.json
@@ -164,9 +177,27 @@ function synthesizeFallbackModel(params: {
     subCategory = detectBasicEnergy(rawName) ? 'BASIC_ENERGY' : 'SPECIAL_ENERGY'
   } else if (isTrainer) {
     category = 'TRAINER'
-    if (lower.includes('ball') || lower.includes('poffin') || lower.includes('bonbon') || lower.includes('candy') || lower.includes('urne') || lower.includes('vessel') || lower.includes('canne') || lower.includes('rod') || lower.includes('stretcher') || lower.includes('civière')) {
+    if (
+      lower.includes('ball') ||
+      lower.includes('poffin') ||
+      lower.includes('bonbon') ||
+      lower.includes('candy') ||
+      lower.includes('urne') ||
+      lower.includes('vessel') ||
+      lower.includes('canne') ||
+      lower.includes('rod') ||
+      lower.includes('stretcher') ||
+      lower.includes('civière')
+    ) {
       subCategory = 'ITEM'
-    } else if (lower.includes('pierre') || lower.includes('stone') || lower.includes('ceinture') || lower.includes('band') || lower.includes('amulette') || lower.includes('charm')) {
+    } else if (
+      lower.includes('pierre') ||
+      lower.includes('stone') ||
+      lower.includes('ceinture') ||
+      lower.includes('band') ||
+      lower.includes('amulette') ||
+      lower.includes('charm')
+    ) {
       subCategory = 'TOOL'
     } else if (lower.includes('pokéstop') || lower.includes('stade')) {
       subCategory = 'STADIUM'
@@ -181,7 +212,7 @@ function synthesizeFallbackModel(params: {
   const isRuleBox = /\b(ex|v|vstar|vmax|radieux|radiant)\b/i.test(rawName)
   const prizes = /\b(ex|v|vstar)\b/i.test(rawName) ? 2 : 1
 
-  return {
+  const rawModel = {
     cardId,
     identity: {
       cardId,
@@ -197,14 +228,16 @@ function synthesizeFallbackModel(params: {
       legalExpanded: true,
       rarity: isRuleBox ? 'Double Rare' : 'Commune',
       imageUrl: params.imageUrl || null,
-      rawRulesText: [`[Carte Synthétisée] ${rawName}`],
+      rawRulesText: [`[Carte Non Résolue] ${rawName}`],
+      isRuleBox,
+      prizeCardsGiven: prizes,
     },
     pokemonStats:
       category === 'POKEMON'
         ? {
             hp: isRuleBox ? 210 : 80,
             types: ['Incolore'],
-            stage: 'De base',
+            stage: 'Base',
             evolvesFrom: null,
             rootBasicName: rawName,
             evolutionChain: [rawName],
@@ -223,49 +256,37 @@ function synthesizeFallbackModel(params: {
             {
               actionId: `attack_${cardId.replace(/[^a-z0-9]/gi, '_')}`,
               label: 'Attaque Standard',
-              sourceType: 'ATTACK',
-              timing: 'END_OF_TURN_ATTACK',
+              actionType: 'ATTACK',
+              timingPhase: 'ATTACK_PHASE',
               canUseTurn1GoingFirst: false,
               canUseTurn1GoingSecond: true,
-              preconditions: [
-                { type: 'SELF_IS_ACTIVE', zone: 'ACTIVE', minCount: 1, targetFilter: null },
-                {
-                  type: 'SELF_HAS_ENERGY_COST',
-                  zone: 'ACTIVE',
-                  minCount: 2,
-                  targetFilter: { category: 'ENERGY', energyType: 'Incolore' },
-                },
-              ],
-              costs: [],
+              cost: { Incolore: 2 },
+              preconditions: ['SELF_IS_ACTIVE'],
               effects: [
                 {
-                  primitive: 'DEAL_DAMAGE_ACTIVE',
-                  sourceZone: 'ACTIVE',
-                  targetZone: 'ACTIVE',
+                  primitive: 'DAMAGE_ACTIVE',
+                  target: 'OPPONENT_ACTIVE',
+                  value: isRuleBox ? 140 : 50,
                   count: 1,
                   upTo: false,
-                  targetFilter: null,
-                  baseDamage: isRuleBox ? 140 : 50,
-                  damageScalingPerOpponentPrizeTaken: null,
+                  optional: false,
                 },
               ],
             },
           ]
         : [],
     strategicEvaluator: {
-      primaryRole: category === 'ENERGY' ? 'RESOURCE_ENERGY' : category === 'TRAINER' ? 'TECH_UTILITY' : 'SECONDARY_ATTACKER',
-      intrinsicBaseScore: 70,
+      aiRole: category === 'ENERGY' ? 'ENERGY_ACCELERATOR' : category === 'TRAINER' ? 'GUEST_TECH' : 'SECONDARY_ATTACKER',
       turnPhaseWeights: { turn1: 1.0, turn2: 1.0, turn3: 1.0, turn4Plus: 1.0 },
       decklistSynergyRequirements: [],
-      inGameDeadCardConditions: [],
-      discardPriorityWhenDead: 65,
-      holdForNextTurnBonus: 15,
     },
   }
+
+  return normalizeCardModel(rawModel)
 }
 
 /**
- * Vérifie si un `EngineCardModel` satisfait un `CardFilter` issu de `cards_database.json`.
+ * Vérifie si un `EngineCardModel` satisfait un `CardFilter`.
  */
 export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | null): boolean {
   if (!filter) return true
@@ -344,7 +365,7 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
     }
   }
   if (filter.isRuleBox !== null && filter.isRuleBox !== undefined) {
-    const ruleBox = Boolean(card.pokemonStats?.isRuleBox)
+    const ruleBox = Boolean(card.identity.isRuleBox || card.pokemonStats?.isRuleBox)
     if (ruleBox !== filter.isRuleBox) {
       return false
     }
@@ -372,7 +393,7 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
     }
   }
   if (filter.isTera !== null && filter.isTera !== undefined) {
-    const isTera = Boolean(card.pokemonStats?.isTera)
+    const isTera = Boolean(card.pokemonStats?.isTera || card.identity.isTera)
     if (isTera !== filter.isTera) {
       return false
     }
@@ -380,7 +401,7 @@ export function matchesCardFilter(card: EngineCardModel, filter?: CardFilter | n
   if (filter.hasAbility !== null && filter.hasAbility !== undefined) {
     const hasAbil = Boolean(
       card.pokemonStats?.hasAbility ||
-        card.playableActions.some((a) => a.sourceType.startsWith('ABILITY')),
+        card.playableActions.some((a) => a.actionType === 'USE_ABILITY'),
     )
     if (hasAbil !== filter.hasAbility) {
       return false

@@ -57,7 +57,8 @@ const nativeEnergyCount = computed(() =>
     .reduce((sum, c) => sum + c.quantity, 0),
 )
 
-function formatRoleLabel(role: string): string {
+function formatRoleLabel(role?: string): string {
+  if (!role) return 'Utilitaire'
   const labels: Record<string, string> = {
     MAIN_ATTACKER: 'Attaquant Principal',
     SECONDARY_ATTACKER: 'Attaquant Secondaire',
@@ -419,7 +420,7 @@ function formatRoleLabel(role: string): string {
               <div class="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
                 <span>{{ card.subCategory }}</span>
                 <span>•</span>
-                <span>{{ formatRoleLabel(card.model.strategicEvaluator.primaryRole) }}</span>
+                <span>{{ formatRoleLabel(card.model.strategicEvaluator.aiRole || card.model.strategicEvaluator.primaryRole) }}</span>
               </div>
             </div>
             <div class="shrink-0 text-right font-mono">
@@ -466,7 +467,7 @@ function formatRoleLabel(role: string): string {
               <div class="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
                 <span>{{ card.subCategory }}</span>
                 <span>•</span>
-                <span>{{ formatRoleLabel(card.model.strategicEvaluator.primaryRole) }}</span>
+                <span>{{ formatRoleLabel(card.model.strategicEvaluator.aiRole || card.model.strategicEvaluator.primaryRole) }}</span>
               </div>
             </div>
             <div class="shrink-0 text-right font-mono">
