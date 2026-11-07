@@ -15,18 +15,21 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import urllib.parse
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
 try:
     from tcgdexsdk import TCGdex
+    from tcgdexsdk.query import Query
 except ImportError:
     TCGdex = None
+    Query = None
 
 from compiler.schemas import (
     CardCategory,
@@ -44,7 +47,7 @@ class FetcherProvider(str, Enum):
     sdk = "sdk"
     rest = "rest"
 
-# Liste officielle des 11 cartes stratégiques de référence du mode --test
+# Liste officielle des 14 cartes stratégiques et énergies de référence du mode --test
 TEST_CARD_IDS: List[str] = [
     "sv04-125",  # Super Bonbon (Rare Candy)
     "sv05-144",  # Poffin Copain-Copain (Buddy-Buddy Poffin)
@@ -57,6 +60,9 @@ TEST_CARD_IDS: List[str] = [
     "sv04-160",  # Attrape-Riposte (Counter Catcher)
     "sv05-123",  # Ire-Foudre-ex (Raging Bolt ex)
     "sv06.5-038",  # Favianos-ex (Fezandipiti ex)
+    "me01-104",  # Méga-Kangourex-ex (Mega Kangaskhan ex)
+    "sve-002",  # Énergie Feu (Fire Energy) - Court-circuit statique
+    "sve-004",  # Énergie Électrique (Lightning Energy) - Court-circuit statique
 ]
 
 # Table de référence garantissant que les IDs stratégiques résolvent toujours vers la bonne carte
@@ -117,7 +123,31 @@ TEST_CARDS_REFERENCE: Dict[str, Dict[str, str]] = {
         "expected_name_en": "Fezandipiti",
         "fallback_tcgdex_id": "sv06.5-038",
     },
+    "me01-104": {
+        "expected_name_fr": "Kangourex",
+        "expected_name_en": "Kangaskhan",
+        "fallback_tcgdex_id": "me01-104",
+    },
+    "sve-002": {
+        "expected_name_fr": "Énergie Feu",
+        "expected_name_en": "Fire Energy",
+        "fallback_tcgdex_id": "sve-002",
+    },
+    "sve-004": {
+        "expected_name_fr": "Énergie Electrik",
+        "expected_name_en": "Lightning Energy",
+        "fallback_tcgdex_id": "sve-004",
+    },
 }
+
+
+def _clean_tcgdex_dict(obj: Any) -> Any:
+    """Nettoie récursivement les dictionnaires issus de `asdict` en supprimant les instances SDK non sérialisables."""
+    if isinstance(obj, dict):
+        return {k: _clean_tcgdex_dict(v) for k, v in obj.items() if k != "sdk"}
+    elif isinstance(obj, list):
+        return [_clean_tcgdex_dict(v) for v in obj]
+    return obj
 
 
 @dataclass
@@ -296,24 +326,15 @@ def extract_raw_rules_text(
     return lines
 
 
+from compiler.deterministic_builder import (
+    build_identity_and_stats_from_raw,
+    detect_rule_box_and_prizes as _det_rule_box_and_prizes,
+)
+
+
 def detect_rule_box_and_prizes(name_fr: str, name_en: Optional[str], raw_fr: Dict[str, Any]) -> Tuple[bool, int]:
-    """Détermine si un Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Radieux) et le nombre de Récompenses."""
-    combined_name = f"{name_fr} {name_en or ''}"
-    suffix = str(raw_fr.get("suffix") or "").lower()
-
-    if re.search(r"\bvmax\b", combined_name, flags=re.IGNORECASE) or "vmax" in suffix:
-        return True, 3
-
-    if (
-        re.search(r"(?:\b|-)(ex|v|vstar|gx)\b", combined_name, flags=re.IGNORECASE)
-        or suffix in {"ex", "v", "vstar", "gx"}
-    ):
-        return True, 2
-
-    if re.search(r"\b(radieux|radiant)\b", combined_name, flags=re.IGNORECASE):
-        return True, 1
-
-    return False, 1
+    """Détermine si un Pokémon possède un encadré Règle (ex, V, VSTAR, VMAX, Méga-ex, Radieux) et le nombre de Récompenses."""
+    return _det_rule_box_and_prizes(name_fr, name_en, raw_fr)
 
 
 class TCGdexFetcher:
@@ -329,10 +350,12 @@ class TCGdexFetcher:
         self.raw_dir = self.data_dir / "raw_tcgdex"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.raw_dir / "_cards_index.json"
+        self.standard_index_path = self.raw_dir / "_cards_standard_index.json"
         self.timeout_seconds = timeout_seconds
         self.provider = provider
         self._name_to_pre_evo_cache: Dict[str, Optional[str]] = {}
         self._cards_index_cache: Optional[List[Dict[str, Any]]] = None
+        self._standard_cards_index_cache: Optional[List[Dict[str, Any]]] = None
 
         if self.provider == FetcherProvider.sdk and TCGdex is not None:
             self._sdk_fr = TCGdex("fr")
@@ -364,9 +387,7 @@ class TCGdexFetcher:
             try:
                 cards_list_obj = await asyncio.to_thread(self._sdk_fr.card.listSync)
                 if cards_list_obj and isinstance(cards_list_obj, list):
-                    cards_list = [asdict(c) for c in cards_list_obj if hasattr(c, "id")]
-                    for item in cards_list:
-                        item.pop("sdk", None)
+                    cards_list = [_clean_tcgdex_dict(asdict(c)) for c in cards_list_obj if hasattr(c, "id")]
                     if cards_list:
                         self.index_path.write_text(
                             json.dumps(cards_list, ensure_ascii=False, indent=2),
@@ -392,6 +413,60 @@ class TCGdexFetcher:
         self._cards_index_cache = cards_list
         return cards_list
 
+    async def fetch_standard_cards_index(
+        self,
+        client: httpx.AsyncClient,
+        force: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Récupère la liste officielle des cartes légales au format Standard (`legal.standard=true`).
+
+        Interroge en priorité le SDK Python officiel TCGdex (`t.card.listSync(Query().contains('legal.standard', 'true'))`)
+        ou l'API REST `GET /v2/fr/cards?legal.standard=true`. Met en cache dans `data/raw_tcgdex/_cards_standard_index.json`.
+        """
+        if self._standard_cards_index_cache is not None and not force:
+            return self._standard_cards_index_cache
+
+        if self.standard_index_path.exists() and not force:
+            try:
+                cached = json.loads(self.standard_index_path.read_text(encoding="utf-8"))
+                if isinstance(cached, list) and len(cached) > 0:
+                    self._standard_cards_index_cache = cached
+                    return cached
+            except Exception:
+                pass
+
+        # 1. Tentative via SDK officiel si provider SDK
+        if self.provider == FetcherProvider.sdk and self._sdk_fr is not None and Query is not None:
+            try:
+                q = Query().contains("legal.standard", "true")
+                cards_list_obj = await asyncio.to_thread(self._sdk_fr.card.listSync, q)
+                if cards_list_obj and isinstance(cards_list_obj, list):
+                    cards_list = [_clean_tcgdex_dict(asdict(c)) for c in cards_list_obj if hasattr(c, "id")]
+                    if cards_list:
+                        self.standard_index_path.write_text(
+                            json.dumps(cards_list, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        self._standard_cards_index_cache = cards_list
+                        return cards_list
+            except Exception:
+                pass
+
+        # 2. Requête REST via httpx (provider REST ou repli SDK)
+        url = f"{TCGDEX_API_BASE}/fr/cards?legal.standard=true"
+        response = await client.get(url)
+        response.raise_for_status()
+        cards_list = response.json()
+        if not isinstance(cards_list, list):
+            raise ValueError(f"Réponse inattendue de {url}: attendu une liste JSON.")
+
+        self.standard_index_path.write_text(
+            json.dumps(cards_list, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._standard_cards_index_cache = cards_list
+        return cards_list
+
     async def _get_card_json_with_variants(
         self,
         client: httpx.AsyncClient,
@@ -408,8 +483,7 @@ class TCGdexFetcher:
                 try:
                     card_obj = await asyncio.to_thread(sdk_instance.card.getSync, candidate)
                     if card_obj is not None and getattr(card_obj, "id", None):
-                        data = asdict(card_obj)
-                        data.pop("sdk", None)
+                        data = _clean_tcgdex_dict(asdict(card_obj))
                         return data, candidate
                 except Exception:
                     continue
@@ -506,90 +580,12 @@ class TCGdexFetcher:
         evolution_info: Optional[Tuple[Optional[str], Optional[str], List[str]]] = None,
     ) -> Tuple[CardIdentity, Optional[PokemonStats]]:
         """Construit `CardIdentity` et `PokemonStats` à partir des données brutes TCGdex."""
-        category, sub_category = infer_category_and_subcategory(raw_fr, raw_en)
-        name_fr = str(raw_fr.get("name") or requested_card_id).strip()
-        name_en = str(raw_en.get("name")).strip() if raw_en and raw_en.get("name") else None
-
-        set_obj = raw_fr.get("set") if isinstance(raw_fr.get("set"), dict) else {}
-        set_id = str(set_obj.get("id") or requested_card_id.split("-")[0]).strip()
-        set_name = str(set_obj.get("name")).strip() if set_obj.get("name") else None
-        local_id = str(raw_fr.get("localId") or requested_card_id.split("-")[-1]).strip()
-
-        legal_obj = raw_fr.get("legal") if isinstance(raw_fr.get("legal"), dict) else {}
-        legal_standard = bool(legal_obj.get("standard", False))
-        legal_expanded = bool(legal_obj.get("expanded", False))
-
-        raw_rules_text = extract_raw_rules_text(raw_fr, raw_en)
-
-        identity = CardIdentity(
-            cardId=requested_card_id,
-            nameFr=name_fr,
-            nameEn=name_en,
-            setId=set_id,
-            setName=set_name,
-            localId=local_id,
-            category=category,
-            subCategory=sub_category,
-            regulationMark=raw_fr.get("regulationMark") or (raw_en or {}).get("regulationMark"),
-            legalStandard=legal_standard,
-            legalExpanded=legal_expanded,
-            rarity=raw_fr.get("rarity") or (raw_en or {}).get("rarity"),
-            imageUrl=raw_fr.get("image") or (raw_en or {}).get("image"),
-            rawRulesText=raw_rules_text,
+        return build_identity_and_stats_from_raw(
+            requested_card_id=requested_card_id,
+            raw_fr=raw_fr,
+            raw_en=raw_en,
+            evolution_info=evolution_info,
         )
-
-        pokemon_stats: Optional[PokemonStats] = None
-        if category == CardCategory.POKEMON:
-            hp_raw = raw_fr.get("hp") if raw_fr.get("hp") is not None else (raw_en or {}).get("hp")
-            try:
-                hp = int(hp_raw) if hp_raw is not None else 0
-            except (TypeError, ValueError):
-                hp = 0
-
-            types_list = [str(t) for t in (raw_fr.get("types") or (raw_en or {}).get("types") or [])]
-            stage_str = raw_fr.get("stage") or (raw_en or {}).get("stage")
-
-            if evolution_info is not None:
-                evolves_from, root_basic, evo_chain = evolution_info
-            else:
-                evo_from_raw = raw_fr.get("evolveFrom") or raw_fr.get("evolvesFrom")
-                evolves_from = str(evo_from_raw).strip() if evo_from_raw else None
-                root_basic = evolves_from or name_fr
-                evo_chain = [evolves_from, name_fr] if evolves_from else [name_fr]
-
-            retreat_raw = raw_fr.get("retreat") if raw_fr.get("retreat") is not None else (raw_en or {}).get("retreat")
-            try:
-                retreat_cost = int(retreat_raw) if retreat_raw is not None else 0
-            except (TypeError, ValueError):
-                retreat_cost = 0
-
-            weaknesses = [
-                str(w.get("type"))
-                for w in (raw_fr.get("weaknesses") or [])
-                if isinstance(w, dict) and w.get("type")
-            ]
-            resistances = [
-                str(r.get("type"))
-                for r in (raw_fr.get("resistances") or [])
-                if isinstance(r, dict) and r.get("type")
-            ]
-            is_rule_box, prize_cards = detect_rule_box_and_prizes(name_fr, name_en, raw_fr)
-
-            pokemon_stats = PokemonStats(
-                hp=hp,
-                types=types_list,
-                stage=stage_str,
-                evolvesFrom=evolves_from,
-                rootBasicName=root_basic,
-                evolutionChain=evo_chain,
-                retreatCost=retreat_cost,
-                weaknesses=weaknesses,
-                resistances=resistances,
-                prizeCardsGiven=prize_cards,
-                isRuleBox=is_rule_box,
-            )
-
-        return identity, pokemon_stats
 
     async def fetch_card_by_id(
         self,
@@ -652,6 +648,16 @@ class TCGdexFetcher:
                     resolved_id = fb_resolved or fallback_id
                     raw_en, _ = await self._get_card_json_with_variants(client, "en", resolved_id)
 
+        if raw_fr is None and cache_path.exists():
+            try:
+                cached_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(cached_payload, dict) and "fr" in cached_payload:
+                    raw_fr = cached_payload["fr"]
+                    raw_en = cached_payload.get("en")
+                    resolved_id = cached_payload.get("resolvedTcgdexId", safe_id)
+            except Exception:
+                pass
+
         if raw_fr is None:
             raise RuntimeError(
                 f"Impossible de récupérer la carte '{safe_id}' sur TCGdex (variantes testées: {generate_candidate_ids(safe_id)})."
@@ -706,54 +712,48 @@ class TCGdexFetcher:
         self,
         client: httpx.AsyncClient,
         limit: Optional[int] = None,
+        force: bool = False,
     ) -> List[str]:
         """Récupère les IDs des cartes légales au format Standard (`legal.standard == true`).
 
-        Optimise la sélection en filtrant les extensions Écarlate et Violet (`sv*`) de l'index global
-        ou en vérifiant `legal.standard` lors du téléchargement détaillé.
-        Exclut les sets futurs ou placeholders non encore publiés sur TCGdex (ex: sv09, sv10, sv10.5).
+        Interroge en priorité le SDK Python officiel TCGdex (`t.card.listSync(Query().contains('legal.standard', 'true'))`)
+        avec repli HTTP REST (`GET /v2/fr/cards?legal.standard=true`).
+        Met en cache les résultats dans `data/raw_tcgdex/_cards_standard_index.json`.
         """
+        try:
+            cards_index = await self.fetch_standard_cards_index(client, force=force)
+            card_ids = [
+                str(entry.get("id")).strip()
+                for entry in cards_index
+                if isinstance(entry, dict) and entry.get("id")
+            ]
+            unique_ids = list(dict.fromkeys(card_ids))
+            if unique_ids:
+                if limit is not None and limit > 0:
+                    return unique_ids[:limit]
+                return unique_ids
+        except Exception:
+            pass
+
+        # Repli défensif si hors ligne et sans cache _cards_standard_index.json
         cards_index = await self.fetch_cards_index(client, force=False)
-
-        # Extensions Standard officielles parues de l'ère Écarlate et Violet (bloc SV)
-        # Exclut les sets futurs / placeholders non publiés (ex: sv09, sv10, sv10.5) qui provoquent des 404
-        known_released_prefixes = {
-            "sv01", "sv02", "sv03", "sv03.5", "sv04", "sv04.5",
-            "sv05", "sv06", "sv06.5", "sv07", "sv08", "sv08.5",
-            "sve", "svp",
-        }
-
-        sv_candidates: List[str] = []
-        unreleased_sv_candidates: List[str] = []
-        other_candidates: List[str] = []
-
+        candidate_ids: List[str] = []
         for entry in cards_index:
             if not isinstance(entry, dict):
                 continue
             cid = str(entry.get("id") or "").strip()
             if not cid:
                 continue
+            reg_m = str(entry.get("regulationMark") or "").strip().upper()
+            if reg_m in {"G", "H", "I"}:
+                candidate_ids.append(cid)
+            elif cid.lower().startswith(("sv", "me")):
+                candidate_ids.append(cid)
 
-            # Si l'index inclut déjà l'objet legal, on l'utilise directement
-            legal = entry.get("legal")
-            if isinstance(legal, dict) and "standard" in legal:
-                if legal.get("standard") is True:
-                    sv_candidates.append(cid)
-                continue
-
-            set_prefix = cid.split("-")[0].lower() if "-" in cid else cid.lower()
-            if set_prefix in known_released_prefixes:
-                sv_candidates.append(cid)
-            elif cid.lower().startswith("sv"):
-                unreleased_sv_candidates.append(cid)
-            else:
-                other_candidates.append(cid)
-
-        # Priorité absolue aux extensions Standard parues, puis unreleased en fin de liste
-        selected = sv_candidates if sv_candidates else (unreleased_sv_candidates or other_candidates)
+        unique_ids = list(dict.fromkeys(candidate_ids))
         if limit is not None and limit > 0:
-            return selected[:limit]
-        return selected
+            return unique_ids[:limit]
+        return unique_ids
 
     async def fetch_batch(
         self,
@@ -801,3 +801,107 @@ class TCGdexFetcher:
                     bundles.append(res)
 
             return bundles
+
+    async def download_raw_cards(
+        self,
+        card_ids: List[str],
+        client: Optional[httpx.AsyncClient] = None,
+        force: bool = False,
+        concurrency: int = 5,
+        progress_callback: Optional[Callable[[str, str, bool, Optional[str]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Télécharge et enregistre chaque carte dans le cache individuel `data/raw_tcgdex/{card_id}.json`.
+
+        Args:
+            card_ids: Liste d'identifiants de cartes à télécharger dans le cache.
+            client: Instance httpx.AsyncClient optionnelle (créée automatiquement si None).
+            force: Si True, force le re-téléchargement et écrase data/raw_tcgdex/{card_id}.json.
+                   Si False, les cartes déjà présentes sur le disque sont préservées (cache hit).
+            concurrency: Nombre de téléchargements simultanés (requêtes réseau parallèles).
+            progress_callback: Callback optionnel appelé après le traitement de chaque carte:
+                               callback(card_id, card_name, newly_downloaded, error_msg)
+
+        Returns:
+            Dictionnaire récapitulatif {
+                "total": int,
+                "cached": int,
+                "downloaded": int,
+                "failed": int,
+                "failed_cards": Dict[str, str],
+                "elapsed_seconds": float,
+            }
+        """
+        if client is not None:
+            return await self._download_raw_cards_impl(
+                card_ids=card_ids,
+                client=client,
+                force=force,
+                concurrency=concurrency,
+                progress_callback=progress_callback,
+            )
+
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "pokemon-tcg-card-compiler/0.1.0",
+        }
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers, follow_redirects=True) as local_client:
+            return await self._download_raw_cards_impl(
+                card_ids=card_ids,
+                client=local_client,
+                force=force,
+                concurrency=concurrency,
+                progress_callback=progress_callback,
+            )
+
+    async def _download_raw_cards_impl(
+        self,
+        card_ids: List[str],
+        client: httpx.AsyncClient,
+        force: bool = False,
+        concurrency: int = 5,
+        progress_callback: Optional[Callable[[str, str, bool, Optional[str]], None]] = None,
+    ) -> Dict[str, Any]:
+        start_time = time.perf_counter()
+        unique_ids = list(dict.fromkeys(cid.strip() for cid in card_ids if cid.strip()))
+        total = len(unique_ids)
+
+        cached_count = 0
+        downloaded_count = 0
+        failed_cards: Dict[str, str] = {}
+        lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def _worker(cid: str) -> None:
+            nonlocal cached_count, downloaded_count
+            cache_file = self.raw_dir / f"{cid}.json"
+            was_cached = cache_file.exists() and not force
+
+            async with semaphore:
+                try:
+                    bundle = await self.fetch_card_by_id(client, cid, force=force)
+                    cname = bundle.identity.nameFr or cid
+                    async with lock:
+                        if was_cached:
+                            cached_count += 1
+                        else:
+                            downloaded_count += 1
+                    if progress_callback:
+                        progress_callback(cid, cname, not was_cached, None)
+                except Exception as exc:
+                    async with lock:
+                        failed_cards[cid] = str(exc)
+                    if progress_callback:
+                        progress_callback(cid, cid, False, str(exc))
+
+        await asyncio.gather(*[_worker(cid) for cid in unique_ids])
+        elapsed = time.perf_counter() - start_time
+
+        return {
+            "total": total,
+            "cached": cached_count,
+            "downloaded": downloaded_count,
+            "failed": len(failed_cards),
+            "failed_cards": failed_cards,
+            "elapsed_seconds": elapsed,
+        }
+
