@@ -19,8 +19,15 @@ import type {
   ZoneType,
 } from '../types/cardModel'
 import { matchesCardFilter, normalizeCardNameForMatch } from '../data/cardCatalog'
+import { matchesDslFilter } from './filterDsl'
 import { detectBasicEnergy } from '../utils/energy'
 import { fisherYatesShuffle, Mulberry32 } from './prng'
+
+export function cardMatchesEffectFilter(card: EngineCardModel, eff: AtomicEffect): boolean {
+  if (eff.filter) return matchesDslFilter(card, eff.filter)
+  if (eff.targetFilter) return matchesCardFilter(card, eff.targetFilter)
+  return true
+}
 
 export type PlayerKey = 'PLAYER' | 'OPPONENT'
 export type MatchWinner = null | 'PLAYER' | 'OPPONENT' | 'DRAW'
@@ -147,9 +154,15 @@ export function normalizeEnergyType(type: string): string {
  */
 export function canPayEnergyCost(
   attachedEnergies: EngineCardModel[],
-  energyCost?: string[],
+  energyCost?: Record<string, number> | string[],
 ): boolean {
-  if (!energyCost || energyCost.length === 0) {
+  if (!energyCost) {
+    return true
+  }
+  if (Array.isArray(energyCost) && energyCost.length === 0) {
+    return true
+  }
+  if (typeof energyCost === 'object' && !Array.isArray(energyCost) && Object.keys(energyCost).length === 0) {
     return true
   }
 
@@ -181,12 +194,26 @@ export function canPayEnergyCost(
   const specificRequired: string[] = []
   let colorlessRequired = 0
 
-  for (const req of energyCost) {
-    const norm = normalizeEnergyType(req)
-    if (norm === 'incolore') {
-      colorlessRequired++
-    } else {
-      specificRequired.push(norm)
+  if (Array.isArray(energyCost)) {
+    for (const req of energyCost) {
+      const norm = normalizeEnergyType(req)
+      if (norm === 'incolore') {
+        colorlessRequired++
+      } else {
+        specificRequired.push(norm)
+      }
+    }
+  } else if (typeof energyCost === 'object') {
+    for (const [k, count] of Object.entries(energyCost)) {
+      const norm = normalizeEnergyType(k)
+      const c = Number(count) || 0
+      for (let i = 0; i < c; i++) {
+        if (norm === 'incolore') {
+          colorlessRequired++
+        } else {
+          specificRequired.push(norm)
+        }
+      }
     }
   }
 
@@ -402,23 +429,26 @@ export function canPokemonEvolveInto(
  */
 export function hasRequiredEnergyForPrecondition(
   poke: InPlayPokemon,
-  pre: ActionPrecondition,
+  pre: ActionPrecondition | string,
   action?: PlayableAction,
 ): boolean {
+  if (action?.cost && Object.keys(action.cost).length > 0) {
+    return canPayEnergyCost(poke.attachedEnergies, action.cost)
+  }
   if (action?.energyCost && action.energyCost.length > 0) {
     return canPayEnergyCost(poke.attachedEnergies, action.energyCost)
   }
-  const requiredTotal = pre.minCount || 1
-  if (poke.attachedEnergies.length < requiredTotal) {
+  const minCount = typeof pre === 'object' ? pre.minCount || 1 : 1
+  if (poke.attachedEnergies.length < minCount) {
     return false
   }
-  const reqType = pre.targetFilter?.energyType
+  const reqType = typeof pre === 'object' ? pre.targetFilter?.energyType : null
   if (!reqType) return true
   const normReq = normalizeEnergyType(reqType)
   if (normReq === 'incolore') {
-    return poke.attachedEnergies.length >= requiredTotal
+    return poke.attachedEnergies.length >= minCount
   }
-  return canPayEnergyCost(poke.attachedEnergies, Array(requiredTotal).fill(reqType))
+  return canPayEnergyCost(poke.attachedEnergies, Array(minCount).fill(reqType))
 }
 
 /**
@@ -431,7 +461,7 @@ export function canPokemonAttackTwice(poke: InPlayPokemon | null, state: MatchSt
   for (const act of poke.card.playableActions) {
     if (act.canAttackTwice) return true
     if (
-      act.sourceType === 'ABILITY_PASSIVE' &&
+      (act.actionType === 'USE_ABILITY' || act.sourceType === 'ABILITY_PASSIVE') &&
       /festival_lead|fete_battante|fête battante|attack_twice|deux fois|2 fois/i.test(
         `${act.actionId} ${act.label}`,
       )
@@ -454,14 +484,22 @@ export function canPokemonAttackTwice(poke: InPlayPokemon | null, state: MatchSt
  * Détermine si une attaque est une attaque à 0 énergie infligeant un Item-Lock (ex: Pollen Démangeant de Rozbouton / Budew).
  */
 export function isZeroEnergyItemLockAttack(action: PlayableAction): boolean {
-  if (action.sourceType !== 'ATTACK') return false
-  const hasEnergyCost =
-    (action.energyCost && action.energyCost.length > 0) ||
-    action.preconditions.some((p) => p.type === 'SELF_HAS_ENERGY_COST' && p.minCount > 0)
-  if (hasEnergyCost) return false
+  if (action.actionType !== 'ATTACK' && action.sourceType !== 'ATTACK') return false
+  const hasCostObj = action.cost && Object.keys(action.cost).length > 0
+  const hasCostArr = action.energyCost && action.energyCost.length > 0
+  const hasPreCost = action.preconditions.some(
+    (p: any) =>
+      (typeof p === 'string' ? p : p.type) === 'SELF_HAS_ENERGY_COST' &&
+      ((p as any).minCount || 0) > 0,
+  )
+  if (hasCostObj || hasCostArr || hasPreCost) return false
 
   return (
-    action.effects.some((e) => e.primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK') ||
+    action.effects.some(
+      (e) =>
+        e.primitive === 'APPLY_SPECIAL_CONDITION' ||
+        (e.primitive as any) === 'PASSIVE_ABILITY_OR_ITEM_LOCK',
+    ) ||
     /pollen_demangeant|pollen démangeant|itchy_pollen|itchy pollen|item_lock/i.test(
       `${action.actionId} ${action.label}`,
     )
@@ -486,14 +524,16 @@ export function computeAttackDamageToActive(
   let benchDamage = 0
   let energyToDiscard = 0
 
-  for (const cost of action.costs) {
-    if (cost.type === 'DISCARD_ENERGY_FROM_PLAY') {
-      energyToDiscard = Math.max(1, cost.count || 1)
+  if (Array.isArray(action.costs)) {
+    for (const cost of action.costs) {
+      if (cost.type === 'DISCARD_ENERGY_FROM_PLAY') {
+        energyToDiscard = Math.max(1, cost.count || 1)
+      }
     }
   }
 
   for (const eff of action.effects) {
-    if (eff.primitive === 'DEAL_DAMAGE_ACTIVE') {
+    if (eff.primitive === 'DAMAGE_ACTIVE' || (eff as any).primitive === 'DEAL_DAMAGE_ACTIVE') {
       let dmg = eff.baseDamage ?? 0
       const scalingType = eff.damageScalingType
       const scalingValue = eff.damageScalingValue ?? 0
@@ -611,9 +651,10 @@ export function computeAttackDamageToActive(
 
       activeDamage += dmg
     } else if (
-      eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
-      eff.primitive === 'PLACE_DAMAGE_COUNTERS' ||
-      eff.primitive === 'DEAL_DAMAGE_BENCH'
+      eff.primitive === 'DAMAGE_BENCH' ||
+      (eff as any).primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
+      (eff as any).primitive === 'PLACE_DAMAGE_COUNTERS' ||
+      (eff as any).primitive === 'DEAL_DAMAGE_BENCH'
     ) {
       benchDamage += eff.baseDamage ?? (eff.count || 1) * 10
     }
@@ -651,16 +692,16 @@ export function computeAttackDamageToActive(
     } else {
       // Application de la Faiblesse (x2)
       const atkTypes = (attacker.card.pokemonStats?.types || []).map(normalizeCardNameForMatch)
-      const defWeaknesses = (defender.card.pokemonStats?.weaknesses || []).map(
-        normalizeCardNameForMatch,
+      const defWeaknesses = (defender.card.pokemonStats?.weaknesses || []).map((w: any) =>
+        normalizeCardNameForMatch(typeof w === 'string' ? w : w.type || ''),
       )
       if (atkTypes.some((t) => defWeaknesses.includes(t))) {
         activeDamage *= 2
       }
 
       // Application de la Résistance (-30)
-      const defResistances = (defender.card.pokemonStats?.resistances || []).map(
-        normalizeCardNameForMatch,
+      const defResistances = (defender.card.pokemonStats?.resistances || []).map((r: any) =>
+        normalizeCardNameForMatch(typeof r === 'string' ? r : r.type || ''),
       )
       if (atkTypes.some((t) => defResistances.includes(t))) {
         const resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
@@ -699,10 +740,54 @@ export function isCardDeadInHand(
   oppBoard: PlayerBoardState,
   activeStadium?: ActiveStadiumState | null,
 ): boolean {
+  for (const act of card.playableActions) {
+    if (act.deadCardCondition) {
+      if (evaluateDeadStringCondition(act.deadCardCondition, myBoard, oppBoard, activeStadium, card)) {
+        return true
+      }
+    }
+  }
+
   const conditions = card.strategicEvaluator.inGameDeadCardConditions || []
   for (const cond of conditions) {
     if (evaluateDeadCondition(cond, myBoard, oppBoard, activeStadium, card)) {
       return true
+    }
+  }
+  return false
+}
+
+function evaluateDeadStringCondition(
+  condStr: string,
+  myBoard: PlayerBoardState,
+  oppBoard: PlayerBoardState,
+  activeStadium?: ActiveStadiumState | null,
+  cardBeingEvaluated?: EngineCardModel,
+): boolean {
+  const parts = condStr.split('|')
+  for (const part of parts) {
+    const p = part.trim().toUpperCase()
+    if (p === 'BENCH_FULL' || p === 'BENCH_ALREADY_FULL') {
+      const maxSlots = activeStadium?.card.cardId === 'sv07-141' ? 8 : 5
+      if (myBoard.bench.length >= maxSlots) return true
+    } else if (p === 'NOT_BEHIND_ON_PRIZES') {
+      if (myBoard.prizes.length <= oppBoard.prizes.length) return true
+    } else if (p === 'NO_KO_LAST_TURN') {
+      if (!myBoard.koSufferedLastOpponentTurn) return true
+    } else if (p === 'NO_TERA_IN_PLAY' || p === 'NO_TERA_POKEMON_IN_PLAY') {
+      const allInPlay = [myBoard.activePokemon, ...myBoard.bench].filter((x): x is InPlayPokemon => x !== null)
+      if (!allInPlay.some((x) => Boolean(x.card.identity.isTera || x.card.pokemonStats?.isTera))) return true
+    } else if (p === 'DISCARD_EMPTY' || p === 'DISCARD_PILE_EMPTY') {
+      if (myBoard.discard.length === 0) return true
+    } else if (p === 'STADIUM_ALREADY_IN_PLAY_SAME_NAME') {
+      if (
+        activeStadium &&
+        cardBeingEvaluated &&
+        normalizeCardNameForMatch(activeStadium.card.identity.nameFr) ===
+          normalizeCardNameForMatch(cardBeingEvaluated.identity.nameFr)
+      ) {
+        return true
+      }
     }
   }
   return false
@@ -1106,19 +1191,34 @@ export function checkActionPreconditions(
   }
 
   // Verrou Item Lock
-  if (action.sourceType === 'TRAINER_PLAY' && sourceCard.subCategory === 'ITEM' && activeBoard.itemLockActive) {
+  const isItem = sourceCard.subCategory === 'ITEM'
+  if (
+    (action.actionType === 'PLAY_FROM_HAND' || action.sourceType === 'TRAINER_PLAY') &&
+    isItem &&
+    activeBoard.itemLockActive
+  ) {
     return false
   }
 
   // Verrous de timing globaux
-  if (action.timing === 'ONCE_PER_TURN_SUPPORTER' && activeBoard.supporterPlayedThisTurn) {
+  const isSupporter = sourceCard.subCategory === 'SUPPORTER'
+  if (
+    isSupporter &&
+    (action.timingPhase === 'MAIN_PHASE_1' || action.timing === 'ONCE_PER_TURN_SUPPORTER') &&
+    activeBoard.supporterPlayedThisTurn
+  ) {
     return false
   }
-  if (action.timing === 'ONCE_PER_GAME_VSTAR' && activeBoard.vstarPowerUsed) {
+  if (isSupporter && isTurn1FirstPlayer) {
     return false
   }
-  if (action.timing === 'ONCE_PER_TURN_ABILITY') {
-    // Talents globaux limités à 1 par tour (Recherche Rapide, Retour Renversant, Tapage et Prise, Charge Instantanée)
+  if (action.actionId.includes('vstar') && activeBoard.vstarPowerUsed) {
+    return false
+  }
+  if (
+    action.actionType === 'USE_ABILITY' ||
+    (action.sourceType && action.sourceType.startsWith('ABILITY'))
+  ) {
     const globalOncePerTurnIds = new Set([
       'ability_quick_search',
       'ability_flip_the_script',
@@ -1137,150 +1237,148 @@ export function checkActionPreconditions(
     }
   }
 
-  for (const pre of action.preconditions) {
-    switch (pre.type) {
-      case 'BENCH_HAS_EMPTY_SLOTS': {
-        const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
-        if (activeBoard.bench.length > maxSlots - Math.max(1, pre.minCount)) return false
-        break
-      }
+  for (const rawPre of action.preconditions) {
+    const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
+    const minCount = typeof rawPre === 'object' ? (rawPre as any).minCount ?? 1 : 1
+    const targetFilter = typeof rawPre === 'object' ? (rawPre as any).targetFilter : null
+    const zone = typeof rawPre === 'object' ? (rawPre as any).zone || 'DECK' : 'DECK'
 
-      case 'HAND_MIN_OTHER_CARDS': {
-        const otherHandCount =
-          handIndexIfFromHand !== undefined
+    if (preType === 'BENCH_HAS_EMPTY_SLOTS' || preType === 'BENCH_HAS_EMPTY_SLOT') {
+      const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
+      if (activeBoard.bench.length > maxSlots - Math.max(1, minCount)) return false
+    } else if (preType.startsWith('HAND_MIN_OTHER_CARDS')) {
+      const countReq = preType.includes('_')
+        ? parseInt(preType.split('_').pop() || '1', 10) || minCount
+        : minCount
+      const otherHandCount =
+        handIndexIfFromHand !== undefined
+          ? activeBoard.hand.length - 1
+          : activeBoard.hand.length
+      if (otherHandCount < countReq) return false
+    } else if (preType === 'HAND_MAX_OTHER_CARDS_ZERO') {
+      const otherHandCount =
+        handIndexIfFromHand !== undefined
+          ? activeBoard.hand.length - 1
+          : activeBoard.hand.some((c) => c.cardId === sourceCard.cardId)
             ? activeBoard.hand.length - 1
             : activeBoard.hand.length
-        if (otherHandCount < pre.minCount) return false
-        break
-      }
-
-      case 'HAND_MAX_OTHER_CARDS_ZERO': {
-        const otherHandCount =
-          handIndexIfFromHand !== undefined
-            ? activeBoard.hand.length - 1
-            : activeBoard.hand.some((c) => c.cardId === sourceCard.cardId)
-              ? activeBoard.hand.length - 1
-              : activeBoard.hand.length
-        if (otherHandCount > 0) return false
-        break
-      }
-
-      case 'PLAYER_BEHIND_ON_PRIZES':
-        if (activeBoard.prizes.length <= passiveBoard.prizes.length) return false
-        break
-
-      case 'KO_SUFFERED_LAST_TURN':
-        if (!activeBoard.koSufferedLastOpponentTurn) return false
-        break
-
-      case 'BASIC_IN_PLAY_PREVIOUS_TURN': {
-        if (state.turnNumber <= 2) return false
-        // Doit exister un Pokémon BASIC posé à un tour précédent pouvant évoluer en un STAGE_2 présent en main
+      if (otherHandCount > 0) return false
+    } else if (preType === 'PLAYER_BEHIND_ON_PRIZES') {
+      if (activeBoard.prizes.length <= passiveBoard.prizes.length) return false
+    } else if (preType === 'KO_SUFFERED_LAST_TURN') {
+      if (!activeBoard.koSufferedLastOpponentTurn) return false
+    } else if (preType === 'BASIC_IN_PLAY_PREVIOUS_TURN' || preType === 'BASIC_POKEMON_IN_PLAY') {
+      if (state.turnNumber <= 2 && preType === 'BASIC_IN_PLAY_PREVIOUS_TURN') return false
+      const allInPlay = [
+        ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
+        ...activeBoard.bench,
+      ]
+      if (preType === 'BASIC_POKEMON_IN_PLAY') {
+        if (!allInPlay.some((p) => p.card.subCategory === 'BASIC')) return false
+      } else {
         const stage2InHand = activeBoard.hand.filter(
           (c) => c.category === 'POKEMON' && c.subCategory === 'STAGE_2',
         )
         if (stage2InHand.length === 0) return false
-        const allInPlay = [
-          ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
-          ...activeBoard.bench,
-        ]
         const canRareCandyAny = allInPlay.some((poke) =>
           stage2InHand.some((s2) => canPokemonEvolveInto(poke, s2, state.turnNumber, true)),
         )
         if (!canRareCandyAny) return false
-        break
       }
-
-      case 'SELF_IS_ACTIVE':
-        if (!sourcePokemon || activeBoard.activePokemon?.instanceId !== sourcePokemon.instanceId) {
-          return false
-        }
-        break
-
-      case 'SELF_HAS_ENERGY_COST':
-        if (!sourcePokemon || !hasRequiredEnergyForPrecondition(sourcePokemon, pre, action)) {
-          return false
-        }
-        break
-
-      case 'HAS_TERA_POKEMON_IN_PLAY': {
-        const hasTera = [
-          ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
-          ...activeBoard.bench,
-        ].some((p) => Boolean(p.card.pokemonStats?.isTera))
-        if (!hasTera) return false
-        break
+    } else if (preType === 'STAGE_2_CARD_IN_HAND') {
+      const hasS2 = activeBoard.hand.some(
+        (c) => c.category === 'POKEMON' && c.subCategory === 'STAGE_2',
+      )
+      if (!hasS2) return false
+    } else if (preType === 'NOT_FIRST_TURN') {
+      if (state.turnNumber === 1 && state.activePlayerIndex === state.firstPlayerIndex) return false
+    } else if (preType === 'SELF_IS_ACTIVE') {
+      if (!sourcePokemon || activeBoard.activePokemon?.instanceId !== sourcePokemon.instanceId) {
+        return false
       }
-
-      case 'STADIUM_IN_PLAY': {
-        if (!state.activeStadium) return false
-        if (pre.targetFilter && !matchesCardFilter(state.activeStadium.card, pre.targetFilter)) {
-          return false
-        }
-        break
+    } else if (preType === 'SELF_HAS_ENERGY_COST') {
+      if (!sourcePokemon) return false
+      if (action.cost && Object.keys(action.cost).length > 0) {
+        if (!canPayEnergyCost(sourcePokemon.attachedEnergies, action.cost)) return false
+      } else if (action.energyCost && action.energyCost.length > 0) {
+        if (!canPayEnergyCost(sourcePokemon.attachedEnergies, action.energyCost)) return false
+      } else if (typeof rawPre === 'object') {
+        if (!hasRequiredEnergyForPrecondition(sourcePokemon, rawPre, action)) return false
       }
-
-      case 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION': {
-        const oppActive = passiveBoard.activePokemon
-        if (!oppActive || !oppActive.specialConditions || oppActive.specialConditions.length === 0) {
-          return false
-        }
-        break
+    } else if (preType === 'HAS_TERA_POKEMON_IN_PLAY') {
+      const hasTera = [
+        ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
+        ...activeBoard.bench,
+      ].some((p) => Boolean(p.card.identity.isTera || p.card.pokemonStats?.isTera))
+      if (!hasTera) return false
+    } else if (preType === 'STADIUM_IN_PLAY') {
+      if (!state.activeStadium) return false
+      if (targetFilter && !matchesCardFilter(state.activeStadium.card, targetFilter)) {
+        return false
       }
-
-      case 'OPPONENT_PRIZES_EXACT_COUNT': {
-        if (passiveBoard.prizes.length !== pre.minCount) return false
-        break
+    } else if (preType === 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION') {
+      const oppActive = passiveBoard.activePokemon
+      if (!oppActive || !oppActive.specialConditions || oppActive.specialConditions.length === 0) {
+        return false
       }
-
-      case 'SELF_IS_ON_BENCH': {
-        if (!sourcePokemon || !activeBoard.bench.some((b) => b.instanceId === sourcePokemon.instanceId)) {
-          return false
-        }
-        break
+    } else if (preType === 'OPPONENT_PRIZES_EXACT_COUNT') {
+      if (passiveBoard.prizes.length !== minCount) return false
+    } else if (preType === 'SELF_IS_ON_BENCH') {
+      if (
+        !sourcePokemon ||
+        !activeBoard.bench.some((b) => b.instanceId === sourcePokemon.instanceId)
+      ) {
+        return false
       }
-
-      case 'NO_ENERGY_IN_PLAY': {
-        if (sourcePokemon) {
-          if (sourcePokemon.attachedEnergies.length > 0) return false
-        } else {
-          const totalEnergies =
-            (activeBoard.activePokemon?.attachedEnergies.length || 0) +
-            activeBoard.bench.reduce((sum, b) => sum + b.attachedEnergies.length, 0)
-          if (totalEnergies > 0) return false
-        }
-        break
+    } else if (preType === 'NO_ENERGY_IN_PLAY') {
+      if (sourcePokemon) {
+        if (sourcePokemon.attachedEnergies.length > 0) return false
+      } else {
+        const totalEnergies =
+          (activeBoard.activePokemon?.attachedEnergies.length || 0) +
+          activeBoard.bench.reduce((sum, b) => sum + b.attachedEnergies.length, 0)
+        if (totalEnergies > 0) return false
       }
-
-      case 'SECOND_PLAYER_TURN_1': {
-        if (state.turnNumber !== 2 || state.activePlayerIndex === state.firstPlayerIndex) {
-          return false
-        }
-        break
+    } else if (preType === 'SECOND_PLAYER_TURN_1') {
+      if (state.turnNumber !== 2 || state.activePlayerIndex === state.firstPlayerIndex) {
+        return false
       }
-
-      case 'ZONE_HAS_MATCHING_CARD': {
-        const zone = pre.zone || 'DECK'
-        if (zone === 'HAND' && handIndexIfFromHand !== undefined) {
-          const matchingInRest = activeBoard.hand.filter(
-            (c, idx) => idx !== handIndexIfFromHand && matchesCardFilter(c, pre.targetFilter),
-          )
-          if (matchingInRest.length < pre.minCount) return false
-        } else {
-          const count = countMatchingCardsInZones(activeBoard, [zone], pre.targetFilter)
-          if (count < pre.minCount) return false
-        }
-        break
+    } else if (preType === 'ZONE_HAS_MATCHING_CARD') {
+      const effectWithFilter = action.effects.find((e) => e.filter || e.targetFilter)
+      if (zone === 'HAND' && handIndexIfFromHand !== undefined) {
+        const matchingInRest = activeBoard.hand.filter((c, idx) => {
+          if (idx === handIndexIfFromHand) return false
+          if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
+          if (targetFilter) return matchesCardFilter(c, targetFilter)
+          return true
+        })
+        if (matchingInRest.length < minCount) return false
+      } else {
+        const cardsInZone = zone === 'DISCARD' ? activeBoard.discard : activeBoard.deck
+        const matching = cardsInZone.filter((c) => {
+          if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
+          if (targetFilter) return matchesCardFilter(c, targetFilter)
+          return true
+        })
+        if (matching.length < minCount) return false
       }
     }
   }
 
   // Vérifications additionnelles spécifiques aux effets
   for (const eff of action.effects) {
-    if (eff.primitive === 'GUST_OPPONENT_BENCH' && passiveBoard.bench.length === 0) {
+    if (
+      eff.primitive === 'SWITCH_ACTIVE' &&
+      (eff.target === 'OPPONENT_BENCH' || (eff as any).targetZone === 'OPPONENT_BENCH' || (eff as any).primitive === 'GUST_OPPONENT_BENCH') &&
+      passiveBoard.bench.length === 0
+    ) {
       return false
     }
-    if (eff.primitive === 'SWITCH_ACTIVE_POKEMON' && activeBoard.bench.length === 0) {
+    if (
+      eff.primitive === 'SWITCH_ACTIVE' &&
+      (eff.target === 'OWN_BENCH' || eff.target === 'SELF' || (eff as any).primitive === 'SWITCH_ACTIVE_POKEMON') &&
+      activeBoard.bench.length === 0
+    ) {
       return false
     }
   }
@@ -1436,7 +1534,9 @@ export function getLegalActions(state: MatchState): GameAction[] {
     // Cas des Outils d'équipement sans effet immédiat (TM ou Outil stat)
     if (
       card.subCategory === 'TOOL' &&
-      card.playableActions.every((a) => a.effects.length === 0 || a.sourceType === 'ATTACK')
+      card.playableActions.every(
+        (a) => a.effects.length === 0 || a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
+      )
     ) {
       if (activeBoard.activePokemon && activeBoard.activePokemon.attachedTools.length === 0) {
         actions.push({
@@ -1462,7 +1562,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
     }
 
     for (const pAction of card.playableActions) {
-      if (pAction.sourceType !== 'TRAINER_PLAY') continue
+      if (pAction.actionType !== 'PLAY_FROM_HAND' && pAction.sourceType !== 'TRAINER_PLAY') continue
       if (
         !checkActionPreconditions(
           state,
@@ -1477,8 +1577,12 @@ export function getLegalActions(state: MatchState): GameAction[] {
         continue
       }
 
-      // Cas A : Super Bonbon (`EVOLVE_SKIP_STAGE1`) -> Générer une action par couple (Base en jeu -> Stage 2 en main)
-      const isRareCandy = pAction.effects.some((e) => e.primitive === 'EVOLVE_SKIP_STAGE1')
+      // Cas A : Super Bonbon (`EVOLVE_POKEMON` / `EVOLVE_SKIP_STAGE1`) -> Générer une action par couple (Base en jeu -> Stage 2 en main)
+      const isRareCandy =
+        pAction.effects.some(
+          (e) => e.primitive === 'EVOLVE_POKEMON' || (e as any).primitive === 'EVOLVE_SKIP_STAGE1',
+        ) &&
+        /super.*bonbon|rare.*candy|evolve.*stage.*2/i.test(`${card.identity.nameFr} ${pAction.label}`)
       if (isRareCandy) {
         const stage2InHand = activeBoard.hand.filter(
           (c) => c.category === 'POKEMON' && c.subCategory === 'STAGE_2',
@@ -1524,8 +1628,13 @@ export function getLegalActions(state: MatchState): GameAction[] {
         continue
       }
 
-      // Cas B : Gust du Banc adverse (`GUST_OPPONENT_BENCH` : Ordres du Boss, Attrape-Riposte, Attrape-Suprême)
-      const hasGust = pAction.effects.some((e) => e.primitive === 'GUST_OPPONENT_BENCH')
+      // Cas B : Gust du Banc adverse (`SWITCH_ACTIVE` avec target OPPONENT_BENCH ou `GUST_OPPONENT_BENCH`)
+      const hasGust = pAction.effects.some(
+        (e) =>
+          (e.primitive === 'SWITCH_ACTIVE' &&
+            (e.target === 'OPPONENT_BENCH' || (e as any).targetZone === 'OPPONENT_BENCH')) ||
+          (e as any).primitive === 'GUST_OPPONENT_BENCH',
+      )
       if (hasGust) {
         const seenOppTargets = new Set<string>()
         passiveBoard.bench.forEach((oppBench, obIdx) => {
@@ -1547,8 +1656,10 @@ export function getLegalActions(state: MatchState): GameAction[] {
       // Cas C : Recherche ciblée d'1 Pokémon dans le deck vers la main (ex: Hyper Ball)
       const isSinglePokemonTutor =
         pAction.effects.length === 1 &&
-        pAction.effects[0]?.primitive === 'SEARCH_DECK_TO_HAND' &&
-        pAction.effects[0]?.targetFilter?.category === 'POKEMON'
+        (pAction.effects[0]?.primitive === 'SEARCH_DECK' ||
+          (pAction.effects[0] as any)?.primitive === 'SEARCH_DECK_TO_HAND') &&
+        (pAction.effects[0]?.filter?.includes('POKEMON') ||
+          pAction.effects[0]?.targetFilter?.category === 'POKEMON')
       if (isSinglePokemonTutor) {
         const topCandidates = selectBestDeckTutorTargets(
           state,
@@ -1594,9 +1705,10 @@ export function getLegalActions(state: MatchState): GameAction[] {
 
   for (const { poke, slot } of allInPlayWithSlot) {
     for (const pAction of poke.card.playableActions) {
-      if (pAction.sourceType !== 'ABILITY_ACTIVATED') continue
+      if (pAction.actionType !== 'USE_ABILITY' && pAction.sourceType !== 'ABILITY_ACTIVATED') continue
       // Exclure les talents passifs / réactifs / checkup
       if (
+        pAction.timingPhase === 'ATTACK_PHASE' ||
         pAction.timing === 'PASSIVE_CONTINUOUS' ||
         pAction.timing === 'ON_DAMAGED_OR_KO_TRIGGER' ||
         pAction.timing === 'BETWEEN_TURNS_CHECKUP'
@@ -1612,7 +1724,9 @@ export function getLegalActions(state: MatchState): GameAction[] {
         continue
       }
 
-      const endsTurn = pAction.costs.some((c) => c.type === 'END_TURN_IMMEDIATELY')
+      const endsTurn =
+        Array.isArray(pAction.costs) &&
+        pAction.costs.some((c) => c.type === 'END_TURN_IMMEDIATELY')
 
       // Si c'est Recherche Rapide (Roucarnage-ex), génère jusqu'à 2 meilleures cibles stratégiques du deck
       if (pAction.actionId === 'ability_quick_search') {
@@ -1645,7 +1759,9 @@ export function getLegalActions(state: MatchState): GameAction[] {
   if (state.activeStadium && !state.activeStadium.usedThisTurn) {
     for (const stadAction of state.activeStadium.card.playableActions) {
       if (
+        stadAction.timingPhase === 'MAIN_PHASE_1' ||
         stadAction.timing === 'ONCE_PER_TURN_STADIUM' ||
+        stadAction.actionType === 'PLAY_FROM_HAND' ||
         stadAction.sourceType === 'STADIUM_EFFECT'
       ) {
         if (
@@ -1706,7 +1822,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
   ) {
     // 7a. Attaques propres au Pokémon Actif
     for (const pAction of activeBoard.activePokemon.card.playableActions) {
-      if (pAction.sourceType !== 'ATTACK') continue
+      if (pAction.actionType !== 'ATTACK' && pAction.sourceType !== 'ATTACK') continue
       if (
         !checkActionPreconditions(
           state,
@@ -1744,10 +1860,10 @@ export function getLegalActions(state: MatchState): GameAction[] {
     for (const tool of activeBoard.activePokemon.attachedTools) {
       if (
         tool.identity.isTechnicalMachine ||
-        tool.playableActions.some((a) => a.sourceType === 'ATTACK')
+        tool.playableActions.some((a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK')
       ) {
         for (const tmAction of tool.playableActions) {
-          if (tmAction.sourceType !== 'ATTACK') continue
+          if (tmAction.actionType !== 'ATTACK' && tmAction.sourceType !== 'ATTACK') continue
           if (
             !checkActionPreconditions(
               state,
@@ -1819,7 +1935,7 @@ export function selectBestDeckTutorTargets(
   )
 
   const scoreCandidate = (c: EngineCardModel): number => {
-    let score = c.strategicEvaluator.intrinsicBaseScore
+    let score = c.strategicEvaluator.intrinsicBaseScore ?? (c.strategicEvaluator.aiRole === 'MAIN_ATTACKER' ? 90 : 70)
     if (isCardDeadInHand(c, activeBoard, passiveBoard)) return -100
 
     // Si on a Super Bonbon en main et une base prête, un Stage 2 évoluable (Dracaufeu-ex / Roucarnage-ex) est prioritaire absolu !
@@ -1832,8 +1948,8 @@ export function selectBestDeckTutorTargets(
       )
       if (canEvoNow || canNormalEvoNow) {
         score += 120
-        if (c.strategicEvaluator.primaryRole === 'MAIN_ATTACKER') score += 25
-        if (c.strategicEvaluator.primaryRole === 'TUTOR_ENGINE_POKEMON') score += 20
+        if ((c.strategicEvaluator.aiRole as string) === 'MAIN_ATTACKER' || c.strategicEvaluator.primaryRole === 'MAIN_ATTACKER') score += 25
+        if ((c.strategicEvaluator.aiRole as string) === 'CONSISTENCY_BOOSTER' || (c.strategicEvaluator.primaryRole as string) === 'TUTOR_ENGINE_POKEMON') score += 20
       } else if (state.turnNumber === 1) {
         score -= 40
       }
@@ -1886,7 +2002,7 @@ function discardCardsFromHandForCost(
       const isLastCardComboTarget =
         !activeBoard.supporterPlayedThisTurn &&
         c.playableActions.some((a) =>
-          a.preconditions.some((p) => p.type === 'HAND_MAX_OTHER_CARDS_ZERO'),
+          a.preconditions.some((p) => (typeof p === 'string' ? p : (p as any)?.type) === 'HAND_MAX_OTHER_CARDS_ZERO'),
         )
       if (isLastCardComboTarget && activeBoard.hand.length > 1) {
         if (-5000 > bestDiscardScore) {
@@ -1899,10 +2015,10 @@ function discardCardsFromHandForCost(
       // Dans un deck Gardevoir/Ire-Foudre, défausser une Énergie de base est souvent synergique !
       const isSynergisticBasicEnergy = c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY'
       const discardScore = isDead
-        ? 1000 + c.strategicEvaluator.discardPriorityWhenDead
+        ? 1000 + (c.strategicEvaluator.discardPriorityWhenDead ?? 10)
         : isSynergisticBasicEnergy
-          ? 220 - c.strategicEvaluator.intrinsicBaseScore
-          : 120 - c.strategicEvaluator.intrinsicBaseScore
+          ? 220 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
+          : 120 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
       if (discardScore > bestDiscardScore) {
         bestDiscardScore = discardScore
         bestDiscardIdx = idx
@@ -1972,6 +2088,7 @@ export function applyAction(
         // Déclencher les talents à la pose de la main (ABILITY_ON_PLAY_FROM_HAND)
         for (const pAction of card.playableActions) {
           if (
+            pAction.actionType === 'USE_ABILITY' ||
             pAction.sourceType === 'ABILITY_ON_PLAY_FROM_HAND' ||
             pAction.timing === 'ON_PLAY_FROM_HAND_TRIGGER'
           ) {
@@ -2099,7 +2216,9 @@ export function applyAction(
       // Cas d'un Outil attaché directement à un Pokémon (Ceinture Vitalité, Amulette Bravoure, TM)
       if (
         trainerCard.subCategory === 'TOOL' &&
-        trainerCard.playableActions.every((a) => a.effects.length === 0 || a.sourceType === 'ATTACK')
+        trainerCard.playableActions.every(
+          (a) => a.effects.length === 0 || a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
+        )
       ) {
         const targetPoke =
           action.targetSlot === 'ACTIVE'
@@ -2129,7 +2248,7 @@ export function applyAction(
 
       if (pAction) {
         // Paiement des coûts (ex: défausse de 2 cartes pour Hyper Ball, 1 carte pour Urne Terrestre)
-        for (const cost of pAction.costs) {
+        for (const cost of (pAction.costs || [])) {
           if (cost.type === 'DISCARD_FROM_HAND') {
             discardCardsFromHandForCost(activeBoard, passiveBoard, cost)
           }
@@ -2197,7 +2316,7 @@ export function applyAction(
 
       // Paiement des coûts du talent (ex: Raffinement de Kirlia, Cartes Cachées d'Amphinobi Radieux, Enlacement Psy, Explosion Maudite)
       let endsTurn = false
-      for (const cost of pAction.costs) {
+      for (const cost of (pAction.costs || [])) {
         if (cost.type === 'DISCARD_FROM_HAND') {
           discardCardsFromHandForCost(activeBoard, passiveBoard, cost)
         } else if (cost.type === 'PUT_DAMAGE_COUNTERS_ON_SELF') {
@@ -2295,7 +2414,7 @@ export function applyAction(
           .find((a) => a.actionId === action.actionId)
       if (!pAction) break
 
-      if (pAction.costs.some((c) => c.type === 'CANT_ATTACK_NEXT_TURN')) {
+      if ((pAction.costs || []).some((c) => c.type === 'CANT_ATTACK_NEXT_TURN')) {
         attacker.cantAttackNextTurn = true
       }
 
@@ -2322,18 +2441,18 @@ export function applyAction(
         }
 
         for (const eff of pAction.effects) {
-          if (eff.primitive === 'DEAL_DAMAGE_ACTIVE') {
+          if (eff.primitive === 'DAMAGE_ACTIVE' || (eff.primitive as any) === 'DEAL_DAMAGE_ACTIVE') {
             if (passiveBoard.activePokemon && dmgInfo.activeDamage > 0) {
               passiveBoard.activePokemon.damage += dmgInfo.activeDamage
               if (passiveBoard.activePokemon.damage >= getPokemonMaxHp(passiveBoard.activePokemon)) {
                 handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
               }
             }
-          } else if (eff.primitive === 'DEAL_DAMAGE_BENCH') {
-            // DEAL_DAMAGE_BENCH inflige des DÉGÂTS au Banc.
+          } else if (eff.primitive === 'DAMAGE_BENCH' || (eff.primitive as any) === 'DEAL_DAMAGE_BENCH') {
+            // DEAL_DAMAGE_BENCH / DAMAGE_BENCH inflige des DÉGÂTS au Banc.
             // Les Pokémon Téracristal (isTera === true) sont immunisés aux dégâts sur le Banc !
             if (passiveBoard.bench.length > 0) {
-              const benchDmg = eff.baseDamage ?? (eff.count || 1) * 10
+              const benchDmg = eff.baseDamage ?? eff.value ?? (eff.count || 1) * 10
               for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
                 const bPoke = passiveBoard.bench[bIdx]!
                 if (bPoke.card.pokemonStats?.isTera) continue
@@ -2344,8 +2463,8 @@ export function applyAction(
               }
             }
           } else if (
-            eff.primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
-            eff.primitive === 'PLACE_DAMAGE_COUNTERS'
+            (eff.primitive as any) === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
+            (eff.primitive as any) === 'PLACE_DAMAGE_COUNTERS'
           ) {
             // PLACE_DAMAGE_COUNTERS place des MARQUEURS de dégâts.
             // Les marqueurs contournent la prévention des dégâts et affectent les Pokémon Téracristal normalement !
@@ -2357,7 +2476,7 @@ export function applyAction(
                 const willKo = remHp <= dmgInfo.benchDamage
                 const s =
                   (willKo ? 500 : 0) +
-                  bPoke.card.strategicEvaluator.intrinsicBaseScore -
+                  (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 70) -
                   remHp * 0.4
                 if (s > bestBenchScore) {
                   bestBenchScore = s
@@ -2422,7 +2541,11 @@ function evolveInPlayPokemon(
 
   // Résolution automatique des talents `ABILITY_ON_EVOLVE` (ex: Règne Infernal de Dracaufeu-ex)
   for (const pAction of evoCard.playableActions) {
-    if (pAction.sourceType === 'ABILITY_ON_EVOLVE') {
+    if (
+      pAction.actionType === 'USE_ABILITY' ||
+      pAction.sourceType === 'ABILITY_ON_EVOLVE' ||
+      pAction.timing === 'ON_EVOLVE_TRIGGER'
+    ) {
       const rng = new Mulberry32(state.rngState)
       for (const eff of pAction.effects) {
         resolveAtomicEffect(
@@ -2452,7 +2575,276 @@ function resolveAtomicEffect(
   rng: Mulberry32,
   markDeckSearched: () => void,
 ): void {
-  switch (eff.primitive) {
+  switch (eff.primitive as string) {
+    case 'SEARCH_DECK': {
+      markDeckSearched()
+      const maxCount = eff.count || 1
+      const isToBench =
+        eff.target === 'OWN_BENCH' ||
+        eff.target === 'BENCH' ||
+        eff.zone === 'BENCH' ||
+        (eff as any).targetZone === 'BENCH'
+
+      if (isToBench) {
+        const maxSlots = getMaxBenchSlots(activeBoard, state.activeStadium)
+        for (let i = 0; i < maxCount; i++) {
+          if (activeBoard.bench.length >= maxSlots) break
+          const chosenIdx = activeBoard.deck.findIndex((c) => cardMatchesEffectFilter(c, eff))
+          if (chosenIdx === -1) break
+          const card = activeBoard.deck.splice(chosenIdx, 1)[0]!
+          activeBoard.bench.push({
+            instanceId: `p_${state.nextInstanceSeq++}`,
+            card,
+            previousStages: [],
+            damage: 0,
+            attachedEnergies: [],
+            attachedTools: [],
+            turnPlayed: state.turnNumber,
+            evolvedThisTurn: false,
+            specialConditions: [],
+            cantAttackNextTurn: false,
+          })
+        }
+      } else {
+        for (let i = 0; i < maxCount; i++) {
+          let chosenIdx = -1
+          if (action.targetCardIds && action.targetCardIds[i]) {
+            chosenIdx = activeBoard.deck.findIndex(
+              (c) => c.cardId === action.targetCardIds![i] && cardMatchesEffectFilter(c, eff),
+            )
+          }
+          if (chosenIdx === -1) {
+            chosenIdx = activeBoard.deck.findIndex((c) => cardMatchesEffectFilter(c, eff))
+          }
+          if (chosenIdx === -1) break
+          const foundCard = activeBoard.deck.splice(chosenIdx, 1)[0]!
+          activeBoard.hand.push(foundCard)
+        }
+      }
+      fisherYatesShuffle(activeBoard.deck, rng)
+      break
+    }
+
+    case 'ATTACH_ENERGY': {
+      const isFromDiscard = eff.zone === 'DISCARD' || (eff as any).sourceZone === 'DISCARD'
+      const isFromHand = eff.zone === 'HAND' || (eff as any).sourceZone === 'HAND'
+      const maxCount = eff.count || 1
+
+      if (isFromDiscard) {
+        for (let i = 0; i < maxCount; i++) {
+          const enIdx = activeBoard.discard.findIndex((c) => cardMatchesEffectFilter(c, eff))
+          if (enIdx === -1) break
+          const targetPoke = selectBestPokemonForEnergyAttachment(activeBoard)
+          if (!targetPoke) break
+          if (action.actionId === 'ability_psychic_embrace') {
+            if (getRemainingHp(targetPoke) <= 20) break
+            targetPoke.damage += 20
+          }
+          const energyCard = activeBoard.discard.splice(enIdx, 1)[0]!
+          targetPoke.attachedEnergies.push(energyCard)
+        }
+      } else if (isFromHand) {
+        for (let i = 0; i < maxCount; i++) {
+          const enIdx = activeBoard.hand.findIndex((c) => cardMatchesEffectFilter(c, eff))
+          if (enIdx === -1) break
+          const energyCard = activeBoard.hand.splice(enIdx, 1)[0]!
+          const targetPoke = selectBestPokemonForEnergyAttachment(activeBoard)
+          if (targetPoke) {
+            targetPoke.attachedEnergies.push(energyCard)
+          } else {
+            activeBoard.hand.push(energyCard)
+          }
+        }
+      } else {
+        markDeckSearched()
+        for (let i = 0; i < maxCount; i++) {
+          const enIdx = activeBoard.deck.findIndex((c) => cardMatchesEffectFilter(c, eff))
+          if (enIdx === -1) break
+          const energyCard = activeBoard.deck.splice(enIdx, 1)[0]!
+          const targetPoke = selectBestPokemonForEnergyAttachment(activeBoard)
+          if (targetPoke) {
+            targetPoke.attachedEnergies.push(energyCard)
+          } else {
+            activeBoard.discard.push(energyCard)
+          }
+        }
+        fisherYatesShuffle(activeBoard.deck, rng)
+      }
+      break
+    }
+
+    case 'DISCARD_CARDS': {
+      const count = eff.count || 1
+      for (let i = 0; i < count && activeBoard.hand.length > 0; i++) {
+        activeBoard.discard.push(activeBoard.hand.pop()!)
+      }
+      break
+    }
+
+    case 'HEAL': {
+      const healAmt = eff.value ?? eff.baseDamage ?? (eff.count || 1) * 30
+      const target =
+        action.targetSlot === 'ACTIVE'
+          ? activeBoard.activePokemon
+          : typeof action.targetSlot === 'number'
+            ? activeBoard.bench[action.targetSlot] ?? activeBoard.activePokemon
+            : activeBoard.activePokemon
+      if (target) {
+        target.damage = Math.max(0, target.damage - healAmt)
+      }
+      break
+    }
+
+    case 'SWITCH_ACTIVE': {
+      const isGust =
+        eff.target === 'OPPONENT_BENCH' || (eff as any).targetZone === 'OPPONENT_BENCH'
+      if (isGust) {
+        if (passiveBoard.bench.length === 0) break
+        const targetBenchIdx =
+          action.targetBenchIndex !== undefined && passiveBoard.bench[action.targetBenchIndex]
+            ? action.targetBenchIndex
+            : 0
+        const newOppActive = passiveBoard.bench[targetBenchIdx]!
+        const oldOppActive = passiveBoard.activePokemon
+        passiveBoard.activePokemon = newOppActive
+        if (oldOppActive) {
+          passiveBoard.bench[targetBenchIdx] = oldOppActive
+        } else {
+          passiveBoard.bench.splice(targetBenchIdx, 1)
+        }
+      } else {
+        if (activeBoard.bench.length === 0) break
+        let bestBenchIdx = 0
+        let bestScore = -9999
+        activeBoard.bench.forEach((bPoke, bIdx) => {
+          const s =
+            bPoke.attachedEnergies.length * 45 +
+            (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 80) -
+            bPoke.damage * 0.2
+          if (s > bestScore) {
+            bestScore = s
+            bestBenchIdx = bIdx
+          }
+        })
+        const newActive = activeBoard.bench[bestBenchIdx]!
+        const oldActive = activeBoard.activePokemon
+        activeBoard.activePokemon = newActive
+        if (oldActive) {
+          activeBoard.bench[bestBenchIdx] = oldActive
+        } else {
+          activeBoard.bench.splice(bestBenchIdx, 1)
+        }
+      }
+      break
+    }
+
+    case 'EVOLVE_POKEMON': {
+      const targetPoke =
+        action.targetSlot === 'ACTIVE'
+          ? activeBoard.activePokemon
+          : typeof action.targetSlot === 'number'
+            ? activeBoard.bench[action.targetSlot] ?? null
+            : null
+      const wantedStage2Id = action.targetCardIds?.[0]
+      const handIdx = activeBoard.hand.findIndex(
+        (c) =>
+          c.category === 'POKEMON' &&
+          c.subCategory === 'STAGE_2' &&
+          (!wantedStage2Id || c.cardId === wantedStage2Id) &&
+          targetPoke !== null &&
+          canPokemonEvolveInto(targetPoke, c, state.turnNumber, true),
+      )
+      if (targetPoke && handIdx !== -1) {
+        const stage2Card = activeBoard.hand.splice(handIdx, 1)[0]!
+        evolveInPlayPokemon(state, activeBoard, targetPoke, stage2Card, markDeckSearched)
+      }
+      break
+    }
+
+    case 'SHUFFLE_HAND_DRAW': {
+      if (action.actionId === 'play_unfair_stamp') {
+        const myHand = activeBoard.hand.splice(0, activeBoard.hand.length)
+        activeBoard.deck.push(...myHand)
+        fisherYatesShuffle(activeBoard.deck, rng)
+        for (let i = 0; i < 5 && activeBoard.deck.length > 0; i++) {
+          activeBoard.hand.push(activeBoard.deck.shift()!)
+        }
+        const oppHand = passiveBoard.hand.splice(0, passiveBoard.hand.length)
+        passiveBoard.deck.push(...oppHand)
+        fisherYatesShuffle(passiveBoard.deck, rng)
+        for (let i = 0; i < 2 && passiveBoard.deck.length > 0; i++) {
+          passiveBoard.hand.push(passiveBoard.deck.shift()!)
+        }
+      } else if (eff.target === 'OPPONENT' || (eff as any).targetZone === 'OPPONENT_HAND') {
+        const oppHand = passiveBoard.hand.splice(0, passiveBoard.hand.length)
+        passiveBoard.deck.push(...oppHand)
+        fisherYatesShuffle(passiveBoard.deck, rng)
+        const drawCount = eff.count || 2
+        for (let i = 0; i < drawCount && passiveBoard.deck.length > 0; i++) {
+          passiveBoard.hand.push(passiveBoard.deck.shift()!)
+        }
+      } else if (
+        action.actionId?.includes('iono') ||
+        action.actionId?.includes('mashynn') ||
+        (eff as any).primitive === 'SHUFFLE_HAND_BOTTOM_DRAW_PRIZES'
+      ) {
+        for (const board of [activeBoard, passiveBoard]) {
+          if (board.hand.length > 0) {
+            const oldHand = board.hand.splice(0, board.hand.length)
+            fisherYatesShuffle(oldHand, rng)
+            board.deck.push(...oldHand)
+          }
+          const prizeDraw = Math.min(board.deck.length, board.prizes.length)
+          for (let i = 0; i < prizeDraw; i++) {
+            board.hand.push(board.deck.shift()!)
+          }
+        }
+      } else {
+        const myHand = activeBoard.hand.splice(0, activeBoard.hand.length)
+        activeBoard.deck.push(...myHand)
+        fisherYatesShuffle(activeBoard.deck, rng)
+        const drawCount = eff.count || 5
+        for (let i = 0; i < drawCount && activeBoard.deck.length > 0; i++) {
+          activeBoard.hand.push(activeBoard.deck.shift()!)
+        }
+      }
+      break
+    }
+
+    case 'RECOVER_FROM_DISCARD': {
+      const isToHand = eff.target !== 'DECK' && eff.zone !== 'DECK'
+      if (isToHand) {
+        let bestIdx = -1
+        let bestScore = -1
+        activeBoard.discard.forEach((c, idx) => {
+          if (cardMatchesEffectFilter(c, eff) || c.category === 'POKEMON' || (c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY')) {
+            const s = c.strategicEvaluator.intrinsicBaseScore ?? 80
+            if (s > bestScore) {
+              bestScore = s
+              bestIdx = idx
+            }
+          }
+        })
+        if (bestIdx !== -1) {
+          activeBoard.hand.push(activeBoard.discard.splice(bestIdx, 1)[0]!)
+        }
+      } else {
+        const maxCount = eff.count || 3
+        let moved = 0
+        for (let i = activeBoard.discard.length - 1; i >= 0 && moved < maxCount; i--) {
+          const c = activeBoard.discard[i]!
+          if (cardMatchesEffectFilter(c, eff) || c.category === 'POKEMON' || (c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY')) {
+            activeBoard.deck.push(activeBoard.discard.splice(i, 1)[0]!)
+            moved++
+          }
+        }
+        if (moved > 0) {
+          fisherYatesShuffle(activeBoard.deck, rng)
+        }
+      }
+      break
+    }
+
     case 'SEARCH_DECK_TO_BENCH': {
       markDeckSearched()
       const maxCount = eff.count || 1
@@ -2596,7 +2988,7 @@ function resolveAtomicEffect(
       const topCards = activeBoard.deck.splice(0, topSliceCount)
       topCards.sort(
         (a, b) =>
-          b.strategicEvaluator.intrinsicBaseScore - a.strategicEvaluator.intrinsicBaseScore,
+          (b.strategicEvaluator.intrinsicBaseScore ?? 70) - (a.strategicEvaluator.intrinsicBaseScore ?? 70),
       )
       const picked = topCards.shift()!
       if (!eff.targetFilter || matchesCardFilter(picked, eff.targetFilter)) {
@@ -2678,7 +3070,7 @@ function resolveAtomicEffect(
       let bestScore = -1
       activeBoard.discard.forEach((c, idx) => {
         if (c.category === 'POKEMON' || (c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY')) {
-          const s = c.strategicEvaluator.intrinsicBaseScore
+          const s = c.strategicEvaluator.intrinsicBaseScore ?? 70
           if (s > bestScore) {
             bestScore = s
             bestIdx = idx
@@ -2731,7 +3123,7 @@ function resolveAtomicEffect(
       activeBoard.bench.forEach((bPoke, bIdx) => {
         const s =
           bPoke.attachedEnergies.length * 45 +
-          bPoke.card.strategicEvaluator.intrinsicBaseScore -
+          (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 70) -
           bPoke.damage * 0.2
         if (s > bestScore) {
           bestScore = s
@@ -2805,7 +3197,7 @@ function resolveAtomicEffect(
     }
 
     case 'APPLY_SPECIAL_CONDITION': {
-      const cond = eff.specialCondition || 'POISONED'
+      const cond = (eff.specialCondition || 'POISONED') as SpecialConditionType
       const target = passiveBoard.activePokemon
       if (target) {
         target.specialConditions = target.specialConditions || []
@@ -2977,7 +3369,7 @@ function selectBestBasicInDeckForBench(
     if (normName.includes('lumineon')) return
 
     const inPlayCount = allInPlay.filter((p) => p.card.cardId === c.cardId).length
-    let score = c.strategicEvaluator.intrinsicBaseScore
+    let score = c.strategicEvaluator.intrinsicBaseScore ?? 70
     // Diversifie le Banc : au moins 2 Salamèche / Fantyrm / Tarsal et 1 Roucool / Natu / Ogerpon
     if (inPlayCount === 0) score += 45
     else if (inPlayCount === 1) score += 20
@@ -3014,10 +3406,10 @@ function selectBestPokemonForEnergyAttachment(
     const currentEnergy = poke.attachedEnergies.length
     const needsEnergyForAttack = currentEnergy < reqEnergy
 
-    let score = poke.card.strategicEvaluator.intrinsicBaseScore
+    let score = poke.card.strategicEvaluator.intrinsicBaseScore ?? 70
     if (isActive && needsEnergyForAttack) {
       score += 150
-    } else if (!isActive && needsEnergyForAttack && poke.card.strategicEvaluator.primaryRole === 'MAIN_ATTACKER') {
+    } else if (!isActive && needsEnergyForAttack && ((poke.card.strategicEvaluator.aiRole as string) === 'MAIN_ATTACKER' || poke.card.strategicEvaluator.primaryRole === 'MAIN_ATTACKER')) {
       score += 110
     } else if (!isActive && needsEnergyForAttack) {
       score += 65
@@ -3040,10 +3432,19 @@ function selectBestPokemonForEnergyAttachment(
 export function getMainAttackEnergyRequirement(card: EngineCardModel): number {
   let maxReq = 1
   for (const act of card.playableActions) {
-    if (act.sourceType === 'ATTACK') {
-      for (const pre of act.preconditions) {
-        if (pre.type === 'SELF_HAS_ENERGY_COST') {
-          maxReq = Math.max(maxReq, pre.minCount || 1)
+    if (act.actionType === 'ATTACK' || act.sourceType === 'ATTACK') {
+      if (act.cost && typeof act.cost === 'object' && !Array.isArray(act.cost)) {
+        const total = Object.values(act.cost).reduce((a, b) => a + Number(b), 0)
+        if (total > 0) maxReq = Math.max(maxReq, total)
+      } else if (act.energyCost && act.energyCost.length > 0) {
+        maxReq = Math.max(maxReq, act.energyCost.length)
+      } else {
+        for (const rawPre of act.preconditions) {
+          const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
+          if (preType === 'SELF_HAS_ENERGY_COST') {
+            const minC = typeof rawPre === 'object' ? (rawPre as any).minCount : 1
+            maxReq = Math.max(maxReq, minC || 1)
+          }
         }
       }
     }
@@ -3138,7 +3539,7 @@ export function handleKnockOut(
       const readyToAttack = bPoke.attachedEnergies.length >= reqEn
       const s =
         (readyToAttack ? 120 : 0) +
-        bPoke.card.strategicEvaluator.intrinsicBaseScore +
+        (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 70) +
         getRemainingHp(bPoke) * 0.25
       if (s > bestPromoteScore) {
         bestPromoteScore = s

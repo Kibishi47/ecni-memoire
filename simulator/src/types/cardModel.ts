@@ -155,8 +155,8 @@ export interface PlayableAction {
   deadCardCondition?: string | null
 
   // Rétrocompatibilité
-  sourceType?: ActionType
-  timing?: TimingPhase
+  sourceType?: ActionSourceType
+  timing?: ActionTiming
   costs?: any[]
   energyCost?: string[]
   canAttackTwice?: boolean
@@ -175,11 +175,37 @@ export interface StrategicEvaluator {
   decklistSynergyRequirements: string[]
 
   // Rétrocompatibilité
-  primaryRole?: AIRole
+  primaryRole?: StrategicRole
   intrinsicBaseScore?: number
   inGameDeadCardConditions?: any[]
   discardPriorityWhenDead?: number
   holdForNextTurnBonus?: number
+}
+
+export type SpecialConditionType =
+  | 'POISONED'
+  | 'BURNED'
+  | 'CONFUSED'
+  | 'PARALYZED'
+  | 'ASLEEP'
+
+export interface ActionCost {
+  type: string
+  count: number
+  targetFilter?: any
+}
+
+export interface ActionPrecondition {
+  type: string
+  zone?: ZoneType | null
+  minCount?: number
+  targetFilter?: any
+}
+
+export interface DeadCardCondition {
+  reason: string
+  zonesToCheck: ZoneType[]
+  targetFilter?: any
 }
 
 export interface SynergyRequirement {
