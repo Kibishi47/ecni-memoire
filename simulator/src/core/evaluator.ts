@@ -26,8 +26,8 @@ import {
   type GameAction,
   type InPlayPokemon,
   type MatchState,
-  type PlayerBoardState,
 } from './engine'
+import { computeNumericStateHash } from './fastState'
 
 export type MaxBranchesSetting = 8 | 20 | 50 | 'INFINITE'
 
@@ -321,43 +321,11 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
 
 /**
  * Calcule l'empreinte canonique (`getStateHash(state)`) d'un `MatchState` à un instant T.
- * Permet de dédoublonner les séquences d'actions commutatives (ex: poser Salamèche puis Roucool vs Roucool puis Salamèche).
+ * Utilise le hachage numérique commutatif Zobrist / Murmur3 (`computeNumericStateHash`)
+ * pour dédoublonner les séquences d'actions commutatives sans tri ni allocation mémoire.
  */
 export function getStateHash(state: MatchState): string {
-  const hashBoard = (b: PlayerBoardState): string => {
-    const activeStr = b.activePokemon
-      ? `${b.activePokemon.card.cardId}:${b.activePokemon.damage}:${b.activePokemon.attachedEnergies.length}:${b.activePokemon.evolvedThisTurn ? 1 : 0}:${b.activePokemon.attachedTools.length}`
-      : 'NONE'
-
-    const benchStr = b.bench
-      .map(
-        (p) =>
-          `${p.card.cardId}:${p.damage}:${p.attachedEnergies.length}:${p.evolvedThisTurn ? 1 : 0}:${p.attachedTools.length}`,
-      )
-      .sort()
-      .join(',')
-
-    const handStr = b.hand
-      .map((c) => c.cardId)
-      .sort()
-      .join(',')
-
-    const abilitiesStr = Array.from(b.usedOncePerTurnAbilities).sort().join(',')
-
-    return [
-      activeStr,
-      `B[${benchStr}]`,
-      `H[${handStr}]`,
-      `P:${b.prizes.length}`,
-      `D:${b.deck.length}`,
-      `G:${b.discard.length}`,
-      `Flags:${b.supporterPlayedThisTurn ? 1 : 0}${b.energyAttachedThisTurn ? 1 : 0}${b.retreatUsedThisTurn ? 1 : 0}${b.vstarPowerUsed ? 1 : 0}${b.itemLockActive ? 1 : 0}:${b.turnDamageBoost || 0}`,
-      `Ab[${abilitiesStr}]`,
-    ].join('|')
-  }
-
-  const stadStr = state.activeStadium ? state.activeStadium.card.cardId : 'NONE'
-  return `T${state.turnNumber}_P${state.activePlayerIndex}_W${state.winner || 'N'}_S${stadStr}__${hashBoard(state.player)}__${hashBoard(state.opponent)}`
+  return `T${state.turnNumber}_P${state.activePlayerIndex}_W${state.winner || 'N'}_${computeNumericStateHash(state).toString(36)}`
 }
 
 /**
@@ -606,11 +574,32 @@ export function exploreTurnBranches(
   customBeamWidth?: number,
 ): { completedBranches: PartialTurnNode[]; totalExplored: number } {
   const perspectiveIndex = turnStartState.activePlayerIndex
+
+  // Fast-path : si le seul coup légal au départ clôt le tour (ex: PASS_TURN forcé), exécute-le immédiatement
+  if (turnStartState.winner === null && turnStartState.activePlayerIndex === perspectiveIndex) {
+    const initialActions = getLegalActions(turnStartState)
+    if (initialActions.length === 1 && initialActions[0]!.endsTurnImmediately) {
+      const onlyAction = initialActions[0]!
+      const nextState = applyAction(turnStartState, onlyAction, false)
+      return {
+        completedBranches: [
+          {
+            state: nextState,
+            actions: [onlyAction],
+            heuristicScore: evaluateState(nextState, perspectiveIndex),
+          },
+        ],
+        totalExplored: 1,
+      }
+    }
+  }
+
   const numericLimit = maxBranches === 'INFINITE' ? 12 : Math.min(Number(maxBranches), 12)
   const perStepBeamWidth = customBeamWidth ?? Math.min(numericLimit, 8)
+  const maxActionsPerNode = Math.max(perStepBeamWidth + 3, 7)
 
-  const visitedIntermediateHashes = new Set<string>()
-  const completedByHash = new Map<string, PartialTurnNode>()
+  const visitedIntermediateHashes = new Set<number>()
+  const completedByHash = new Map<number, PartialTurnNode>()
 
   let frontier: PartialTurnNode[] = [
     {
@@ -619,16 +608,18 @@ export function exploreTurnBranches(
       heuristicScore: evaluateState(turnStartState, perspectiveIndex),
     },
   ]
-  visitedIntermediateHashes.add(getStateHash(turnStartState))
+  visitedIntermediateHashes.add(computeNumericStateHash(turnStartState))
 
   let totalExplored = 0
 
   for (let depth = 0; depth < maxActionDepth && frontier.length > 0; depth++) {
     const nextFrontier: PartialTurnNode[] = []
+    const isLastDepth = depth === maxActionDepth - 1
 
-    for (const node of frontier) {
+    for (let fIdx = 0; fIdx < frontier.length; fIdx++) {
+      const node = frontier[fIdx]!
       if (node.state.winner !== null || node.state.activePlayerIndex !== perspectiveIndex) {
-        const finHash = getStateHash(node.state)
+        const finHash = computeNumericStateHash(node.state)
         const existing = completedByHash.get(finHash)
         if (!existing || node.actions.length < existing.actions.length) {
           completedByHash.set(finHash, node)
@@ -637,58 +628,55 @@ export function exploreTurnBranches(
       }
 
       const legalActions = getLegalActions(node.state)
-      legalActions.sort(
-        (a, b) => scoreAtomicActionHeuristic(node.state, b) - scoreAtomicActionHeuristic(node.state, a),
-      )
 
-      // Si on est à la dernière profondeur autorisée, ne garde que les actions de clôture de tour
-      const isLastDepth = depth === maxActionDepth - 1
-      const filteredActions = isLastDepth
-        ? legalActions.filter((a) => a.endsTurnImmediately)
-        : legalActions
+      // Pré-calcul O(N) des scores heuristiques et élagage immédiat des retraites / Gusts inutiles
+      const scoredActions: Array<{ action: GameAction; score: number }> = []
+      for (let aIdx = 0; aIdx < legalActions.length; aIdx++) {
+        const action = legalActions[aIdx]!
+        if (isLastDepth && !action.endsTurnImmediately) continue
 
-      for (const action of filteredActions) {
-        // Évite de battre en retraite si aucune raison tactique et qu'on a déjà fait plusieurs actions
-        if (
-          action.type === 'RETREAT_ACTIVE' &&
-          scoreAtomicActionHeuristic(node.state, action) < 100
-        ) {
-          continue
-        }
-        // Évite de gaspiller un Gust (Ordres du Boss / Attrape-Riposte) qui ne permet pas de KO
+        const score = scoreAtomicActionHeuristic(node.state, action)
+        if (action.type === 'RETREAT_ACTIVE' && score < 100) continue
         if (
           action.type === 'PLAY_TRAINER' &&
           action.targetBenchIndex !== undefined &&
-          scoreAtomicActionHeuristic(node.state, action) < 100
+          score < 100
         ) {
           continue
         }
+        scoredActions.push({ action, score })
+      }
 
+      scoredActions.sort((a, b) => b.score - a.score)
+      const expandCount = Math.min(scoredActions.length, maxActionsPerNode)
+
+      for (let sIdx = 0; sIdx < expandCount; sIdx++) {
+        const { action } = scoredActions[sIdx]!
         const nextState = applyAction(node.state, action, false)
         totalExplored++
-        const nextActions = [...node.actions, action]
-        const nextScore = evaluateState(nextState, perspectiveIndex)
-        const stateHash = getStateHash(nextState)
+        const stateHash = computeNumericStateHash(nextState)
 
         if (
           action.endsTurnImmediately ||
           nextState.winner !== null ||
           nextState.activePlayerIndex !== perspectiveIndex
         ) {
+          const nextScore = evaluateState(nextState, perspectiveIndex)
           const existing = completedByHash.get(stateHash)
           if (!existing || nextScore > existing.heuristicScore) {
             completedByHash.set(stateHash, {
               state: nextState,
-              actions: nextActions,
+              actions: [...node.actions, action],
               heuristicScore: nextScore,
             })
           }
         } else {
           if (!visitedIntermediateHashes.has(stateHash)) {
             visitedIntermediateHashes.add(stateHash)
+            const nextScore = evaluateState(nextState, perspectiveIndex)
             nextFrontier.push({
               state: nextState,
-              actions: nextActions,
+              actions: [...node.actions, action],
               heuristicScore: nextScore,
             })
           }
@@ -698,7 +686,10 @@ export function exploreTurnBranches(
 
     // Trie la frontière intermédiaire par score heuristique et applique le Beam Width
     nextFrontier.sort((a, b) => b.heuristicScore - a.heuristicScore)
-    frontier = nextFrontier.slice(0, perStepBeamWidth)
+    frontier =
+      nextFrontier.length > perStepBeamWidth
+        ? nextFrontier.slice(0, perStepBeamWidth)
+        : nextFrontier
   }
 
   let completedBranches = Array.from(completedByHash.values())
@@ -721,7 +712,6 @@ export function exploreTurnBranches(
 
   completedBranches.sort((a, b) => b.heuristicScore - a.heuristicScore)
 
-  // Si on a au moins une branche qui attaque avec des dégâts positifs, privilégie les branches offensives tout en gardant la meilleure branche de passe pour comparaison
   if (maxBranches !== 'INFINITE' && completedBranches.length > maxBranches) {
     completedBranches = completedBranches.slice(0, maxBranches)
   } else if (maxBranches === 'INFINITE' && completedBranches.length > numericLimit) {
@@ -745,11 +735,12 @@ function summarizeActionSequence(actions: GameAction[]): string {
 
 /**
  * Rollout Rapide Glouton (W = 1, Greedy Optimal) pour l'anticipation de T_adv et T+1.
- * Ne fait aucun embranchement combinatoire : choisit séquentiellement le meilleur coup heuristique
- * immédiat jusqu'à clôture du tour (attaque ou fin de tour).
+ * Utilise un seul clone initial puis mute l'état en place (`mutateInPlace = true`)
+ * pour éviter jusqu'à 16 clonages complets par candidat.
  */
 function fastGreedySingleTurnRollout(
   postPreviousTurnState: MatchState,
+  needActionsList = false,
 ): { bestEndState: MatchState; bestActions: GameAction[]; bestPerspectiveScore: number } {
   if (postPreviousTurnState.winner !== null) {
     const pIdx = postPreviousTurnState.activePlayerIndex
@@ -760,7 +751,7 @@ function fastGreedySingleTurnRollout(
     }
   }
 
-  let state = fastCloneState(postPreviousTurnState, false)
+  const state = fastCloneState(postPreviousTurnState, false)
   const actingPlayerIdx = state.activePlayerIndex
   startTurn(state)
 
@@ -789,7 +780,8 @@ function fastGreedySingleTurnRollout(
     let bestAction = legalActions[0]!
     let bestActionScore = -Infinity
 
-    for (const act of legalActions) {
+    for (let i = 0; i < legalActions.length; i++) {
+      const act = legalActions[i]!
       const actScore = scoreAtomicActionHeuristic(state, act)
       if (actScore > bestActionScore) {
         bestActionScore = actScore
@@ -797,8 +789,10 @@ function fastGreedySingleTurnRollout(
       }
     }
 
-    state = applyAction(state, bestAction, false)
-    actionsTaken.push(bestAction)
+    applyAction(state, bestAction, false, true)
+    if (needActionsList) {
+      actionsTaken.push(bestAction)
+    }
 
     if (bestAction.endsTurnImmediately) {
       break
@@ -816,7 +810,7 @@ function fastGreedySingleTurnRollout(
  * Sélectionne la meilleure branche de tour complet via l'anticipation asymétrique 3-ply :
  * - Tour T : Beam Search élagué (maxBranches ≤ 12, profondeur ≤ 8)
  * - Top-3 : Sélection des K = 3 meilleures feuilles de fin de tour T
- * - Rollout Rapide (W = 1, Greedy Optimal) pour T_adv et T+1
+ * - Rollout Rapide (W = 1, Greedy Optimal) pour T_adv et T+1 avec Table de Transposition
  *
  * Formule officielle de pondération :
  * Score(B) = 0.35 * V(S_T) - 0.30 * V_adv(S_{T_adv}) + 0.35 * V(S_{T+1})
@@ -827,12 +821,29 @@ export function selectBestTurnBranch(
   recordTrace = false,
 ): TurnBranchDecision {
   const perspectiveIndex = turnStartState.activePlayerIndex
-  const opponentIndex: 0 | 1 = perspectiveIndex === 0 ? 1 : 0
 
   const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 8)
 
   // Sélection stricte des Top-3 (K = 3) meilleures feuilles du tour T
   const candidatesToEvaluate = completedBranches.slice(0, 3)
+
+  // Fast-path Monte Carlo : si une seule branche unique existe et qu'on n'enregistre pas de trace UI,
+  // inutile de projeter T_adv et T+1 puisque l'unique branche sera nécessairement choisie !
+  if (!recordTrace && candidatesToEvaluate.length === 1) {
+    const only = candidatesToEvaluate[0]!
+    const roundedScoreT = Math.round(only.heuristicScore * 10) / 10
+    return {
+      chosenActions: only.actions,
+      chosenActionLabels: [],
+      finalTurnState: only.state,
+      scoreT: roundedScoreT,
+      scoreTAdv: 0,
+      scoreTPlus1: roundedScoreT,
+      totalScore: roundedScoreT,
+      totalBranchesExplored: Math.max(totalExplored, completedBranches.length),
+      candidateTraces: [],
+    }
+  }
 
   let bestIdx = 0
   let bestTotalScore = -Infinity
@@ -847,15 +858,27 @@ export function selectBestTurnBranch(
     reboundSummary: string
   }> = []
 
+  // Table de transposition locale pour éviter de recalculer T_adv -> T+1 sur deux états équivalents
+  const rolloutTranspositionTable = new Map<
+    number,
+    {
+      scoreTAdv: number
+      scoreTPlus1: number
+      opponentReactionSummary: string
+      reboundSummary: string
+    }
+  >()
+
+  const myWinnerLabel = perspectiveIndex === 0 ? 'PLAYER' : 'OPPONENT'
+
   for (let i = 0; i < candidatesToEvaluate.length; i++) {
     const candidate = candidatesToEvaluate[i]!
     const stateT = candidate.state
 
-    // Étape 1 : Score à la fin du tour courant T
-    const scoreT = evaluateState(stateT, perspectiveIndex)
+    // Étape 1 : Réutilise le score heuristique déjà calculé à la fin du tour courant T
+    const scoreT = candidate.heuristicScore
 
     // Si la branche donne la victoire immédiate à T, son score est maximal !
-    const myWinnerLabel = perspectiveIndex === 0 ? 'PLAYER' : 'OPPONENT'
     if (stateT.winner === myWinnerLabel) {
       const totalScore = WIN_SCORE
       evaluatedResults.push({
@@ -864,35 +887,61 @@ export function selectBestTurnBranch(
         scoreTAdv: -WIN_SCORE,
         scoreTPlus1: WIN_SCORE,
         totalScore,
-        opponentReactionSummary: 'Partie remportée immédiatement (Victoire au Tour T)',
-        reboundSummary: 'Victoire acquise',
+        opponentReactionSummary: recordTrace
+          ? 'Partie remportée immédiatement (Victoire au Tour T)'
+          : '',
+        reboundSummary: recordTrace ? 'Victoire acquise' : '',
       })
       if (totalScore > bestTotalScore) {
         bestTotalScore = totalScore
         bestIdx = i
       }
+      if (!recordTrace) {
+        break
+      }
       continue
     }
 
-    // Étape 2 : Projection rapide du tour adverse T_adv (Rollout glouton W = 1)
-    const advRollout = fastGreedySingleTurnRollout(stateT)
-    const stateTAdv = advRollout.bestEndState
-    const scoreTAdv = evaluateState(stateTAdv, opponentIndex)
-    const opponentReactionSummary = summarizeActionSequence(advRollout.bestActions)
+    const stateTHash = computeNumericStateHash(stateT)
+    const cachedRollout = rolloutTranspositionTable.get(stateTHash)
 
-    // Étape 3 : Projection rapide du rebond Joueur T+1 (Rollout glouton W = 1)
+    let scoreTAdv: number
     let scoreTPlus1: number
+    let opponentReactionSummary: string
     let reboundSummary: string
-    if (stateTAdv.winner !== null) {
-      scoreTPlus1 = evaluateState(stateTAdv, perspectiveIndex)
-      reboundSummary =
-        stateTAdv.winner === myWinnerLabel
-          ? 'Victoire sur épuisement adverse'
-          : 'Défaite subie lors de la riposte adverse (T_adv)'
+
+    if (cachedRollout) {
+      scoreTAdv = cachedRollout.scoreTAdv
+      scoreTPlus1 = cachedRollout.scoreTPlus1
+      opponentReactionSummary = cachedRollout.opponentReactionSummary
+      reboundSummary = cachedRollout.reboundSummary
     } else {
-      const reboundRollout = fastGreedySingleTurnRollout(stateTAdv)
-      scoreTPlus1 = evaluateState(reboundRollout.bestEndState, perspectiveIndex)
-      reboundSummary = summarizeActionSequence(reboundRollout.bestActions)
+      // Étape 2 : Projection rapide du tour adverse T_adv (Rollout glouton W = 1 en place)
+      const advRollout = fastGreedySingleTurnRollout(stateT, recordTrace)
+      const stateTAdv = advRollout.bestEndState
+      scoreTAdv = advRollout.bestPerspectiveScore
+      opponentReactionSummary = recordTrace ? summarizeActionSequence(advRollout.bestActions) : ''
+
+      // Étape 3 : Projection rapide du rebond Joueur T+1 (Rollout glouton W = 1 en place)
+      if (stateTAdv.winner !== null) {
+        scoreTPlus1 = evaluateState(stateTAdv, perspectiveIndex)
+        reboundSummary = recordTrace
+          ? stateTAdv.winner === myWinnerLabel
+            ? 'Victoire sur épuisement adverse'
+            : 'Défaite subie lors de la riposte adverse (T_adv)'
+          : ''
+      } else {
+        const reboundRollout = fastGreedySingleTurnRollout(stateTAdv, recordTrace)
+        scoreTPlus1 = reboundRollout.bestPerspectiveScore
+        reboundSummary = recordTrace ? summarizeActionSequence(reboundRollout.bestActions) : ''
+      }
+
+      rolloutTranspositionTable.set(stateTHash, {
+        scoreTAdv,
+        scoreTPlus1,
+        opponentReactionSummary,
+        reboundSummary,
+      })
     }
 
     // Formule officielle de pondération 3-Ply :
@@ -935,7 +984,7 @@ export function selectBestTurnBranch(
 
   return {
     chosenActions: chosen.node.actions,
-    chosenActionLabels: chosen.node.actions.map((a) => a.label),
+    chosenActionLabels: recordTrace ? chosen.node.actions.map((a) => a.label) : [],
     finalTurnState: chosen.node.state,
     scoreT: chosen.scoreT,
     scoreTAdv: chosen.scoreTAdv,

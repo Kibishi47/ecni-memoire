@@ -18,9 +18,8 @@ import type {
   SpecialConditionType,
   ZoneType,
 } from '../types/cardModel'
-import { matchesCardFilter, normalizeCardNameForMatch } from '../data/cardCatalog'
+import { getCardFastMeta, matchesCardFilter, normalizeCardNameForMatch } from '../data/cardCatalog'
 import { matchesDslFilter } from './filterDsl'
-import { detectBasicEnergy } from '../utils/energy'
 import { fisherYatesShuffle, Mulberry32 } from './prng'
 
 export function cardMatchesEffectFilter(card: EngineCardModel, eff: AtomicEffect): boolean {
@@ -132,108 +131,126 @@ export interface CreateMatchOptions {
   perturbationTurn?: number
 }
 
+const energyTypeNormCache = new Map<string, string>()
+
 /**
  * Normalise un type d'énergie (Français / Anglais / Abrégé).
  */
 export function normalizeEnergyType(type: string): string {
+  const cached = energyTypeNormCache.get(type)
+  if (cached !== undefined) return cached
   const norm = normalizeCardNameForMatch(type)
-  if (['feu', 'fire', 'r'].includes(norm)) return 'feu'
-  if (['eau', 'water', 'w'].includes(norm)) return 'eau'
-  if (['plante', 'grass', 'g'].includes(norm)) return 'plante'
-  if (['electrique', 'electrik', 'lightning', 'l', 'electrique'].includes(norm)) return 'electrique'
-  if (['psy', 'psychic', 'p'].includes(norm)) return 'psy'
-  if (['combat', 'fighting', 'f'].includes(norm)) return 'combat'
-  if (['obscurite', 'darkness', 'dark', 'd'].includes(norm)) return 'obscurite'
-  if (['metal', 'm'].includes(norm)) return 'metal'
-  if (['fee', 'fairy', 'y'].includes(norm)) return 'fee'
-  return 'incolore'
+  let res = 'incolore'
+  if (norm === 'feu' || norm === 'fire' || norm === 'r') res = 'feu'
+  else if (norm === 'eau' || norm === 'water' || norm === 'w') res = 'eau'
+  else if (norm === 'plante' || norm === 'grass' || norm === 'g') res = 'plante'
+  else if (norm === 'electrique' || norm === 'electrik' || norm === 'lightning' || norm === 'l') res = 'electrique'
+  else if (norm === 'psy' || norm === 'psychic' || norm === 'p') res = 'psy'
+  else if (norm === 'combat' || norm === 'fighting' || norm === 'f') res = 'combat'
+  else if (norm === 'obscurite' || norm === 'darkness' || norm === 'dark' || norm === 'd') res = 'obscurite'
+  else if (norm === 'metal' || norm === 'm') res = 'metal'
+  else if (norm === 'fee' || norm === 'fairy' || norm === 'y') res = 'fee'
+  energyTypeNormCache.set(type, res)
+  return res
+}
+
+interface ParsedEnergyCost {
+  totalRequired: number
+  colorlessRequired: number
+  specificPairs: Array<[string, number]>
+}
+
+const parsedEnergyCostCache = new WeakMap<object, ParsedEnergyCost>()
+
+function getParsedEnergyCost(energyCost: Record<string, number> | string[]): ParsedEnergyCost {
+  const cached = parsedEnergyCostCache.get(energyCost)
+  if (cached !== undefined) return cached
+
+  let totalRequired = 0
+  let colorlessRequired = 0
+  const specificMap = new Map<string, number>()
+
+  if (Array.isArray(energyCost)) {
+    for (let i = 0; i < energyCost.length; i++) {
+      const norm = normalizeEnergyType(energyCost[i]!)
+      totalRequired++
+      if (norm === 'incolore') {
+        colorlessRequired++
+      } else {
+        specificMap.set(norm, (specificMap.get(norm) || 0) + 1)
+      }
+    }
+  } else {
+    for (const [k, count] of Object.entries(energyCost)) {
+      const c = Number(count) || 0
+      if (c <= 0) continue
+      const norm = normalizeEnergyType(k)
+      totalRequired += c
+      if (norm === 'incolore') {
+        colorlessRequired += c
+      } else {
+        specificMap.set(norm, (specificMap.get(norm) || 0) + c)
+      }
+    }
+  }
+
+  const parsed: ParsedEnergyCost = {
+    totalRequired,
+    colorlessRequired,
+    specificPairs: Array.from(specificMap.entries()),
+  }
+  parsedEnergyCostCache.set(energyCost, parsed)
+  return parsed
 }
 
 /**
  * Résout le coût énergétique complet d'une attaque ou d'un talent (multi-type et incolore).
+ * Optimisé zéro allocation : utilise `getCardFastMeta` et `ParsedEnergyCost` mis en cache.
  */
 export function canPayEnergyCost(
   attachedEnergies: EngineCardModel[],
   energyCost?: Record<string, number> | string[],
 ): boolean {
-  if (!energyCost) {
-    return true
-  }
-  if (Array.isArray(energyCost) && energyCost.length === 0) {
-    return true
-  }
-  if (typeof energyCost === 'object' && !Array.isArray(energyCost) && Object.keys(energyCost).length === 0) {
-    return true
-  }
+  if (!energyCost) return true
+  const parsed = getParsedEnergyCost(energyCost)
+  if (parsed.totalRequired === 0) return true
+  if (attachedEnergies.length === 0) return false
 
-  interface EnergyUnit {
-    type: string
-  }
-  const units: EnergyUnit[] = []
+  let totalUnits = 0
+  let wildcardCount = 0
 
-  for (const en of attachedEnergies) {
-    const nameNorm = normalizeCardNameForMatch(en.identity.nameFr + ' ' + (en.identity.nameEn || ''))
-    if (nameNorm.includes('double turbo')) {
-      units.push({ type: 'incolore' }, { type: 'incolore' })
-    } else if (nameNorm.includes('lumineuse') || nameNorm.includes('luminous')) {
-      units.push({ type: 'WILDCARD' })
+  for (let i = 0; i < attachedEnergies.length; i++) {
+    const meta = getCardFastMeta(attachedEnergies[i]!)
+    if (meta.energyUnitKind === 'DOUBLE_TURBO') {
+      totalUnits += 2
+    } else if (meta.energyUnitKind === 'WILDCARD') {
+      totalUnits += 1
+      wildcardCount += 1
     } else {
-      const basic = detectBasicEnergy(en.identity.nameFr) || detectBasicEnergy(en.identity.nameEn || '')
-      if (basic) {
-        units.push({ type: normalizeEnergyType(basic.energyTypeFr) })
-      } else {
-        const raw = normalizeCardNameForMatch(en.identity.rawRulesText?.join(' ') || '')
-        const found = ['feu', 'eau', 'plante', 'electrique', 'psy', 'combat', 'obscurite', 'metal', 'fee'].find(
-          (t) => nameNorm.includes(t) || raw.includes(t),
-        )
-        units.push({ type: found ? normalizeEnergyType(found) : 'incolore' })
-      }
+      totalUnits += 1
     }
   }
 
-  const specificRequired: string[] = []
-  let colorlessRequired = 0
+  if (totalUnits < parsed.totalRequired) return false
+  if (parsed.specificPairs.length === 0) return true
 
-  if (Array.isArray(energyCost)) {
-    for (const req of energyCost) {
-      const norm = normalizeEnergyType(req)
-      if (norm === 'incolore') {
-        colorlessRequired++
-      } else {
-        specificRequired.push(norm)
+  let wildcardsNeeded = 0
+  for (let s = 0; s < parsed.specificPairs.length; s++) {
+    const [reqType, reqCount] = parsed.specificPairs[s]!
+    let haveExact = 0
+    for (let i = 0; i < attachedEnergies.length; i++) {
+      const meta = getCardFastMeta(attachedEnergies[i]!)
+      if (meta.energyUnitKind === 'SINGLE' && meta.energyProvidedType === reqType) {
+        haveExact++
       }
     }
-  } else if (typeof energyCost === 'object') {
-    for (const [k, count] of Object.entries(energyCost)) {
-      const norm = normalizeEnergyType(k)
-      const c = Number(count) || 0
-      for (let i = 0; i < c; i++) {
-        if (norm === 'incolore') {
-          colorlessRequired++
-        } else {
-          specificRequired.push(norm)
-        }
-      }
+    if (haveExact < reqCount) {
+      wildcardsNeeded += reqCount - haveExact
+      if (wildcardsNeeded > wildcardCount) return false
     }
   }
 
-  const availableUnits = units.slice()
-
-  for (const req of specificRequired) {
-    const exactIdx = availableUnits.findIndex((u) => u.type === req)
-    if (exactIdx !== -1) {
-      availableUnits.splice(exactIdx, 1)
-      continue
-    }
-    const wildcardIdx = availableUnits.findIndex((u) => u.type === 'WILDCARD')
-    if (wildcardIdx !== -1) {
-      availableUnits.splice(wildcardIdx, 1)
-      continue
-    }
-    return false
-  }
-
-  return availableUnits.length >= colorlessRequired
+  return true
 }
 
 /**
@@ -244,14 +261,7 @@ export function getMaxBenchSlots(
   activeStadium: MatchState['activeStadium'],
 ): number {
   if (!activeStadium) return 5
-  const stadName = normalizeCardNameForMatch(
-    activeStadium.card.identity.nameFr + ' ' + (activeStadium.card.identity.nameEn || ''),
-  )
-  const isAreaZero =
-    stadName.includes('abime zero') ||
-    stadName.includes('area zero') ||
-    activeStadium.card.cardId === 'sv07-131'
-  if (!isAreaZero) return 5
+  if (!getCardFastMeta(activeStadium.card).isAreaZeroStadium) return 5
 
   const hasTera = Boolean(
     board.activePokemon?.card.pokemonStats?.isTera ||
@@ -368,12 +378,9 @@ export function getPassiveBoard(state: MatchState): PlayerBoardState {
 export function getPokemonMaxHp(poke: InPlayPokemon): number {
   const baseHp = poke.card.pokemonStats?.hp ?? 70
   let bonusHp = 0
-  if (poke.card.subCategory === 'BASIC') {
-    for (const tool of poke.attachedTools) {
-      if (
-        tool.cardId === 'sv02-173' ||
-        normalizeCardNameForMatch(tool.identity.nameFr).includes('amulette bravoure')
-      ) {
+  if (poke.card.subCategory === 'BASIC' && poke.attachedTools.length > 0) {
+    for (let i = 0; i < poke.attachedTools.length; i++) {
+      if (getCardFastMeta(poke.attachedTools[i]!).isBraveryCharm) {
         bonusHp += 50
       }
     }
@@ -398,29 +405,26 @@ export function canPokemonEvolveInto(
   if (poke.turnPlayed >= currentTurnNumber) return false
   if (evoCard.category !== 'POKEMON' || !evoCard.pokemonStats) return false
 
-  const targetNameNorm = normalizeCardNameForMatch(poke.card.identity.nameFr)
-  const targetNameEnNorm = poke.card.identity.nameEn
-    ? normalizeCardNameForMatch(poke.card.identity.nameEn)
-    : ''
+  const pokeMeta = getCardFastMeta(poke.card)
+  const evoMeta = getCardFastMeta(evoCard)
 
   if (allowRareCandySkipStage1) {
     if (poke.card.subCategory !== 'BASIC' || evoCard.subCategory !== 'STAGE_2') {
       return false
     }
-    const rootNorm = evoCard.pokemonStats.rootBasicName
-      ? normalizeCardNameForMatch(evoCard.pokemonStats.rootBasicName)
-      : ''
-    return Boolean(rootNorm && (rootNorm === targetNameNorm || rootNorm === targetNameEnNorm))
+    const rootNorm = evoMeta.normRootBasicName
+    return Boolean(
+      rootNorm && (rootNorm === pokeMeta.normNameFr || rootNorm === pokeMeta.normNameEn),
+    )
   }
 
   if (evoCard.subCategory !== 'STAGE_1' && evoCard.subCategory !== 'STAGE_2') {
     return false
   }
-  const evolvesFromNorm = evoCard.pokemonStats.evolvesFrom
-    ? normalizeCardNameForMatch(evoCard.pokemonStats.evolvesFrom)
-    : ''
+  const evolvesFromNorm = evoMeta.normEvolvesFrom
   return Boolean(
-    evolvesFromNorm && (evolvesFromNorm === targetNameNorm || evolvesFromNorm === targetNameEnNorm),
+    evolvesFromNorm &&
+      (evolvesFromNorm === pokeMeta.normNameFr || evolvesFromNorm === pokeMeta.normNameEn),
   )
 }
 
@@ -448,7 +452,7 @@ export function hasRequiredEnergyForPrecondition(
   if (normReq === 'incolore') {
     return poke.attachedEnergies.length >= minCount
   }
-  return canPayEnergyCost(poke.attachedEnergies, Array(minCount).fill(reqType))
+  return canPayEnergyCost(poke.attachedEnergies, { [normReq]: minCount })
 }
 
 /**
@@ -457,27 +461,7 @@ export function hasRequiredEnergyForPrecondition(
  */
 export function canPokemonAttackTwice(poke: InPlayPokemon | null, state: MatchState): boolean {
   if (!poke || !state.activeStadium) return false
-  if (poke.card.pokemonStats?.canAttackTwice) return true
-  for (const act of poke.card.playableActions) {
-    if (act.canAttackTwice) return true
-    if (
-      (act.actionType === 'USE_ABILITY' || act.sourceType === 'ABILITY_PASSIVE') &&
-      /festival_lead|fete_battante|fête battante|attack_twice|deux fois|2 fois/i.test(
-        `${act.actionId} ${act.label}`,
-      )
-    ) {
-      return true
-    }
-  }
-  const rulesText = (poke.card.identity.rawRulesText || []).join(' ')
-  if (
-    /fête battante|festival lead|attaquer.*deuxième fois|utiliser une attaque une deuxième fois|use an attack a second time|attack twice/i.test(
-      rulesText,
-    )
-  ) {
-    return true
-  }
-  return false
+  return getCardFastMeta(poke.card).canAttackTwiceStatic
 }
 
 /**
@@ -665,11 +649,9 @@ export function computeAttackDamageToActive(
       activeDamage += attackerBoard.turnDamageBoost
     }
     // Bonus d'Outil attaquant (ex: Ceinture Vitalité +10, Maximum Belt +50 contre Pokémon ex)
-    for (const tool of attacker.attachedTools) {
-      const toolNameNorm = normalizeCardNameForMatch(
-        tool.identity.nameFr + ' ' + (tool.identity.nameEn || ''),
-      )
-      if (toolNameNorm.includes('ceinture vitalite')) {
+    for (let tIdx = 0; tIdx < attacker.attachedTools.length; tIdx++) {
+      const toolNameNorm = getCardFastMeta(attacker.attachedTools[tIdx]!).normCombinedName
+      if (toolNameNorm.includes('ceinture vitalite') || toolNameNorm.includes('vitality band')) {
         activeDamage += 10
       } else if (
         toolNameNorm.includes('ceinture maximum') ||
@@ -686,26 +668,45 @@ export function computeAttackDamageToActive(
     }
 
     // Immunité de Mimiriqui (Rune Protectrice contre Pokémon-ex / V)
-    const defNameNorm = normalizeCardNameForMatch(defender.card.identity.nameFr)
-    if (defNameNorm.includes('mimiriqui') && attacker.card.pokemonStats?.isRuleBox) {
+    const defMeta = getCardFastMeta(defender.card)
+    if (
+      (defMeta.normNameFr.includes('mimiriqui') || defMeta.normNameEn.includes('mimikyu')) &&
+      attacker.card.pokemonStats?.isRuleBox
+    ) {
       activeDamage = 0
     } else {
-      // Application de la Faiblesse (x2)
-      const atkTypes = (attacker.card.pokemonStats?.types || []).map(normalizeCardNameForMatch)
-      const defWeaknesses = (defender.card.pokemonStats?.weaknesses || []).map((w: any) =>
-        normalizeCardNameForMatch(typeof w === 'string' ? w : w.type || ''),
-      )
-      if (atkTypes.some((t) => defWeaknesses.includes(t))) {
-        activeDamage *= 2
+      const atkTypes = getCardFastMeta(attacker.card).normPokeTypes
+      const rawWeaknesses = defender.card.pokemonStats?.weaknesses
+      if (rawWeaknesses && rawWeaknesses.length > 0 && atkTypes.length > 0) {
+        let weakHit = false
+        for (let wIdx = 0; wIdx < rawWeaknesses.length; wIdx++) {
+          const wRaw = rawWeaknesses[wIdx] as any
+          const wNorm = normalizeCardNameForMatch(typeof wRaw === 'string' ? wRaw : wRaw?.type || '')
+          if (atkTypes.includes(wNorm)) {
+            weakHit = true
+            break
+          }
+        }
+        if (weakHit) {
+          activeDamage *= 2
+        }
       }
 
-      // Application de la Résistance (-30)
-      const defResistances = (defender.card.pokemonStats?.resistances || []).map((r: any) =>
-        normalizeCardNameForMatch(typeof r === 'string' ? r : r.type || ''),
-      )
-      if (atkTypes.some((t) => defResistances.includes(t))) {
-        const resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
-        activeDamage = Math.max(0, activeDamage + resMod)
+      const rawResistances = defender.card.pokemonStats?.resistances
+      if (rawResistances && rawResistances.length > 0 && atkTypes.length > 0) {
+        let resHit = false
+        for (let rIdx = 0; rIdx < rawResistances.length; rIdx++) {
+          const rRaw = rawResistances[rIdx] as any
+          const rNorm = normalizeCardNameForMatch(typeof rRaw === 'string' ? rRaw : rRaw?.type || '')
+          if (atkTypes.includes(rNorm)) {
+            resHit = true
+            break
+          }
+        }
+        if (resHit) {
+          const resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
+          activeDamage = Math.max(0, activeDamage + resMod)
+        }
       }
     }
   }
@@ -1167,6 +1168,14 @@ export function applyDebugPerturbationIfConfigured(
   return null
 }
 
+const GLOBAL_ONCE_PER_TURN_ABILITY_IDS = new Set([
+  'ability_quick_search',
+  'ability_flip_the_script',
+  'ability_squawk_and_seize',
+  'ability_instant_charge',
+  'ability_luminous_sign',
+])
+
 /**
  * Vérifie si toutes les `preconditions` d'une `PlayableAction` du modèle JSON sont satisfaites.
  */
@@ -1219,17 +1228,10 @@ export function checkActionPreconditions(
     action.actionType === 'USE_ABILITY' ||
     (action.sourceType && action.sourceType.startsWith('ABILITY'))
   ) {
-    const globalOncePerTurnIds = new Set([
-      'ability_quick_search',
-      'ability_flip_the_script',
-      'ability_squawk_and_seize',
-      'ability_instant_charge',
-      'ability_luminous_sign',
-    ])
     if (action.actionId === 'ability_squawk_and_seize' && state.turnNumber > 2) {
       return false
     }
-    const abilityKey = globalOncePerTurnIds.has(action.actionId)
+    const abilityKey = GLOBAL_ONCE_PER_TURN_ABILITY_IDS.has(action.actionId)
       ? action.actionId
       : `${sourcePokemon?.instanceId || sourceCard.cardId}:${action.actionId}`
     if (activeBoard.usedOncePerTurnAbilities.has(abilityKey)) {
@@ -1237,7 +1239,8 @@ export function checkActionPreconditions(
     }
   }
 
-  for (const rawPre of action.preconditions) {
+  for (let pIdx = 0; pIdx < action.preconditions.length; pIdx++) {
+    const rawPre = action.preconditions[pIdx]!
     const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
     const minCount = typeof rawPre === 'object' ? (rawPre as any).minCount ?? 1 : 1
     const targetFilter = typeof rawPre === 'object' ? (rawPre as any).targetFilter : null
@@ -1305,10 +1308,14 @@ export function checkActionPreconditions(
         if (!hasRequiredEnergyForPrecondition(sourcePokemon, rawPre, action)) return false
       }
     } else if (preType === 'HAS_TERA_POKEMON_IN_PLAY') {
-      const hasTera = [
-        ...(activeBoard.activePokemon ? [activeBoard.activePokemon] : []),
-        ...activeBoard.bench,
-      ].some((p) => Boolean(p.card.identity.isTera || p.card.pokemonStats?.isTera))
+      const hasTera =
+        Boolean(
+          activeBoard.activePokemon?.card.identity.isTera ||
+            activeBoard.activePokemon?.card.pokemonStats?.isTera,
+        ) ||
+        activeBoard.bench.some((p) =>
+          Boolean(p.card.identity.isTera || p.card.pokemonStats?.isTera),
+        )
       if (!hasTera) return false
     } else if (preType === 'STADIUM_IN_PLAY') {
       if (!state.activeStadium) return false
@@ -1350,22 +1357,32 @@ export function checkActionPreconditions(
         (effectWithFilter as any)?.sourceZone ||
         'DECK'
       if (targetZone === 'HAND') {
-        const matchingInRest = activeBoard.hand.filter((c, idx) => {
-          if (handIndexIfFromHand !== undefined && idx === handIndexIfFromHand) return false
-          if (handIndexIfFromHand === undefined && c === sourceCard) return false
-          if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
-          if (targetFilter) return matchesCardFilter(c, targetFilter)
-          return true
-        })
-        if (matchingInRest.length < minCount) return false
+        let matchCount = 0
+        for (let idx = 0; idx < activeBoard.hand.length; idx++) {
+          if (handIndexIfFromHand !== undefined && idx === handIndexIfFromHand) continue
+          const c = activeBoard.hand[idx]!
+          if (handIndexIfFromHand === undefined && c === sourceCard) continue
+          const ok = effectWithFilter
+            ? cardMatchesEffectFilter(c, effectWithFilter)
+            : targetFilter
+              ? matchesCardFilter(c, targetFilter)
+              : true
+          if (ok && ++matchCount >= minCount) break
+        }
+        if (matchCount < minCount) return false
       } else {
         const cardsInZone = targetZone === 'DISCARD' ? activeBoard.discard : activeBoard.deck
-        const matching = cardsInZone.filter((c) => {
-          if (effectWithFilter) return cardMatchesEffectFilter(c, effectWithFilter)
-          if (targetFilter) return matchesCardFilter(c, targetFilter)
-          return true
-        })
-        if (matching.length < minCount) return false
+        let matchCount = 0
+        for (let idx = 0; idx < cardsInZone.length; idx++) {
+          const c = cardsInZone[idx]!
+          const ok = effectWithFilter
+            ? cardMatchesEffectFilter(c, effectWithFilter)
+            : targetFilter
+              ? matchesCardFilter(c, targetFilter)
+              : true
+          if (ok && ++matchCount >= minCount) break
+        }
+        if (matchCount < minCount) return false
       }
     }
   }
@@ -1982,8 +1999,9 @@ export function selectBestDeckTutorTargets(
     return score
   }
 
-  candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
-  return candidates.slice(0, maxDistinctTargets)
+  const scored = candidates.map((c) => ({ card: c, score: scoreCandidate(c) }))
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, maxDistinctTargets).map((s) => s.card)
 }
 
 /**
@@ -2041,14 +2059,15 @@ function discardCardsFromHandForCost(
 }
 
 /**
- * Exécute un coup atomique sur une copie de `state` et retourne le nouvel état (`applyAction`).
+ * Exécute un coup atomique sur une copie de `state` (ou en place si `mutateInPlace = true`) et retourne l'état (`applyAction`).
  */
 export function applyAction(
   inputState: MatchState,
   action: GameAction,
   includeActionLog = false,
+  mutateInPlace = false,
 ): MatchState {
-  const state = fastCloneState(inputState, includeActionLog)
+  const state = mutateInPlace ? inputState : fastCloneState(inputState, includeActionLog)
   if (state.winner !== null) return state
 
   const activeBoard = getActiveBoard(state)
@@ -3437,7 +3456,12 @@ function selectBestPokemonForEnergyAttachment(
   return bestPoke
 }
 
+const mainAttackEnergyReqCache = new WeakMap<EngineCardModel, number>()
+
 export function getMainAttackEnergyRequirement(card: EngineCardModel): number {
+  const cached = mainAttackEnergyReqCache.get(card)
+  if (cached !== undefined) return cached
+
   let maxReq = 1
   for (const act of card.playableActions) {
     if (act.actionType === 'ATTACK' || act.sourceType === 'ATTACK') {
@@ -3457,6 +3481,7 @@ export function getMainAttackEnergyRequirement(card: EngineCardModel): number {
       }
     }
   }
+  mainAttackEnergyReqCache.set(card, maxReq)
   return maxReq
 }
 

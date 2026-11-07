@@ -54,20 +54,37 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
 
 export class SimulationWorkerPool {
   private activeWorkers: Worker[] = []
+  private warmWorkers: Worker[] = []
   private rejectCurrentRun?: ((reason?: unknown) => void) | null
   private isCancelled = false
   public isRunning = false
   public status: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'ERROR' = 'IDLE'
 
+  private getOrCreateWarmWorker(slotIndex: number): Worker {
+    const existing = this.warmWorkers[slotIndex]
+    if (existing) {
+      return existing
+    }
+    const created = new Worker(new URL('./simulation.worker.ts', import.meta.url), {
+      type: 'module',
+    })
+    this.warmWorkers[slotIndex] = created
+    return created
+  }
+
   public terminateAll(): void {
-    for (const w of this.activeWorkers) {
+    const allToTerminate = new Set<Worker>([...this.activeWorkers, ...this.warmWorkers])
+    for (const w of allToTerminate) {
       try {
+        w.onmessage = null
+        w.onerror = null
         w.terminate()
       } catch {
         // Silently ignore termination errors
       }
     }
     this.activeWorkers = []
+    this.warmWorkers = []
   }
 
   public cancelSimulation(): void {
@@ -77,7 +94,7 @@ export class SimulationWorkerPool {
     this.isRunning = false
     this.terminateAll()
     if (this.rejectCurrentRun) {
-      this.rejectCurrentRun(new Error('Simulation annulée par l\'utilisateur'))
+      this.rejectCurrentRun(new Error("Simulation annulée par l'utilisateur"))
       this.rejectCurrentRun = null
     }
   }
@@ -87,7 +104,10 @@ export class SimulationWorkerPool {
     config: SimulationConfig,
     onProgress?: (completedGames: number, totalGames: number, elapsedMs: number) => void,
   ): Promise<SimulationMetricsSummary> {
-    this.terminateAll()
+    if (this.isRunning) {
+      this.terminateAll()
+    }
+    this.activeWorkers = []
     this.isCancelled = false
     this.status = 'RUNNING'
     this.isRunning = true
@@ -215,11 +235,9 @@ export class SimulationWorkerPool {
     }
 
     const shardPromises = shardsInput.map(
-      (shardIn) =>
+      (shardIn, shardIdx) =>
         new Promise<SimulationShardResult>((resolve, reject) => {
-          const worker = new Worker(new URL('./simulation.worker.ts', import.meta.url), {
-            type: 'module',
-          })
+          const worker = this.getOrCreateWarmWorker(shardIdx)
           this.activeWorkers.push(worker)
 
           worker.onmessage = (event: MessageEvent<WorkerResponseMessage>) => {
@@ -235,21 +253,22 @@ export class SimulationWorkerPool {
             } else if (data.type === 'SHARD_COMPLETE') {
               progressByShard.set(data.shardId, shardIn.gameCount)
               reportAggregatedProgress()
-              worker.terminate()
+              worker.onmessage = null
+              worker.onerror = null
               resolve(data.result)
             } else if (data.type === 'ERROR') {
               console.error('[WorkerPool ERROR]:', data.message, data.stack)
-              worker.terminate()
+              this.terminateAll()
               reject(new Error(data.message))
             } else if (data.type === 'SHARD_ERROR') {
               console.error('[WorkerPool SHARD_ERROR]:', data.error)
-              worker.terminate()
+              this.terminateAll()
               reject(new Error(data.error))
             }
           }
 
           worker.onerror = (err) => {
-            worker.terminate()
+            this.terminateAll()
             reject(new Error(err.message || 'Erreur Web Worker inattendue'))
           }
 
@@ -266,7 +285,7 @@ export class SimulationWorkerPool {
       try {
         const shardResults = await Promise.all(shardPromises)
         if (this.isCancelled) {
-          reject(new Error('Simulation annulée par l\'utilisateur'))
+          reject(new Error("Simulation annulée par l'utilisateur"))
           return
         }
         const totalDurationMs = performance.now() - startTime
@@ -280,7 +299,7 @@ export class SimulationWorkerPool {
       } finally {
         this.isRunning = false
         this.rejectCurrentRun = null
-        this.terminateAll()
+        this.activeWorkers = []
       }
     })
   }
