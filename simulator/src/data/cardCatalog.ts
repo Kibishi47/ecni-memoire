@@ -224,6 +224,9 @@ const CARD_ID_ALIASES: Record<string, string> = {
   'sv04.5-054': 'sv03-125', // Dracaufeu-ex PAF -> sv03-125
   'sv05-144': 'sv05-144', // Poffin Copain-Copain / Poffin Pote-Pote
   'me02.5-142': 'sv06.5-038', // Favianos-ex ASC -> Favianos-ex
+  '30c-066': '30th-066',
+  '30c-66': '30th-066',
+  '30th-66': '30th-066',
 }
 
 const byNormalizedName = new Map<string, { model: EngineCardModel; source: 'compiled_db' }>()
@@ -264,6 +267,7 @@ const NAME_SYNONYMS: Record<string, string> = {
   'arven': 'sv01-166',
   'attrape riposte': 'sv04-160',
   'counter catcher': 'sv04-160',
+  'mew ex': '30th-066',
 }
 
 export function resolveCardModel(params: {

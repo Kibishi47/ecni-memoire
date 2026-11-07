@@ -53,10 +53,11 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
 
     // Vérification des 6 nouvelles familles d'analyses tactiques compétitives
     expect(Object.keys(summary1.cardTelemetry).length).toBeGreaterThan(0)
-    const ragingBoltTelemetry = summary1.cardTelemetry['sv05-123']
-    expect(ragingBoltTelemetry).toBeDefined()
-    expect(ragingBoltTelemetry!.gamesInDeck).toBe(8)
-    expect(ragingBoltTelemetry!.quantityInDeck).toBe(4)
+    const firstCard = playerDeck.cards[0]!
+    const telemetry = summary1.cardTelemetry[firstCard.cardId]
+    expect(telemetry).toBeDefined()
+    expect(telemetry!.gamesInDeck).toBe(8)
+    expect(telemetry!.quantityInDeck).toBe(firstCard.quantity)
 
     expect(summary1.averageSetupTurn).toBeGreaterThanOrEqual(0)
     expect(summary1.setupTurnHistogram.T1).toBeGreaterThanOrEqual(0)
