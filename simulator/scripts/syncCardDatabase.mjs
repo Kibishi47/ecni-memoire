@@ -46,6 +46,7 @@ const META_REFERENCE_CARD_IDS = [
   'sv01-181', // Faiblo Ball
   'sv03-164', // Roucarnage-ex
   'sv04-160', // Attrape-Riposte
+  '30th-066', // Mew-ex
 ]
 
 function targetFilterToDsl(rawFilter) {

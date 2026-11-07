@@ -12,23 +12,32 @@ describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
     expect(UNIFIED_CARD_REGISTRY['sv03-164']?.identity.nameFr).toBe('Roucarnage-ex')
     expect(UNIFIED_CARD_REGISTRY['sv05-123']?.identity.nameFr).toBe('Ire-Foudre-ex')
     expect(UNIFIED_CARD_REGISTRY['sv06.5-038']?.identity.nameFr).toBe('Favianos-ex')
-    expect(getCompiledCardsCount()).toBe(853)
+    expect(getCompiledCardsCount()).toBe(854)
   })
 
-  it('valide le deck de test 100 % compatible à 60 cartes avec énergies natives', () => {
-    const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
-    expect(parsed.totalCards).toBe(60)
-    expect(parsed.isValid60).toBe(true)
-    expect(parsed.hasAtLeastOneBasic).toBe(true)
-    expect(parsed.isFullyResolved).toBe(true)
-    expect(parsed.unresolvedCount).toBe(0)
-    expect(parsed.unresolvedCards.length).toBe(0)
-    expect(parsed.warnings.length).toBe(0)
+  it('valide les 3 decks méta de référence à 60 cartes avec 100 % de cartes résolues', () => {
+    expect(META_OPPONENT_DECKS.length).toBe(3)
+    expect(META_OPPONENT_DECKS.map((d) => d.name)).toEqual([
+      'Lanssorien-ex',
+      'Méga-Kangourex-ex',
+      'Roigada',
+    ])
 
-    const compiledCards = parsed.cards.filter((c) => c.resolvedFromSource === 'compiled_db')
-    const nativeEnergies = parsed.cards.filter((c) => c.resolvedFromSource === 'native_basic_energy')
-    expect(compiledCards.length).toBeGreaterThan(0)
-    expect(nativeEnergies.length).toBeGreaterThan(0)
+    for (const deck of META_OPPONENT_DECKS) {
+      const parsed = parsePtcglDecklist(deck.ptcglText)
+      expect(parsed.totalCards).toBe(60)
+      expect(parsed.isValid60).toBe(true)
+      expect(parsed.hasAtLeastOneBasic).toBe(true)
+      expect(parsed.isFullyResolved).toBe(true)
+      expect(parsed.unresolvedCount).toBe(0)
+      expect(parsed.unresolvedCards.length).toBe(0)
+      expect(parsed.warnings.length).toBe(0)
+
+      const compiledCards = parsed.cards.filter((c) => c.resolvedFromSource === 'compiled_db')
+      const nativeEnergies = parsed.cards.filter((c) => c.resolvedFromSource === 'native_basic_energy')
+      expect(compiledCards.length).toBeGreaterThan(0)
+      expect(nativeEnergies.length).toBeGreaterThan(0)
+    }
   })
 
   it('résout nativement les 9 types d\'énergies de base', () => {

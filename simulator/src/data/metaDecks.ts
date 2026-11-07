@@ -1,232 +1,139 @@
 import type { MetaOpponentDeck } from '../types/deck'
 
-export const COMPATIBLE_TEST_DECK_PTCGL = `Pokémon: 6
-4 Ire-Foudre-ex TEF 123
-2 Favianos-ex SFA 38
+export const DECK_LANSSORIEN_EX_PTCGL = `Pokémon: 19
+4 Dreepy TWM 128
+4 Drakloak TWM 129
+3 Dragapult ex TWM 130
+2 Munkidori TWM 95
+2 Budew ASC 16
+1 Dunsparce TEF 128
+1 Dudunsparce TEF 129
+1 Meowth ex POR 62
+1 Fezandipiti ex ASC 142
 
-Dresseurs: 28
-4 Pepper SVI 166
-4 Mashynn PAL 185
-4 Hyper Ball SVI 196
-4 Faiblo Ball SVI 181
-4 Poffin Copain-Copain TEF 144
-4 Super Bonbon PAF 125
-4 Attrape-Riposte PAR 160
+Trainer: 32
+4 Lillie's Determination MEG 119
+3 Boss's Orders MEG 114
+2 Crispin SCR 133
+1 Rosa's Encouragement POR 84
+1 Judge POR 76
+4 Buddy-Buddy Poffin TEF 144
+4 Poké Pad POR 81
+4 Crushing Hammer POR 71
+3 Ultra Ball MEG 131
+3 Night Stretcher ASC 196
+1 Unfair Stamp TWM 165
+2 Risky Ruins MEG 127
 
-Énergies: 26
-15 Énergie Combat de base SVE 6
-11 Énergie Électrik de base SVE 4
+Energy: 9
+3 Fire Energy MEE 10
+3 Psychic Energy MEE 13
+3 Darkness Energy MEE 15
 
 Total Cards: 60`
 
-export const COMPATIBLE_TEST_DECK_VARIANT_PTCGL = `Pokémon: 6
-2 Ire-Foudre-ex TEF 123
-4 Favianos-ex SFA 38
+export const DECK_MEGA_KANGOUREX_EX_PTCGL = `Pokémon: 20
+4 Mega Kangaskhan ex MEG 104
+4 Meowth ex POR 62
+2 Teal Mask Ogerpon ex TWM 25
+2 Latias ex SSP 76
+2 Lillie's Clefairy ex JTG 56
+1 Chien-Pao SSP 56
+1 Iron Leaves ex TEF 25
+1 Fezandipiti ex ASC 142
+1 Koraidon ex ASC 121
+1 Bloodmoon Ursaluna ex TWM 141
+1 Wellspring Mask Ogerpon ex TWM 64
 
-Dresseurs: 28
-4 Pepper SVI 166
-4 Mashynn PAL 185
-4 Hyper Ball SVI 196
-4 Faiblo Ball SVI 181
-4 Poffin Copain-Copain TEF 144
-4 Super Bonbon PAF 125
-4 Attrape-Riposte PAR 160
+Trainer: 27
+4 Crispin SCR 133
+3 Boss's Orders MEG 114
+2 Cyrano SSP 170
+1 Ciphermaniac's Codebreaking TEF 145
+1 Judge POR 76
+4 Energy Switch MEG 115
+4 Ultra Ball MEG 131
+2 Night Stretcher ASC 196
+1 Special Red Card CRI 82
+1 Hero's Cape TEF 152
+4 Area Zero Underdepths SCR 131
 
-Énergies: 26
-11 Énergie Combat de base SVE 6
-15 Énergie Électrik de base SVE 4
+Energy: 13
+7 Grass Energy MEE 9
+3 Psychic Energy MEE 13
+2 Fighting Energy MEE 14
+1 Water Energy MEE 11
+
+Total Cards: 60`
+
+export const DECK_ROIGADA_PTCGL = `Pokémon: 22
+4 Slowpoke SCR 57
+3 Slowking SCR 58
+4 Mega Kangaskhan ex MEG 104
+2 Latias ex SSP 76
+2 Metagross CRI 61
+2 Kyurem SFA 47
+1 Fezandipiti ex ASC 142
+1 Zeraora DRI 78
+1 Lillie's Clefairy ex JTG 56
+1 Meowth ex POR 62
+1 Mew ex 30C 66
+
+Trainer: 28
+4 Ciphermaniac's Codebreaking TEF 145
+4 Lillie's Determination MEG 119
+4 Ultra Ball MEG 131
+4 Poké Pad POR 81
+3 Wondrous Patch PFL 94
+2 Night Stretcher ASC 196
+1 Switch MEG 130
+1 Secret Box TWM 163
+1 Lucky Helmet TWM 158
+4 Academy at Night SFA 54
+
+Energy: 10
+4 Psychic Energy MEE 13
+4 Telepathic Psychic Energy POR 88
+2 Boomerang Energy TWM 166
 
 Total Cards: 60`
 
 /**
- * Les decks méta adverses pour les affrontements.
- * Les deux premiers decks sont 100 % compatibles avec les 11 cartes compilées de cards_database.json et les énergies natives.
+ * Les 3 decks top méta du moment servant d'adversaires de référence.
+ * 100 % des 60 cartes sont résolues dans cards_database.json et les énergies natives.
  */
 export const META_OPPONENT_DECKS: MetaOpponentDeck[] = [
   {
-    id: 'meta_test_compatible',
-    name: 'Ire-Foudre-ex / Favianos-ex (Miroir Compilé 100 %)',
-    archetypeBadge: 'Turbo Compilé',
-    strategySubtitle: 'Deck 100 % compatible avec les 11 modèles de cards_database.json',
+    id: 'meta_lanssorien_ex',
+    name: 'Lanssorien-ex',
+    archetypeBadge: 'Spread & Contrôle',
+    strategySubtitle: 'Moteur de pioche Dispareptil + Plongée Fantôme (200 + 60 Banc)',
     description:
-      'Deck de référence composé exclusivement des 11 cartes compilées dans cards_database.json et d\'énergies de base natives.',
-    keyThreats: ['Ire-Foudre-ex (Tempête Éclats)', 'Favianos-ex', 'Attrape-Riposte'],
-    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    ptcglText: COMPATIBLE_TEST_DECK_PTCGL,
-  },
-  {
-    id: 'meta_test_compatible_variant',
-    name: 'Ire-Foudre-ex / Favianos-ex (Variante Compilée 100 %)',
-    archetypeBadge: 'Contre-Attaque Compilée',
-    strategySubtitle: 'Variante 100 % compatible axée Favianos-ex et énergies Électrik',
-    description:
-      'Variante adverse composée exclusivement des modèles compilés dans cards_database.json et d\'énergies natives.',
-    keyThreats: ['Favianos-ex (Pioche)', 'Ire-Foudre-ex', 'Mashynn'],
+      'Deck méta combinant le moteur de pioche de Dispareptil avec Lanssorien-ex (Plongée Fantôme), Munkidori pour manipuler les marqueurs de dégâts, et Rozbouton pour bloquer les Objets adverses.',
+    keyThreats: ['Lanssorien-ex (200 + 60 Spread)', 'Dispareptil (Reconnaissance Aérienne)', 'Rozbouton (Item Lock)'],
     badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    ptcglText: COMPATIBLE_TEST_DECK_VARIANT_PTCGL,
+    ptcglText: DECK_LANSSORIEN_EX_PTCGL,
   },
   {
-    id: 'meta_charizard_pidgeot',
-    name: 'Dracaufeu-ex / Roucarnage-ex',
-    archetypeBadge: 'Midrange Setup',
-    strategySubtitle: 'Accélération Règne Infernal + Tutorat universel Recherche Rapide',
+    id: 'meta_mega_kangourex_ex',
+    name: 'Méga-Kangourex-ex',
+    archetypeBadge: 'Accélération & Multi-Attaquants',
+    strategySubtitle: 'Abîme Zéro à 8 places de Banc + Transfert d\'Énergies multi-types',
     description:
-      'Établit Roucarnage-ex et Dracaufeu-ex dès le Tour 2 via Super Bonbon et Pepper, puis prend l\'avantage aux Récompenses avec Combustion Obscure (180 à 330 dégâts) et Attrape-Riposte.',
-    keyThreats: ['Dracaufeu-ex (330 PV)', 'Roucarnage-ex (Recherche Rapide)', 'Favianos-ex (Pioche 3)'],
-    badgeColor: 'bg-orange-50 text-orange-700 border-orange-200',
-    ptcglText: `Pokémon: 17
-4 Salamèche MEW 4
-1 Reptincel OBF 27
-3 Dracaufeu-ex OBF 125
-2 Roucool MEW 16
-1 Roucoups OBF 163
-2 Roucarnage-ex OBF 164
-1 Favianos-ex SFA 38
-1 Motisma V CRZ 45
-1 Luminéon V BRS 40
-1 Mélofée OBF 80
-
-Dresseurs: 36
-4 Pepper SVI 166
-4 Mashynn PAL 185
-3 Ordres du Boss PAL 172
-1 Plan du Professeur Turum PAR 171
-4 Poffin Copain-Copain TEF 144
-4 Hyper Ball SVI 196
-3 Faiblo Ball SVI 181
-4 Super Bonbon PAF 125
-2 Attrape-Riposte PAR 160
-2 Civière Nocturne SFA 61
-2 Méga Canne PAL 188
-1 Tampon Injuste TWM 165
-1 Pierre Scellée Sylvestre SIT 156
-1 Ceinture Vitalité SVI 197
-
-Énergies: 7
-7 Énergie Feu de base SVE 2
-
-Total Cards: 60`,
-  },
-  {
-    id: 'meta_raging_bolt_ogerpon',
-    name: 'Ire-Foudre-ex / Ogerpon-ex',
-    archetypeBadge: 'Turbo Aggro',
-    strategySubtitle: 'Accélération Danse Turquoise + Vitalité d\'Olim pour OHKO dès le T1/T2',
-    description:
-      'Inonde le plateau d\'énergies de base avec Ogerpon Masque Turquoise-ex et Vitalité de la Professeure Olim pour infliger 210 à 350 dégâts dès les premiers tours avec Tempête Éclats.',
-    keyThreats: ['Ire-Foudre-ex (Tempête Éclats 70×)', 'Ogerpon Masque Turquoise-ex', 'Attrape-Suprême'],
+      'Deck massif exploitant les 8 places de Banc conférées par Abîme Zéro, l\'accélération d\'énergies via Échange d\'Énergie / Crispin et la force de frappe de Méga-Kangourex-ex, Ogerpon-ex et Koraidon-ex.',
+    keyThreats: ['Méga-Kangourex-ex', 'Ogerpon Masque Turquoise-ex', 'Abîme Zéro'],
     badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
-    ptcglText: `Pokémon: 12
-4 Ire-Foudre-ex TEF 123
-4 Ogerpon Masque Turquoise-ex TWM 25
-1 Pelage-Sablé-ex PAR 123
-1 Tapatoès-ex PAL 169
-1 Amphinobi Radieux ASR 46
-1 Favianos-ex SFA 38
-
-Dresseurs: 36
-4 Vitalité de la Professeure Olim PAR 170
-2 Ordres du Boss PAL 172
-2 Mashynn PAL 185
-1 Recherches Professorales SVI 189
-4 Faiblo Ball SVI 181
-4 Hyper Ball SVI 196
-4 Urne Terrestre PAR 163
-3 Civière Nocturne SFA 61
-2 Méga Canne PAL 188
-1 Attrape-Suprême TEF 157
-3 Échange SVI 194
-3 Amulette Bravoure PAL 173
-3 PokéStop PGO 68
-
-Énergies: 12
-6 Énergie Plante de base SVE 1
-3 Énergie Électrik de base SVE 4
-3 Énergie Combat de base SVE 6
-
-Total Cards: 60`,
+    ptcglText: DECK_MEGA_KANGOUREX_EX_PTCGL,
   },
   {
-    id: 'meta_dragapult_drakloak',
-    name: 'Lanssorien-ex / Dispareptil',
-    archetypeBadge: 'Spread & Tempo',
-    strategySubtitle: 'Moteur de pioche Reconnaissance Aérienne + Plongée Fantôme (200 + 60 Banc)',
+    id: 'meta_roigada',
+    name: 'Roigada',
+    archetypeBadge: 'Combo & Manipulation de Deck',
+    strategySubtitle: 'Manipulation du dessus du deck avec Décodage du Cryptologue & Académie de Nuit',
     description:
-      'Accumule les cartes avec plusieurs Dispareptil sur le Banc et Xatu, puis met sous pression tout le plateau adverse avec Plongée Fantôme (200 sur l\'Actif + 6 marqueurs sur le Banc).',
-    keyThreats: ['Lanssorien-ex (200 + 60 Spread)', 'Dispareptil (Reconnaissance Aérienne)', 'Xatu'],
-    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    ptcglText: `Pokémon: 18
-4 Fantyrm TWM 128
-4 Dispareptil TWM 129
-3 Lanssorien-ex TWM 130
-2 Natu PAR 71
-2 Xatu PAR 72
-1 Motisma V CRZ 45
-1 Luminéon V BRS 40
-1 Favianos-ex SFA 38
-
-Dresseurs: 35
-4 Pepper SVI 166
-4 Mashynn PAL 185
-2 Ordres du Boss PAL 172
-1 Recherches Professorales SVI 189
-4 Poffin Copain-Copain TEF 144
-4 Hyper Ball SVI 196
-2 Faiblo Ball SVI 181
-3 Super Bonbon PAF 125
-2 Urne Terrestre PAR 163
-2 Attrape-Riposte PAR 160
-2 Civière Nocturne SFA 61
-2 Méga Canne PAL 188
-1 Tampon Injuste TWM 165
-1 Pierre Scellée Sylvestre SIT 156
-1 CT : Évolution PAR 178
-
-Énergies: 7
-4 Énergie Psy de base SVE 5
-3 Énergie Feu de base SVE 2
-
-Total Cards: 60`,
-  },
-  {
-    id: 'meta_gardevoir_fezandipiti',
-    name: 'Gardevoir-ex / Favianos-ex',
-    archetypeBadge: 'Contre-Tempo',
-    strategySubtitle: 'Raffinement de Kirlia + Enlacement Psy sur Baudrive / Hurle-Queue',
-    description:
-      'Défausse ses Énergies Psy avec Kirlia et Hyper Ball pour charger des attaquants à 1 Récompense (Baudrive, Hurle-Queue) via Gardevoir-ex tout en perturbant la main adverse avec Mashynn et Tampon Injuste.',
-    keyThreats: ['Gardevoir-ex (Enlacement Psy)', 'Baudrive (OHKO 1-Prize)', 'Hurle-Queue'],
+      'Deck combo exploitant les synergies de Roigada avec Décodage du Cryptologue et Académie de Nuit pour ordonner le dessus du deck, soutenu par Méga-Kangourex-ex, Métalosse et Kyurem.',
+    keyThreats: ['Roigada', 'Décodage du Cryptologue', 'Kyurem'],
     badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
-    ptcglText: `Pokémon: 17
-4 Tarsal ASR 60
-4 Kirlia SIT 68
-2 Gardevoir-ex SVI 86
-2 Baudrive SVI 89
-1 Hurle-Queue PAR 86
-1 Fort-Usinier TEF 60
-1 Mimiriqui PAL 97
-1 Amphinobi Radieux ASR 46
-1 Favianos-ex SFA 38
-
-Dresseurs: 34
-4 Mashynn PAL 185
-4 Pepper SVI 166
-2 Ordres du Boss PAL 172
-1 Plan du Professeur Turum PAR 171
-4 Poffin Copain-Copain TEF 144
-4 Hyper Ball SVI 196
-2 Faiblo Ball SVI 181
-1 Super Bonbon PAF 125
-2 Urne Terrestre PAR 163
-2 Attrape-Riposte PAR 160
-2 Civière Nocturne SFA 61
-2 Méga Canne PAL 188
-1 Tampon Injuste TWM 165
-3 Amulette Bravoure PAL 173
-
-Énergies: 9
-9 Énergie Psy de base SVE 5
-
-Total Cards: 60`,
+    ptcglText: DECK_ROIGADA_PTCGL,
   },
 ]
