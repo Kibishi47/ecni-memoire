@@ -197,7 +197,7 @@ export function buildDeckEntryFromTokens(input: {
 
 export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number, lineIndex = 99): ParsedDeckEntry {
   const mapping = lookupSetMapping(model.identity.setId)
-  const cleanNumber = stripLeadingZeros(model.identity.localId)
+  const cleanNumber = stripLeadingZeros(model.identity.localId || '001')
   const paddedNumber = padLocalNumber(cleanNumber)
   const sectionCategory: DeckSectionCategory =
     model.category === 'POKEMON' ? 'pokemon' : model.category === 'TRAINER' ? 'trainer' : 'energy'
@@ -276,30 +276,69 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
   for (const entry of activeCards) {
     const reqs = entry.model.strategicEvaluator.decklistSynergyRequirements || []
     for (let rIdx = 0; rIdx < reqs.length; rIdx++) {
-      const req = reqs[rIdx]!
+      const rawReq = reqs[rIdx]!
       const key = `${entry.model.cardId}_${rIdx}`
       if (seenKey.has(key)) continue
       seenKey.add(key)
 
       let matchingCount = 0
-      for (const candidate of activeCards) {
-        if (matchesCardFilter(candidate.model, req.requiredFilter)) {
-          matchingCount += candidate.quantity
+      let filterDesc = ''
+      let minCount = 1
+      let isCriticalZero = false
+
+      if (typeof rawReq === 'string') {
+        if (rawReq.startsWith('requires_energy_type:')) {
+          const energyType = rawReq.replace('requires_energy_type:', '')
+          filterDesc = `Énergie ${energyType}`
+          matchingCount = activeCards
+            .filter(
+              (c) =>
+                c.model.category === 'ENERGY' &&
+                (c.model.pokemonStats?.types?.includes(energyType) ||
+                  c.nameFr.toLowerCase().includes(energyType.toLowerCase()) ||
+                  c.nameEn.toLowerCase().includes(energyType.toLowerCase())),
+            )
+            .reduce((sum, c) => sum + c.quantity, 0)
+        } else if (rawReq.startsWith('requires_evolution_line:')) {
+          const evoName = rawReq.replace('requires_evolution_line:', '')
+          filterDesc = `Lignée ${evoName}`
+          matchingCount = activeCards
+            .filter(
+              (c) =>
+                c.nameFr.toLowerCase().includes(evoName.toLowerCase()) ||
+                c.nameEn.toLowerCase().includes(evoName.toLowerCase()),
+            )
+            .reduce((sum, c) => sum + c.quantity, 0)
+        } else {
+          filterDesc = rawReq
+          matchingCount = 1
+        }
+      } else {
+        const reqObj = rawReq as any
+        minCount = reqObj.minCountInDeck || 1
+        isCriticalZero = reqObj.ifMissingSetValueToZero || false
+        filterDesc = describeCardFilterFr(reqObj.requiredFilter)
+        for (const candidate of activeCards) {
+          if (matchesCardFilter(candidate.model, reqObj.requiredFilter)) {
+            matchingCount += candidate.quantity
+          }
         }
       }
 
-      const satisfied = matchingCount >= req.minCountInDeck
-      const criticalZeroValue = matchingCount === 0 && req.ifMissingSetValueToZero
-      const filterDesc = describeCardFilterFr(req.requiredFilter)
+      const satisfied = matchingCount >= minCount
+      const criticalZeroValue = matchingCount === 0 && isCriticalZero
 
       auditItems.push({
         cardId: entry.model.cardId,
         cardNameFr: entry.nameFr,
-        requirement: req,
+        requirement:
+          typeof rawReq === 'object'
+            ? rawReq
+            : { minCountInDeck: minCount, ifMissingSetValueToZero: isCriticalZero },
         matchingCountInDeck: matchingCount,
         satisfied,
         criticalZeroValue,
-        description: `${entry.nameFr} attend ≥ ${req.minCountInDeck}× ${filterDesc} (trouvé : ${matchingCount})`,
+        description: `${entry.nameFr} attend ≥ ${minCount}× ${filterDesc} (trouvé : ${matchingCount})`,
       })
     }
   }

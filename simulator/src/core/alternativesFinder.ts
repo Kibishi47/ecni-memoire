@@ -55,28 +55,20 @@ export interface SmartAlternativeSuggestion {
 }
 
 const TUTOR_PRIMITIVES = new Set<EffectPrimitive>([
-  'SEARCH_DECK_TO_HAND',
-  'SEARCH_DECK_TO_BENCH',
+  'SEARCH_DECK',
 ])
 
 const DRAW_REFRESH_PRIMITIVES = new Set<EffectPrimitive>([
   'DRAW_CARDS',
-  'DISCARD_HAND_AND_DRAW',
-  'SHUFFLE_HAND_AND_DRAW',
-  'SHUFFLE_HAND_BOTTOM_DRAW_PRIZES',
-  'DRAW_UNTIL_HAND_SIZE',
-  'LOOK_TOP_DECK_PICK',
+  'SHUFFLE_HAND_DRAW',
 ])
 
 const ENERGY_ACCEL_PRIMITIVES = new Set<EffectPrimitive>([
-  'SEARCH_AND_ATTACH_ENERGY',
-  'ATTACH_ENERGY_FROM_DISCARD',
-  'ATTACH_EXTRA_ENERGY_FROM_HAND',
+  'ATTACH_ENERGY',
 ])
 
 const RECOVERY_PRIMITIVES = new Set<EffectPrimitive>([
-  'RECOVER_DISCARD_TO_HAND',
-  'SHUFFLE_DISCARD_TO_DECK',
+  'RECOVER_FROM_DISCARD',
 ])
 
 function arePrimitivesCompatible(p1: EffectPrimitive, p2: EffectPrimitive): boolean {
@@ -176,13 +168,22 @@ export function extractAttackerComparisonRow(
 ): AttackerComparisonRow | null {
   if (model.category !== 'POKEMON' || !model.pokemonStats) return null
 
-  const attacks = model.playableActions.filter((a) => a.sourceType === 'ATTACK')
+  const attacks = model.playableActions.filter(
+    (a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
+  )
   const mainAttack = attacks[attacks.length - 1] ?? attacks[0] ?? null
   const reqEnergy = getMainAttackEnergyRequirement(model)
-  const energyLabels =
-    mainAttack?.energyCost && mainAttack.energyCost.length > 0
-      ? mainAttack.energyCost
-      : Array.from({ length: reqEnergy }, () => 'Incolore')
+  const energyLabels: string[] = []
+  if (mainAttack?.cost && typeof mainAttack.cost === 'object' && !Array.isArray(mainAttack.cost)) {
+    for (const [k, v] of Object.entries(mainAttack.cost)) {
+      for (let i = 0; i < (Number(v) || 0); i++) energyLabels.push(k)
+    }
+  } else if (mainAttack?.energyCost && mainAttack.energyCost.length > 0) {
+    energyLabels.push(...mainAttack.energyCost)
+  }
+  if (energyLabels.length === 0) {
+    for (let i = 0; i < reqEnergy; i++) energyLabels.push('Incolore')
+  }
 
   const dmgBounds = mainAttack
     ? estimateAttackDamageBounds(model, mainAttack)
@@ -207,9 +208,9 @@ export function extractAttackerComparisonRow(
     estimatedMaxDamage: dmgBounds.estimatedMaxDamage,
     damageSummary: dmgBounds.damageSummary,
     retreatCost: model.pokemonStats.retreatCost,
-    prizeCardsGiven: model.pokemonStats.prizeCardsGiven,
+    prizeCardsGiven: model.identity.prizeCardsGiven ?? model.pokemonStats.prizeCardsGiven ?? 1,
     canAttackTwice,
-    primaryRole: model.strategicEvaluator.primaryRole,
+    primaryRole: (model.strategicEvaluator.aiRole || model.strategicEvaluator.primaryRole) as any,
     mainAttackLabel: mainAttack?.label ?? 'Soutien / Talent',
   }
 }
@@ -265,13 +266,21 @@ export function findAlternativesForCard(
         candidate.subCategory === 'ITEM' ||
         candidate.subCategory === 'TOOL' ||
         (candidate.category === 'POKEMON' &&
-          candidate.playableActions.some((a) => a.sourceType.startsWith('ABILITY')))
+          candidate.playableActions.some(
+            (a) => a.actionType === 'USE_ABILITY' || (a.sourceType && a.sourceType.startsWith('ABILITY')),
+          ))
 
       if (!isEconomyCandidate && candidate.subCategory !== 'SUPPORTER') continue
 
       const sharedPrimitives: EffectPrimitive[] = []
       for (const cAct of candidate.playableActions) {
-        if (candidate.category === 'POKEMON' && !cAct.sourceType.startsWith('ABILITY')) continue
+        if (
+          candidate.category === 'POKEMON' &&
+          cAct.actionType !== 'USE_ABILITY' &&
+          (!cAct.sourceType || !cAct.sourceType.startsWith('ABILITY'))
+        ) {
+          continue
+        }
         for (const cEff of cAct.effects) {
           for (const [tPrim, tFilter] of targetPrimitives.entries()) {
             if (
@@ -316,7 +325,7 @@ export function findAlternativesForCard(
           relevanceScore:
             (isActionEconomyUpgrade ? 120 : 65) +
             sharedPrimitives.length * 15 +
-            candidate.strategicEvaluator.intrinsicBaseScore * 0.2,
+            (candidate.strategicEvaluator.intrinsicBaseScore ?? 80) * 0.2,
           attackerComparison: extractAttackerComparisonRow(candidate) ?? undefined,
         })
       }
@@ -327,7 +336,13 @@ export function findAlternativesForCard(
     if (targetModel.category === 'TRAINER') {
       const sharedPrimitives: EffectPrimitive[] = []
       for (const cAct of candidate.playableActions) {
-        if (candidate.category === 'POKEMON' && !cAct.sourceType.startsWith('ABILITY')) continue
+        if (
+          candidate.category === 'POKEMON' &&
+          cAct.actionType !== 'USE_ABILITY' &&
+          (!cAct.sourceType || !cAct.sourceType.startsWith('ABILITY'))
+        ) {
+          continue
+        }
         for (const cEff of cAct.effects) {
           for (const [tPrim, tFilter] of targetPrimitives.entries()) {
             if (
@@ -359,7 +374,7 @@ export function findAlternativesForCard(
           relevanceScore:
             85 +
             sharedPrimitives.length * 15 +
-            candidate.strategicEvaluator.intrinsicBaseScore * 0.2,
+            (candidate.strategicEvaluator.intrinsicBaseScore ?? 80) * 0.2,
           attackerComparison: extractAttackerComparisonRow(candidate) ?? undefined,
         })
       }
@@ -373,9 +388,15 @@ export function findAlternativesForCard(
       if (!targetRow || !candRow) continue
 
       const sameRole =
-        targetModel.strategicEvaluator.primaryRole === candidate.strategicEvaluator.primaryRole
+        (targetModel.strategicEvaluator.aiRole || targetModel.strategicEvaluator.primaryRole) ===
+        (candidate.strategicEvaluator.aiRole || candidate.strategicEvaluator.primaryRole)
       const bothAttackers =
-        targetModel.playableActions.some((a) => a.sourceType === 'ATTACK') &&
+        targetModel.playableActions.some(
+          (a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
+        ) &&
+        candidate.playableActions.some(
+          (a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
+        )
         candidate.playableActions.some((a) => a.sourceType === 'ATTACK')
       const bothDoubleAttackers = targetRow.canAttackTwice && candRow.canAttackTwice
 
@@ -393,7 +414,7 @@ export function findAlternativesForCard(
       }
 
       if (sameRole || bothAttackers || bothDoubleAttackers || sharedPrimitives.length > 0) {
-        let score = 70 + candidate.strategicEvaluator.intrinsicBaseScore * 0.25
+        let score = 70 + (candidate.strategicEvaluator.intrinsicBaseScore ?? 70) * 0.25
         if (sameRole) score += 35
         if (bothDoubleAttackers) score += 45
         if (targetRow.subCategory === candRow.subCategory) score += 15

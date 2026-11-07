@@ -174,29 +174,31 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
     return 'Double attaque sous Stade (Fête Battante)'
   }
 
-  for (const pre of action.preconditions) {
-    if (pre.type === 'HAND_MAX_OTHER_CARDS_ZERO') {
+  for (const rawPre of action.preconditions) {
+    const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
+    if (preType === 'HAND_MAX_OTHER_CARDS_ZERO') {
       return 'Seule carte en main (0 autre carte)'
     }
-    if (pre.type === 'KO_SUFFERED_LAST_TURN') {
+    if (preType === 'KO_SUFFERED_LAST_TURN') {
       return 'Après K.O. subi au tour précédent'
     }
-    if (pre.type === 'PLAYER_BEHIND_ON_PRIZES') {
+    if (preType === 'PLAYER_BEHIND_ON_PRIZES') {
       return 'Retard aux Récompenses'
     }
-    if (pre.type === 'OPPONENT_PRIZES_EXACT_COUNT') {
-      return `Adversaire à ${pre.minCount ?? 1} Récompense(s)`
+    if (preType.startsWith('OPPONENT_PRIZES_EXACT_COUNT')) {
+      const minCount = typeof rawPre === 'object' ? (rawPre as any).minCount ?? 1 : 1
+      return `Adversaire à ${minCount} Récompense(s)`
     }
-    if (pre.type === 'STADIUM_IN_PLAY') {
+    if (preType === 'STADIUM_IN_PLAY') {
       return 'Stade en jeu requis'
     }
-    if (pre.type === 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION') {
+    if (preType === 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION') {
       return 'Actif adverse sous État Spécial'
     }
-    if (pre.type === 'HAS_TERA_POKEMON_IN_PLAY') {
+    if (preType === 'HAS_TERA_POKEMON_IN_PLAY') {
       return 'Pokémon Téracristal en jeu requis'
     }
-    if (pre.type === 'SECOND_PLAYER_TURN_1') {
+    if (preType === 'SECOND_PLAYER_TURN_1') {
       return 'Joueur 2 dès le Tour 1'
     }
   }
@@ -208,13 +210,19 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
     if (eff.damageScalingPerOpponentPrizeTaken) {
       return `Dégâts progressifs (+${eff.damageScalingPerOpponentPrizeTaken}/Récompense)`
     }
-    if (eff.primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK') {
+    if (
+      eff.primitive === 'APPLY_SPECIAL_CONDITION' ||
+      (eff as any).primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK'
+    ) {
       return "Verrouillage d'Objets (Item-Lock)"
     }
   }
 
-  if (action.sourceType === 'ATTACK') {
-    const costLen = action.energyCost?.length ?? 0
+  if (action.actionType === 'ATTACK' || action.sourceType === 'ATTACK') {
+    const costLen =
+      action.cost && typeof action.cost === 'object' && !Array.isArray(action.cost)
+        ? Object.values(action.cost).reduce((a, b) => a + Number(b), 0)
+        : action.energyCost?.length ?? 0
     return costLen === 0 ? 'Attaque à 0 Énergie' : `Attaque (${costLen} Énergie${costLen > 1 ? 's' : ''})`
   }
 
@@ -252,15 +260,16 @@ export function createShardTelemetryAccumulator(
   for (const cardId of Object.keys(cardCounters)) {
     const sampleModel = playerDeckModels.find((m) => m.cardId === cardId)!
     for (const pAction of sampleModel.playableActions) {
-      const hasNonTrivialPrecondition = pAction.preconditions.some(
-        (p) => p.type !== 'SELF_HAS_ENERGY_COST' && p.type !== 'SELF_IS_ACTIVE',
-      )
+      const hasNonTrivialPrecondition = pAction.preconditions.some((p) => {
+        const pType = typeof p === 'string' ? p : (p as any).type
+        return pType !== 'SELF_HAS_ENERGY_COST' && pType !== 'SELF_IS_ACTIVE'
+      })
       const hasDynamicDmg = pAction.effects.some((e) =>
         Boolean(e.damageScalingType || e.damageScalingPerOpponentPrizeTaken),
       )
       const hasDoubleAtk =
         Boolean(pAction.canAttackTwice) || Boolean(sampleModel.pokemonStats?.canAttackTwice)
-      const isAttack = pAction.sourceType === 'ATTACK'
+      const isAttack = pAction.actionType === 'ATTACK' || pAction.sourceType === 'ATTACK'
 
       if (hasNonTrivialPrecondition || hasDynamicDmg || hasDoubleAtk || isAttack) {
         const comboId = `${sampleModel.cardId}::${pAction.actionId}`
@@ -271,7 +280,7 @@ export function createShardTelemetryAccumulator(
             cardId: sampleModel.cardId,
             cardNameFr: sampleModel.identity.nameFr,
             conditionSummary: describeComboCondition(sampleModel, pAction),
-            sourceType: pAction.sourceType,
+            sourceType: pAction.sourceType || pAction.actionType,
             actionId: pAction.actionId,
             gamesTriggered: 0,
             totalTriggersCount: 0,
@@ -291,7 +300,12 @@ function isGustAction(action: GameAction, deckLookup: Map<string, EngineCardMode
   const model = deckLookup.get(action.cardId)
   if (model) {
     const hasGustPrimitive = model.playableActions.some((pa) =>
-      pa.effects.some((e) => e.primitive === 'GUST_OPPONENT_BENCH'),
+      pa.effects.some(
+        (e) =>
+          (e.primitive === 'SWITCH_ACTIVE' &&
+            (e.target === 'OPPONENT_BENCH' || (e as any).targetZone === 'OPPONENT_BENCH')) ||
+          (e as any).primitive === 'GUST_OPPONENT_BENCH',
+      ),
     )
     if (hasGustPrimitive) return true
     const norm = normalizeCardNameForMatch(model.identity.nameFr)
@@ -323,9 +337,11 @@ function isDrawOrSearchSupporterAction(
   const isOffensiveOrGustSupporter = model.playableActions.some((pa) =>
     pa.effects.some(
       (e) =>
-        e.primitive === 'GUST_OPPONENT_BENCH' ||
-        e.primitive === 'PASSIVE_DAMAGE_BOOST' ||
-        e.primitive === 'TAKE_EXTRA_PRIZE_CARDS',
+        (e.primitive === 'SWITCH_ACTIVE' &&
+          (e.target === 'OPPONENT_BENCH' || (e as any).targetZone === 'OPPONENT_BENCH')) ||
+        (e as any).primitive === 'GUST_OPPONENT_BENCH' ||
+        (e as any).primitive === 'PASSIVE_DAMAGE_BOOST' ||
+        (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
     ),
   )
   if (isOffensiveOrGustSupporter) return false
