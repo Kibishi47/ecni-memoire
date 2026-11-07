@@ -57,7 +57,7 @@ export type AIRole =
   | 'CONSISTENCY_BOOSTER'
 
 // Alias de rétrocompatibilité
-export type StrategicRole = AIRole
+export type StrategicRole = AIRole | string
 export type ActionSourceType = ActionType | string
 export type ActionTiming = TimingPhase | string
 

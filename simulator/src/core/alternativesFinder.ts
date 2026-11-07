@@ -71,12 +71,19 @@ const RECOVERY_PRIMITIVES = new Set<EffectPrimitive>([
   'RECOVER_FROM_DISCARD',
 ])
 
+const GUST_SWITCH_PRIMITIVES = new Set<string>([
+  'SWITCH_ACTIVE',
+  'SWITCH_ACTIVE_POKEMON',
+  'GUST_OPPONENT_BENCH',
+])
+
 function arePrimitivesCompatible(p1: EffectPrimitive, p2: EffectPrimitive): boolean {
   if (p1 === p2) return true
   if (TUTOR_PRIMITIVES.has(p1) && TUTOR_PRIMITIVES.has(p2)) return true
   if (DRAW_REFRESH_PRIMITIVES.has(p1) && DRAW_REFRESH_PRIMITIVES.has(p2)) return true
   if (ENERGY_ACCEL_PRIMITIVES.has(p1) && ENERGY_ACCEL_PRIMITIVES.has(p2)) return true
   if (RECOVERY_PRIMITIVES.has(p1) && RECOVERY_PRIMITIVES.has(p2)) return true
+  if (GUST_SWITCH_PRIMITIVES.has(p1) && GUST_SWITCH_PRIMITIVES.has(p2)) return true
   return false
 }
 

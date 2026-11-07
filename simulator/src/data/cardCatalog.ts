@@ -119,20 +119,22 @@ export function resolveCardModel(params: {
 } {
   const { cardId, unpaddedCardId, rawName } = params
 
-  // 1. Correspondance directe par ID dans `cards_database.json`
+  // 1. Exception native absolue pour les Énergies de Base (pas besoin d'être dans cards_database.json)
+  const basicEnergy = detectBasicEnergy(rawName, params.localId)
+  if (basicEnergy || (params.categoryHint === 'energy' && detectBasicEnergy(rawName))) {
+    const nativeModel = compiledCards[cardId]
+      ? structuredClone(compiledCards[cardId]!)
+      : createNativeBasicEnergyModel(rawName, cardId, params.setName, params.localId)
+    return { model: nativeModel, source: 'native_basic_energy' }
+  }
+
+  // 2. Correspondance directe par ID dans `cards_database.json`
   if (compiledCards[cardId]) {
     return { model: structuredClone(compiledCards[cardId]!), source: 'compiled_db' }
   }
   const aliasedId = CARD_ID_ALIASES[cardId] || (unpaddedCardId ? CARD_ID_ALIASES[unpaddedCardId] : undefined)
   if (aliasedId && compiledCards[aliasedId]) {
     return { model: structuredClone(compiledCards[aliasedId]!), source: 'compiled_db' }
-  }
-
-  // 2. Exception native absolue pour les Énergies de Base (pas besoin d'être dans cards_database.json)
-  const basicEnergy = detectBasicEnergy(rawName, params.localId)
-  if (basicEnergy || (params.categoryHint === 'energy' && detectBasicEnergy(rawName))) {
-    const nativeModel = createNativeBasicEnergyModel(rawName, cardId, params.setName, params.localId)
-    return { model: nativeModel, source: 'native_basic_energy' }
   }
 
   // 3. Recherche par synonyme direct dans cards_database.json
