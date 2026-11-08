@@ -11,948 +11,745 @@
       <div class="slides">
 
         <!-- ========================================== -->
-        <!-- ACTE I : INTRODUCTION & VISION DU PROJET   -->
+        <!-- SLIDES LIMINAIRES : TITRE, BIO, SOMMAIRE   -->
         <!-- ========================================== -->
 
-        <!-- Slide 1 -->
+        <!-- Slide 0 : Titre de départ -->
         <section>
           <h1>Analyse Prédictive &amp; Simulation Stratégique pour Pokémon TCG</h1>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 1 : Titre du Projet
+### 🎙️ Slide 0 : Titre du Projet
 **Titre affiché** : Analyse Prédictive &amp; Simulation Stratégique pour Pokémon TCG
 
-* **Présentation du candidat & Contexte** :
-  Bonjour à tous et bienvenue à cette soutenance d'ingénierie. Je vous présente aujourd'hui un projet de recherche appliquée et d'ingénierie logicielle avancée : une plateforme complète d'analyse prédictive et de simulation stratégique pour le Jeu de Cartes à Collectionner Pokémon (Pokémon TCG).
-* **L'Accroche & Le Paradoxe Compétitif** :
-  Le JCC Pokémon est l'un des jeux compétitifs les plus pratiqués sur la planète, avec des dizaines de milliards de cartes imprimées et des tournois majeurs (Régionaux, Internationaux, Championnats du Monde) rassemblant des milliers de compétiteurs d'élite pour des dotations significatives. Pourtant, la préparation de ces tournois repose encore quasi-exclusivement sur l'intuition, le ressenti subjectif et l'empirisme des joueurs.
-* **L'Objectif de l'Ingénieur** :
-  Notre mission : remplacer le « doigt mouillé » par une démarche scientifique rigoureuse. Construire un système de bout en bout capable de modéliser formellement les règles de jeu, d'ingérer n'importe quelle liste officielle en un clic, et d'exécuter des milliers de simulations Monte-Carlo en une fraction de seconde pour quantifier scientifiquement la viabilité et la stabilité de chaque choix de deckbuilding.
+* **Accroche & Salutations** :
+  Bonjour à tous et bienvenue à la soutenance de mon projet de fin d'études. Je vous présente aujourd'hui l'aboutissement d'une année de recherche et d'ingénierie : la conception et le développement d'un banc d'essai décisionnel, déterministe et haute performance dédié aux compétiteurs du Jeu de Cartes à Collectionner Pokémon (Pokémon TCG).
+* **Le Pont entre Deux Mondes** :
+  Ce projet se situe au croisement précis de la modélisation mathématique, de l'ingénierie logicielle bas-niveau, de l'intelligence artificielle locale et du design d'interaction centré utilisateur.
+* **L'Objectif de la Session** :
+  Remplacer l'empirisme et les arbitrages « au feeling » qui dominent encore la préparation des tournois par une démarche scientifique, automatisée et accessible en moins d'une minute.
           </aside>
         </section>
 
-        <!-- Slide 2 -->
+        <!-- Slide 1 : Présentation de l'étudiant -->
         <section>
-          <h2>Le Paradoxe de la Décision : Intuition vs Probabilités Réelles</h2>
+          <h2>Emmanuel Moulin — Ingénieur &amp; Compétiteur TCG</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 2 : La Problématique Compétitive
-**Titre affiché** : Le Paradoxe de la Décision : Intuition vs Probabilités Réelles
+### 🎙️ Slide 1 : Présentation de l'Étudiant
+**Titre affiché** : Emmanuel Moulin — Ingénieur &amp; Compétiteur TCG
 
-* **Le Dilemme du Compétiteur** :
-  Pourquoi joue-t-on 4 exemplaires d'une carte au lieu de 3 ? Quel est l'impact réel de remplacer un Attrape-Riposte par une Canne Suprême ? Est-ce que cette modification augmente mon taux de victoire ou handicape-t-elle ma mise en place au Tour 1 ?
-* **L'Impasse du Playtesting Manuel** :
-  Pour mesurer statistiquement l'impact d'une seule carte sur un échantillon de 200 parties manuelles, un joueur d'élite doit investir environ 80 heures de jeu ininterrompu. Même après un tel investissement chronophage, la taille de l'échantillon reste statistiquement insuffisante pour isoler l'effet d'une carte face à la variance inhérente d'un deck de 60 cartes.
-* **L'Ambition Scientifique** :
-  Bâtir un laboratoire virtuel capable de simuler 10 000 parties complètes en quelques secondes, neutralisant le bruit statistique et produisant des métriques d'une précision inaccessible à l'humain : Win Rate réel, taux de streaming d'attaquants, et résilience aux cartes de perturbation.
+* **Qui suis-je ?** :
+  Je m'appelle Emmanuel Moulin, étudiant en Master 2 ECNI (Expert en Conception Numérique et Ingénierie) à GOBELINS Paris / Annecy.
+* **Ma Double Casquette** :
+  * D'un côté, une formation d'ingénieur logiciel passionné par l'architecture des systèmes, la performance algorithmique, les modèles de langage et la rigueur du typage statique.
+  * De l'autre, un joueur et compétiteur passionné de Trading Card Games depuis plusieurs années, habitué aux tournois physiques en boutique locale (LGS) et aux événements régionaux.
+* **L'Origine du Projet** :
+  Ce travail est né d'une frustration personnelle vécue en tournoi : passer 30 heures à tester un deck, hésiter la veille sur deux malheureuses cartes, changer « au feeling » sur un coup de tête, et voir son tournoi ruiné par une « main morte » au Tour 2. J'ai voulu mettre mes compétences d'ingénieur au service de la résolution de ce vide méthodologique.
           </aside>
         </section>
 
-        <!-- Slide 3 -->
+        <!-- Slide 2 : Sommaire -->
         <section>
-          <h2>Une Démarche d'Ingénierie par Preuves de Concept (POCs)</h2>
+          <h2>Sommaire Général de la Présentation</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 3 : L'Approche par Jalons (Méthodologie POC)
-**Titre affiché** : Une Démarche d'Ingénierie par Preuves de Concept (POCs)
+### 🎙️ Slide 2 : Sommaire Général
+**Titre affiché** : Sommaire Général de la Présentation
 
-* **Méthodologie & Dé-risquage Technique** :
-  Face à un système d'une telle complexité combinatoire et sémantique, foncer directement vers un développement monolithique aurait conduit à une impasse architecturale. Nous avons adopté une démarche d'ingénierie modulaire par Preuves de Concept (POCs) ciblées :
-* **Cartographie des 5 Jalons** :
-  1. **POC 1 & POC 2** (Ergonomie & Design System) : Valider un parcours utilisateur fluide en entonnoir et un Atelier A/B interactif.
-  2. **POC 5** (Ingestion & Interopérabilité) : Assurer la compatibilité instantanée avec les listes textuelles de Pokémon TCG Live.
-  3. **POC 3** (Compilateur IA Local) : Relever le défi de la modélisation formelle des règles de cartes via des LLMs locaux sans codage en dur.
-  4. **POC 4** (Banc d'Essai Haute Performance) : Évaluer les runtimes (WebAssembly vs TypeScript natif multi-threadé) pour le Monte-Carlo.
-* **L'Aboutissement** :
-  La convergence de ces 5 briques logicielles au sein de `./simulator/`, créant une solution intégrée de bout en bout.
-          </aside>
-        </section>
-
-        <!-- ======================================================= -->
-        <!-- ACTE II : POC 1 & POC 2 — CONCEPTION UX & DESIGN SYSTEM -->
-        <!-- ======================================================= -->
-
-        <!-- Slide 4 -->
-        <section>
-          <h2>POC 1 &amp; 2 : Capter la Complexité sans Perdre le Joueur</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 4 : POC 1 &amp; POC 2 : Le Parcours Utilisateur en Entonnoir (Wizard)
-**Titre affiché** : POC 1 &amp; 2 : Capter la Complexité sans Perdre le Joueur
-
-* **Le Piège des Outils Académiques** :
-  La majorité des simulateurs de recherche échouent sur l'expérience utilisateur : interfaces austères, 40 paramètres obscurs dès l'accueil, saisies manuelles fastidieuses. Les joueurs compétitifs les abandonnent instantanément.
-* **Le Pattern "Wizard" en 3 Étapes** :
-  Nous avons conçu un entonnoir progressif :
-  1. *Étape 1 - Ingestion* : Un simple copier-coller de liste PTCGL ou le clic sur un archétype méta prédéfini (Dracaufeu ex, Ire-Foudre ex, Gardevoir ex, Regidrago).
-  2. *Étape 2 - Configuration Rapide* : Nombre de parties (100 à 10 000), choix de l'adversaire (miroir ou liste méta), ordre de jeu (J1 / J2).
-  3. *Étape 3 - Télémétrie &amp; Atelier* : Affichage instantané des jauges de performance et accès immédiat à l'Atelier d'optimisation.
-* **Bilan UX** :
-  Permettre une analyse statistique complète en 3 clics pour un joueur pressé, tout en conservant une profondeur d'audit d'expert pour les stratèges.
-          </aside>
-        </section>
-
-        <!-- Slide 5 -->
-        <section>
-          <h2>Design System : L'Anti-Dashboard Sombre</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 5 : Le Choix Esthétique : Clean Editorial Light Mode
-**Titre affiché** : Design System : L'Anti-Dashboard Sombre
-
-* **Rejet Délibéré du "Dark Mode Cyberpunk"** :
-  L'esthétique typique des outils de gaming (fonds noirs, néons violets saturés) est illisible en situation réelle de tournoi (salles fortement éclairées) et fatigue rapidement l'œil lors d'analyses prolongées ou en vidéo-projection.
-* **L'Inspiration Éditoriale Suisse** :
-  Nous avons opté pour une direction artistique claire, élégante et inspirée de la presse économique suisse :
-  * Typographies : `Inter` pour les composants UI, `DM Sans` pour les chiffres et métriques à chasse fixe.
-  * Fonds ardoise douce (`#f8fafc`), cartes blanches surélevées par de fines bordures contrastées (`#e2e8f0`).
-  * Contrastes rigoureusement conformes aux normes d'accessibilité WCAG AA.
-* **Sémantique Visuelle Stricte** :
-  Pastilles de statut sans ambiguïté : Émeraude (`#10b981`) pour les gains significatifs, Ambre (`#f59e0b`) pour les métriques sous surveillance, Rubis (`#ef4444`) pour les alertes de régression.
-          </aside>
-        </section>
-
-        <!-- Slide 6 -->
-        <section>
-          <h2>Le Concept de l'Atelier d'Optimisation A/B</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 6 : L'Atelier A/B : Rendre la Comparaison Tangible
-**Titre affiché** : Le Concept de l'Atelier d'Optimisation A/B
-
-* **La Question Fondamentale du Compétiteur** :
-  Un joueur de haut niveau ne cherche pas un chiffre absolu isolé ; il veut comparer : « Si j'enlève 1 Faiblo Ball pour mettre 1 Méga Canne, est-ce que mon deck devient meilleur ou moins bon ? ».
-* **L'Architecture du Comparateur A/B** :
-  * **Deck Baseline (Référence A)** : La liste originale, figée comme étalon de comparaison.
-  * **Variante Active (Deck B)** : La liste modifiée en direct via l'interface (ajouts, retraits, substitutions de cartes).
-* **Calcul Instantané des Deltas (Δ)** :
-  L'Atelier affiche instantanément les écarts relatifs : Δ Win Rate (+2.4 %), Δ Setup T1 (+3.1 %), Δ Résilience aux perturbations (-1.2 %).
-* **Impact Psychologique** :
-  Matérialiser le compromis (trade-off) de manière tangible et immédiate, transformant le deckbuilding en une discipline empirique guidée par les données.
+* **Déroulé chronologique du projet en 7 Actes** :
+  * **Acte 1 : Le Sujet &amp; la Recherche Initiale** — Genèse, enjeux, délimitation aux TCG à tour fermé, limites mathématiques de l'hypergéométrique et benchmark de l'existant.
+  * **Acte 2 : Exploration du Terrain** — Enquête quantitative (106 répondants), verbatims, personas (Thomas &amp; Julien), formulation du problème et échec formateur de la V1 (dashboard sombre).
+  * **Acte 3 : La Piste de Solution** — Matrice de décision, hybridation PokéPulse Arena + PokéDiff (A/B), intentions techniques et protocoles de validation.
+  * **Acte 4 : La Conception** — Les 5 POCs, l'échec de WebAssembly au profit du multi-threading TypeScript, TCGdex, et l'incroyable évolution du compilateur IA (de la V1 monolithique à la V3 hybride déterministe sur MacBook M4 Pro 24 Go).
+  * **Acte 5 : Le Prototype Actuel** — Le simulateur unifié (`./simulator/`), découplage Engine vs Evaluator, Minimax 3-ply, fastState (Zobrist 53-bit, mutations in-place à 1 600 parties/s) et métriques compétitives inédites.
+  * **Acte 6 : Tests Utilisateurs** — Protocole des 2 sessions de tests prévues, critères d'acceptabilité et axes de peaufinage.
+  * **Acte 7 : La Solution Finale** — Bilan global, compétences mobilisées et invitation à la démonstration interactive en direct.
           </aside>
         </section>
 
         <!-- ======================================================== -->
-        <!-- ACTE III : POC 5 — INGESTION & INTEROPÉRABILITÉ (PTCGL)   -->
+        <!-- ACTE 1 : LE SUJET & LA RECHERCHE INITIALE                -->
         <!-- ======================================================== -->
 
-        <!-- Slide 7 -->
+        <!-- Slide 3 : Acte 1 - Pourquoi le sujet -->
         <section>
-          <h2>POC 5 : Parser le Format Textuel Pokémon TCG Live</h2>
+          <h2>Acte 1 : Pourquoi ce Sujet ? La Passion d'un Compétiteur</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 7 : POC 5 : La Passerelle avec l'Écosystème Officiel
-**Titre affiché** : POC 5 : Parser le Format Textuel Pokémon TCG Live
+### 🎙️ Slide 3 : Acte 1 — Pourquoi ce Sujet ?
+**Titre affiché** : Acte 1 : Pourquoi ce Sujet ? La Passion d'un Compétiteur
 
-* **Zéro Friction à l'Entrée** :
-  Dans le monde réel, tous les joueurs compétitifs copient-collent leurs listes depuis le client de jeu officiel Pokémon TCG Live (PTCGL) ou depuis des sites de référence comme Limitless TCG.
-* **Le Défi du Parsing Textuel** :
-  Le format PTCGL est un bloc de texte structuré par sections : `Pokémon: X`, `Trainer: Y`, `Energy: Z`, avec des lignes du type :
-  `4 Charmander MEW 4` ou `1 Fezandipiti ex SFA 38`.
-* **Exigence de Robustesse** :
-  Le parseur de decklist développé dans le POC 5 doit comprendre instantanément ce flux brut, sans nécessiter la moindre correction manuelle, en extrayant les quantités, noms de cartes, codes d'extension et numéros de collection en moins de 5 millisecondes.
+* **Un Phénomène Mondial Colossal** :
+  Le JCC Pokémon est l'un des jeux les plus pratiqués au monde : plus de 50 milliards de cartes imprimées, des championnats régionaux réunissant plus de 2 000 joueurs par week-end, et des dotations compétitives majeures.
+* **Le Grand Décalage Méthodologique** :
+  Alors que les échecs disposent de Stockfish et le poker de solveurs GTO (Game Theory Optimal) fondés sur l'équilibre de Nash, les joueurs de Pokémon TCG préparent encore leurs tournois de manière quasi moyenâgeuse : ils débattent sur Discord, recopient des listes gagnantes, et ajustent leurs derniers choix de cartes sur des impressions purement subjectives.
+* **La Motivation Profonde** :
+  Ce projet me tient viscéralement à cœur car il vise à doter une communauté passionnée et exigeante du premier véritable banc d'essai scientifique capable d'objectiver leurs intuitions.
           </aside>
         </section>
 
-        <!-- Slide 8 -->
+        <!-- Slide 4 : Acte 1 - Les Enjeux -->
         <section>
-          <h2>Les Défis du Résolveur de Cartes : Noms, Extensions et Numéros</h2>
+          <h2>Les Enjeux du Projet : Économique, Ludique &amp; Technique</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 8 : Les Pièges du Parsing Textuel Multilingue
-**Titre affiché** : Les Défis du Résolveur de Cartes : Noms, Extensions et Numéros
+### 🎙️ Slide 4 : Les Enjeux du Projet
+**Titre affiché** : Les Enjeux du Projet : Économique, Ludique &amp; Technique
 
-* **La Discordance des Identifiants d'Extensions** :
-  Les codes d'extensions ne sont pas harmonisés entre les plateformes :
-  * PTCGL exporte `SVI` là où l'API officielle TCGdex attend `sv01`.
-  * L'extension 151 est codée `MEW` sur PTCGL mais `sv03.5` dans la base TCGdex.
-  * Les cartes promotionnelles utilisent le préfixe spécial `SVP`.
-* **Le Casse-Tête Multilingue &amp; Typographique** :
-  Gestion des apostrophes courbes, traits d'union, accents français (`Dracaufeu-ex`, `Énergie Incolore`), et divergences de nommage strictes entre les exports en français et en anglais.
-* **La Résolution des Réimpressions (Reprints)** :
-  Une carte maîtresse comme *Hyper Ball* ou *Ordres du Boss* existe sous 20 numéros et sets différents. Le résolveur de cartes doit faire converger ces identifiants cosmétiques vers une définition fonctionnelle unique pour le moteur de simulation.
+* **L'Enjeu Économique &amp; Temporel** :
+  Participer à un grand tournoi (Regional, International Championship) coûte entre 300 et 1 500 € par joueur (déplacement, hébergement, achat de cartes à l'unité). Voir ce budget anéanti dès la 2e ronde à cause d'une instabilité statistique de son deck représente un coût financier et émotionnel insupportable.
+* **L'Enjeu Ludique** :
+  Un outil de simulation ne doit pas stériliser la créativité (« tuer le fun ») en imposant une liste unique, mais au contraire servir de filet de sécurité pour permettre aux créateurs de decks de tester des variantes audacieuses sans risquer l'élimination précoce.
+* **L'Enjeu Technique** :
+  Modéliser la complexité sémantique de milliers de cartes différentes au sein d'une architecture décentralisée, 100 % locale (garantissant le secret des listes avant le tournoi) et ultra-rapide sur une machine standard.
           </aside>
         </section>
 
-        <!-- Slide 9 -->
+        <!-- Slide 5 : Acte 1 - Tour Fermé vs Tour Ouvert -->
         <section>
-          <h2>Le Garde-Fou des 60 Cartes &amp; la Règle des Énergies de Base</h2>
+          <h2>La Délimitation Systémique : Le Choix du Tour Fermé</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 9 : Le Verrou Réglementaire des 60 Cartes
-**Titre affiché** : Le Garde-Fou des 60 Cartes &amp; la Règle des Énergies de Base
+### 🎙️ Slide 5 : Tour Fermé vs Tour Ouvert
+**Titre affiché** : La Délimitation Systémique : Le Choix du Tour Fermé
 
-* **Le Respect Inflexible des Règles Officielles** :
-  Un deck de tournoi Pokémon TCG physique fait exactement 60 cartes : ni 59, ni 61, avec un maximum de 4 copies d'une même carte (hors énergies de base). Le système bloque toute simulation d'une liste invalide avec des diagnostics d'erreurs précis.
-* **L'Écueil des Énergies de Base dans PTCGL** :
-  Lors de l'analyse des exports PTCGL, nous avons découvert que les énergies de base reçoivent des identifiants arbitraires et changeants selon les blocs (ex: `Basic Psychic Energy SVE 5`, `Energy Energy: 10`, etc.).
-* **La Solution Déterministe** :
-  Isoler totalement les énergies de base du catalogue d'identifiants variables. Le résolveur identifie le type élémentaire (Feu, Eau, Plante, Électrique, Psy, Combat, Obscurité, Métal) et synthétise instantanément un modèle d'énergie universel natif, éliminant 100 % des risques de cartes manquantes.
+* **Le Cadrage Théorique Indispensable** :
+  Vouloir simuler « tous les jeux de cartes » d'un coup aurait été un suicide d'ingénierie. Une distinction systémique fondamentale s'impose :
+* **TCG à Tour Ouvert (Exclus de l'étude : Magic, Yu-Gi-Oh!)** :
+  * Présence d'une pile d'actions réactives (LIFO — Last In, First Out) où l'adversaire peut interrompre n'importe quelle action pendant votre propre tour.
+  * Explosion combinatoire quasi-infinie nécessitant des agents adverses neuronaux extrêmement lourds et instables.
+* **TCG à Tour Fermé (Périmètre retenu : Pokémon TCG, Lorcana, One Piece)** :
+  * Les actions sont séquentielles et appartiennent exclusivement au joueur actif. Pas d'interruption rétroactive adverse dans le tour.
+  * L'état de jeu évolue par étapes discrètes prévisibles.
+  * Faisabilité algorithmique excellente : permet une simulation solitaire multi-tours ultra-rapide par échantillonnage de Monte-Carlo pour mesurer la régularité intrinsèque du deck.
+          </aside>
+        </section>
+
+        <!-- Slide 6 : Acte 1 - Limites de l'Hypergéométrique & Paradoxe Karsten -->
+        <section>
+          <h2>L'État de l'Art Mathématique et ses Limites</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 6 : L'État de l'Art Mathématique et ses Limites
+**Titre affiché** : L'État de l'Art Mathématique et ses Limites
+
+* **La Loi Hypergéométrique Classique** :
+  Pour calculer la probabilité de piocher une carte précise dans sa main de départ (Tour 1) de 7 cartes sans remise, la formule analytique $P(X = k) = \frac{\binom{K}{k}\binom{N-K}{n-k}}{\binom{N}{n}}$ fonctionne parfaitement.
+* **La Faillite Dès le Tour 2** :
+  Dès que le jeu commence, cette formule analytique devient totalement aveugle et inopérante :
+  1. *Le Mulligan moderne* et la mise de côté des 6 cartes Récompenses (Prized cards) modifient la taille de la population.
+  2. *Les tuteurs et moteurs de pioche* (Arven, Faiblo Ball, Poffin Copain-Copain) déclenchent des recherches ciblées qui amincissent le paquet.
+  3. *Les chaînes séquentielles* : jouer Arven pour chercher un Poffin, qui cherche deux Pokémon de Base, qui évolueront au Tour 2 via un Super Bonbon.
+* **Le « Paradoxe Karsten » (2022)** :
+  Le mathématicien Frank Karsten a prouvé que modéliser la régularité d'un deck moderne dépasse les équations closes et exige obligatoirement une approche par simulation de Monte-Carlo multi-tours.
+          </aside>
+        </section>
+
+        <!-- Slide 7 : Acte 1 - Benchmark de l'Existant -->
+        <section>
+          <h2>Benchmark de l'Existant : Le « Trou Noir » Fonctionnel</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 7 : Benchmark de l'Existant
+**Titre affiché** : Benchmark de l'Existant : Le « Trou Noir » Fonctionnel
+
+* **La Segmentation Stérile du Marché** :
+  * **Plateformes Méta (Limitless TCG, Justinbasil)** : Excellente ergonomie web, mais purement descriptives et rétrospectives. Elles compilent des résultats passés sans expliquer pourquoi une liste est robuste.
+  * **Constructeurs de Decks (Pokemoncard.io, Dreamborn)** : Pratiques pour assembler 60 cartes, mais analyse statique limitée à une courbe de coûts brute, aveugle aux flux de pioche.
+  * **Calculateurs Hypergéométriques Web** : Jugés trop théoriques ou inutiles en match par les joueurs car bloqués au Tour 1.
+  * **Tableurs Personnels (Excel)** : Lourdeur de saisie rédhibitoire, maintenance impossible, inaccessibles au grand public.
+* **Le « Trou Noir » Identifié** :
+  Aucun outil existant ne permet d'évaluer le comportement séquentiel dynamique d'un deck sur les 3 à 4 premiers tours sans exiger de compétences en programmation.
+          </aside>
+        </section>
+
+        <!-- Slide 8 : Acte 1 - Cibles Initiales & Problématique de Départ -->
+        <section>
+          <h2>Cibles Initiales &amp; Première Question de Recherche</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 8 : Cibles Initiales &amp; Première Question de Recherche
+**Titre affiché** : Cibles Initiales &amp; Première Question de Recherche
+
+* **L'Hésitation Initiale sur la Cible** :
+  Au stade de la note de cadrage (septembre 2026), le projet hésitait entre deux publics cibles :
+  1. Les créateurs de jeux et studios indépendants (besoin de vérifier l'équilibrage et le coût/impact d'une carte avant impression industrielle).
+  2. Les joueurs compétitifs (besoin d'optimiser leurs ratios de cartes et de tester des variantes).
+* **La Question de Départ** :
+  *« Comment la simulation automatisée et l'analyse statistique peuvent-elles aider les créateurs à équilibrer leur jeu et permettre aux joueurs d'optimiser leurs stratégies ? »*
+* **Nécessité de l'Épreuve du Terrain** :
+  Il était indispensable de descendre sur le terrain pour confronter ces hypothèses à la réalité des usages.
           </aside>
         </section>
 
         <!-- ======================================================== -->
-        <!-- ACTE IV : POC 3 — LE COMPILATEUR DE CARTES & L'IA LOCALE  -->
+        <!-- ACTE 2 : EXPLORATION DU TERRAIN & RÉSULTATS              -->
         <!-- ======================================================== -->
 
-        <!-- Slide 10 -->
+        <!-- Slide 9 : Acte 2 - Enquête quantitative -->
         <section>
-          <h2>POC 3 : Pourquoi Bannir le Codage en Dur des Règles ?</h2>
+          <h2>Acte 2 : L'Enquête Quantitative Massive (106 Répondants)</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 10 : Le Rêve Déclaratif vs le Codage en Dur
-**Titre affiché** : POC 3 : Pourquoi Bannir le Codage en Dur des Règles ?
+### 🎙️ Slide 9 : Acte 2 — L'Enquête Quantitative Massive
+**Titre affiché** : Acte 2 : L'Enquête Quantitative Massive (106 Répondants)
 
-* **L'Impasse Technique du Hard-Coding** :
-  Aux échecs, les règles sont figées depuis des siècles. Dans Pokémon TCG, une nouvelle extension de 200 cartes sort tous les 3 mois, introduisant de nouvelles mécaniques et des interactions inédites.
-* **Le Coût Démesuré du Développement Manuel** :
-  Coder à la main les règles et effets des 2 861 cartes du format Standard actuel représenterait plus de 15 000 heures de travail d'ingénierie, avec un risque massif de régressions et un code impossible à maintenir.
-* **Le Choix d'Ingénierie Audacieux** :
-  Bannir le codage en dur. Développer un compilateur sémantique automatique capable de traduire le texte brut des cartes en un schéma JSON déclaratif déterministe (`EngineCardModel`), interprétable par une machine à états finis, en exploitant des Modèles de Langage (LLMs).
+* **Le Dispositif Méthodologique** :
+  * Déploiement d'un questionnaire quantitatif structuré en 16 questions réparties en 4 sections étanches (pratiques réelles, perceptions, frustrations, socio-démographie).
+  * Diffusion multicanale : serveurs Discord spécialisés francophones et anglophones, sollicitations directes en boutique.
+* **Un Échantillon Robuste** :
+  * $N = 106$ répondants bruts, dépassant très largement le seuil académique de 30 pour des tris croisés statistiquement significatifs.
+  * $N = 103$ compétiteurs qualifiés (ayant participé à un tournoi physique récent).
+  * 39,6 % de compétiteurs de niveau National / International (Regionals, IC), 33,7 % de tournois locaux en boutique (LGS), 26,7 % de tournois régionaux intermédiaires.
+  * Pokémon TCG ressort massivement comme le jeu le plus représenté (36,9 % de l'échantillon).
           </aside>
         </section>
 
-        <!-- Slide 11 -->
+        <!-- Slide 10 : Acte 2 - 85,4 % de Bricolage au Feeling -->
         <section>
-          <h2>Inférence Locale Décentralisée : Qwen 2.5 Coder sous llama.cpp</h2>
+          <h2>Le Diagnostic du Terrain : 85,4 % de Bricolage au Feeling</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 11 : Le Banc d'Inférence Local sur MacBook Pro M4
-**Titre affiché** : Inférence Locale Décentralisée : Qwen 2.5 Coder sous llama.cpp
+### 🎙️ Slide 10 : 85,4 % de Bricolage au Feeling
+**Titre affiché** : Le Diagnostic du Terrain : 85,4 % de Bricolage au Feeling
 
-* **Pourquoi Bannir les APIs Cloud Propriétaires ?** :
-  Compiler des milliers de cartes avec OpenAI ou Anthropic engendrerait des coûts récurrents élevés à chaque révision de prompt, dépendrait d'une connexion réseau permanente, et poserait des problèmes de reproductibilité et de latence.
-* **Le Banc d'Inférence Local** :
-  Déploiement sur MacBook Pro Apple Silicon M4 doté de 24 Go de mémoire unifiée.
-* **La Stack Logicielle Locale** :
-  * Moteur : `llama.cpp` et son binding Python `llama-cpp-python` avec accélération matérielle Metal GPU.
-  * Modèle retenu : `Qwen 2.5 Coder 14B Instruct` au format GGUF.
-  * Exploitation de la bande passante mémoire de plus de 150 Go/s d'Apple Silicon pour atteindre un débit d'inférence de 35 à 45 tokens par seconde en totale autonomie offline.
+* **Le Constat Empirique Majeur** :
+  Les chiffres de l'enquête ont révélé une faille méthodologique béante dans la communauté :
+  * **85,4 % des compétiteurs** calibrent leurs ratios de ressources de manière purement empirique (46,6 % au feeling après des mauvaises sorties, 19,4 % par copie brute d'une liste méta, 19,4 % par règles communautaires approximatives).
+  * Seuls **8,7 %** ont recours à des calculs mathématiques précis !
+* **Même l'Élite Mondiale Bricole** :
+  Le croisement statistique niveau $\times$ méthode montre que **50,0 % des compétiteurs de niveau National / Mondial règlent toujours leurs cartes au feeling**, faute d'outils adaptés !
+* **Un Volume de Test Manuel Dérisoire** :
+  46,6 % des compétiteurs jouent 15 parties ou moins avant de figer leur liste de tournoi. Un échantillon minuscule, totalement impuissant face à la variance d'un deck de 60 cartes.
           </aside>
         </section>
 
-        <!-- Slide 12 -->
+        <!-- Slide 11 : Acte 2 - La Terreur du Brick & Syndrome du Vendredi Soir -->
         <section>
-          <h2>L'Illusion du GBNF : Quand la Contrainte Rend le LLM Aveugle</h2>
+          <h2>La Frustration du « Brick » &amp; le Syndrome du Vendredi Soir</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 12 : Le Premier Écueil : Les Hallucinations du Constrained Decoding
-**Titre affiché** : L'Illusion du GBNF : Quand la Contrainte Rend le LLM Aveugle
+### 🎙️ Slide 11 : La Frustration du « Brick » &amp; le Syndrome du Vendredi Soir
+**Titre affiché** : La Frustration du « Brick » &amp; le Syndrome du Vendredi Soir
 
-* **L'Hypothèse Séduisante du Constrained Decoding** :
-  Pour garantir que le LLM produise un JSON valide à 100 %, nous avons initialement utilisé une grammaire GBNF (GGML BNF) stricte basée sur notre schéma Pydantic.
-* **Le Piège Algorithmique Caché** :
-  La grammaire GBNF force le modèle à choisir exclusivement des tokens respectant la grammaire formelle dès le premier caractère. En imposant au LLM d'écrire immédiatement `{"actionType": "..."}` sans aucun espace textuel intermédiaire, on l'empêche de « réfléchir » aux relations logiques du texte de la carte !
-* **Des Hallucinations Catastrophiques** :
-  * *Faiblo Ball* (qui cherche un Pokémon de Base dans le deck) s'est retrouvée compilée avec une primitive `DEAL_DAMAGE_ACTIVE` !
-  * *Hyper Ball* omettait purement et simplement la défausse obligatoire de 2 cartes pour chercher un Pokémon.
-  Le JSON était syntaxiquement parfait, mais la logique de jeu était totalement corrompue.
+* **La « Main Morte » comme Ennemi Public N°1** :
+  La « main morte » (impossibilité mécanique de jouer ses cartes) est citée comme la première cause externe de défaite frustrante (33,7 % au global, et un pic critique de **42,1 % chez les joueurs de Pokémon TCG**, devançant largement les erreurs de matchup à 15,8 %).
+* **Le Syndrome du Vendredi Soir** :
+  L'observation de terrain a révélé un comportement universel chez les joueurs :
+  * La veille du tournoi à 23h ou sur le parking le samedi matin, **47,5 % des compétiteurs modifient impulsivement 1 à 3 cartes** (« flex slots ») dans leur deck.
+  * Ils le font sans aucun moyen de mesurer si le retrait d'un tuteur au profit d'une carte tech va ruiner leur sortie au Tour 1 ou au Tour 2.
           </aside>
         </section>
 
-        <!-- Slide 13 -->
+        <!-- Slide 12 : Acte 2 - Entretiens & Personas Opérationnels -->
         <section>
-          <h2>Le Contournement : Forcer la Réflexion dans le Schéma</h2>
+          <h2>Entretiens Semi-Directifs : Thomas &amp; Julien</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 13 : La Solution Algorithmique : Le Schema-Guided Chain-of-Thought
-**Titre affiché** : Le Contournement : Forcer la Réflexion dans le Schéma
+### 🎙️ Slide 12 : Entretiens &amp; Personas Opérationnels
+**Titre affiché** : Entretiens Semi-Directifs : Thomas &amp; Julien
 
-* **L'Innovation dans le Schéma Pydantic** :
-  Comment concilier la rigueur d'une grammaire GBNF et la puissance de déduction du raisonnement pas-à-pas (Chain-of-Thought) ?
-* **L'Astuce du Champ `reasoningAnalysis`** :
-  Dans notre modèle Pydantic, nous avons placé en tout premier champ :
-  `reasoningAnalysis: str = Field(description="Analyse pas à pas des coûts et effets...")`.
-* **Le Mécanisme d'Exécution Séquentielle** :
-  Comme le moteur génère les clés JSON dans l'ordre strict de déclaration, la grammaire GBNF oblige le LLM à débuter sa réponse par une analyse en langage naturel : identifier les coûts préalables, les cibles, les conditions d'activation et les restrictions de fin de tour.
-* **Résultat Spectaculaire** :
-  Élimination de plus de 95 % des erreurs de défausse et de ciblage ! Lorsqu'il arrive aux champs d'effets, le modèle n'a plus qu'à transcrire les conclusions qu'il a lui-même formulées dans son contexte immédiat.
+* **L'Investigation Qualitative In Situ** :
+  Observations directes lors de tournois en boutique locale (24 et 32 joueurs) et lors d'un grand événement inter-régional, complétées par 8 entretiens semi-directifs de 15 minutes.
+* **Deux Personas Opérationnels Émergent** :
+  * **Persona 1 : Thomas (28 ans, Ingénieur, Cœur de Cible Performance)** :
+    Joue 30 parties par semaine, participe aux Régionaux. Sa hantise : perdre une ronde éliminatoire décisive au Tour 2 sur un blocage de ressources après 25h de préparation.
+    *Verbatim* : « Si mon deck me lâche au tour 2 sur une mauvaise sortie d'énergies, tout mon entraînement est jeté à la poubelle. »
+  * **Persona 2 : Julien (23 ans, Étudiant en alternance, Cœur de Cible Accessibilité)** :
+    Joue en boutique le vendredi soir, peu de temps libre (&lt; 10 parties de test). Manque chronique de confiance dans sa liste.
+    *Verbatim* : « Je n'ai pas 15 heures à passer sur des tests. Je veux juste savoir si mes ratios tiennent debout avant d'arriver vendredi soir au magasin. »
           </aside>
         </section>
 
-        <!-- Slide 14 -->
+        <!-- Slide 13 : Acte 2 - Recentrage sur Pokémon TCG -->
         <section>
-          <h2>Dimensionnement Mémoire : Le Mythe des Gros Modèles sur 24 Go</h2>
+          <h2>Le Recentrage Décisif : Focus Exclusif sur Pokémon TCG</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 14 : Analyse Matérielle : 14B Q6_K vs Modèles 27B/32B/MoE
-**Titre affiché** : Dimensionnement Mémoire : Le Mythe des Gros Modèles sur 24 Go
+### 🎙️ Slide 13 : Le Recentrage Décisif
+**Titre affiché** : Le Recentrage Décisif : Focus Exclusif sur Pokémon TCG
 
-* **La Tentation des Très Grands Modèles** :
-  Pourquoi ne pas utiliser des modèles plus massifs comme Qwen 2.5 32B ou des mélanges d'experts (MoE 8x7B) pour maximiser la finesse d'analyse ?
-* **La Contrainte Métallique de macOS (Wired Memory)** :
-  Sur une machine Apple Silicon de 24 Go de RAM, le système d'exploitation et les applications réservent une part importante de mémoire. Le GPU Metal est plafonné par l'OS à environ 18 Go de mémoire filaire (`wired_mem_limit`).
-* **L'Effondrement du Swapping SSD** :
-  Un modèle 32B quantifié en Q4_K_M pèse environ 19 Go. Dès que le KV-Cache se déploie sur des contextes de 4 096 tokens, la mémoire sature et déclenche le swapping sur le SSD NVMe : la vitesse d'inférence s'effondre brutalement de 42 tokens/s à 1 token/s !
-* **Le Point d'Équilibre Optimal** :
-  Le modèle `Qwen 2.5 Coder 14B` en quantification `Q6_K` (~12 Go) offre une précision quasi-identique au FP16, tient sereinement en mémoire unifiée aux côtés du système, et maintient un débit stable de 38 tokens/seconde.
+* **L'Abandon de la Cible « Créateurs de Jeux »** :
+  Le terrain a clairement démontré que les créateurs de jeux ont des besoins de playtest physique centré sur le « fun » et l'ergonomie des règles, alors que les compétiteurs de Pokémon TCG souffrent d'une douleur aiguë, quotidienne et non résolue sur l'optimisation combinatoire de leurs listes.
+* **La Problématique Définitivement Reformulée** :
+  *« Comment permettre aux compétiteurs de Pokémon TCG d'objectiver et de comparer en moins d'une minute la viabilité séquentielle de leurs sorties (Tours 1 à 4) face aux archétypes réels du métagame (pression offensive et perturbation de main), à travers une interface guidée sans friction qui élimine toute complexité statistique ? »*
+* **Deux Piliers Fondateurs** :
+  1. Sortir du calcul solitaire dans le vide (goldfishing) pour évaluer sous contrainte adverse.
+  2. Bannir la saisie manuelle des 60 cartes via l'ingestion en 1 clic.
           </aside>
         </section>
 
-        <!-- Slide 15 -->
+        <!-- Slide 14 : Acte 2 - Les 4 Pistes de Solution -->
         <section>
-          <h2>Contamination Stateless : L'Affaire du Dracaufeu dans Ire-Foudre</h2>
+          <h2>Quatre Pistes de Solution Explorées</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 15 : Le Mystère des Talents Fantômes et de la Contamination
-**Titre affiché** : Contamination Stateless : L'Affaire du Dracaufeu dans Ire-Foudre
+### 🎙️ Slide 14 : Quatre Pistes de Solution Explorées
+**Titre affiché** : Quatre Pistes de Solution Explorées
 
-* **L'Anomalie Mystérieuse** :
-  Durant nos sessions de compilation en lot, nous avons découvert un bug stupéfiant : la carte *Ire-Foudre ex* s'est retrouvée dotée du talent `Règne Infernal` de *Dracaufeu ex* (attacher 3 énergies Feu lors de l'évolution), alors qu'Ire-Foudre est un Pokémon de Base sans aucun talent !
-* **L'Enquête Forensique** :
-  Ce n'était ni une fuite mémoire de llama.cpp, ni une hallucination aléatoire :
-  1. Dans le System Prompt, nous avions injecté un exemple Few-Shot détaillé basé sur Dracaufeu ex pour illustrer la structure d'un talent.
-  2. Le KV-Cache du modèle conservait des résidus d'attention entre deux requêtes successives en mode batch.
-* **La Correction Implémentée** :
-  * Assainissement du prompt par des exemples abstraits et neutres.
-  * Appel explicite et systématique de `llm.reset()` pour purger intégralement l'état interne et garantir un traitement strictement *stateless* entre chaque carte.
+* **Piste 1 : « PokéPulse Arena » (Le Banc d'Essai Face au Gauntlet)** :
+  Simulateur web confrontant le deck aux archétypes majeurs du métagame (Dracaufeu ex, Ire-Foudre ex, Gardevoir ex) en simulant la pression adverse et la perturbation de main (Mashynn).
+* **Piste 2 : « PokéDiff Matchup Comparator » (Le Comparateur A/B)** :
+  Outil d'arbitrage différentiel testant deux listes (A vs B) sous graine déterministe identique (Same-Seed) pour isoler l'impact net d'un changement de 1 à 3 cartes.
+* **Piste 3 : « PokéTuner Engine » (L'Optimiseur Combinatoire Prescriptif)** :
+  Le joueur fixe son squelette de deck (ex: 47 cartes) et l'algorithme calcule et impose mathématiquement la répartition optimale des 13 cartes restantes.
+* **Piste 4 : « PokéConsistency Overlay » (L'Extension Navigateur)** :
+  Extension Chrome/Firefox s'injectant sur les sites communautaires (Limitless, Pokemoncard.io). Écartée en amont car hyper-vulnérable aux changements de code DOM des sites tiers.
           </aside>
         </section>
 
-        <!-- Slide 16 -->
+        <!-- Slide 15 : Acte 2 - L'Échec Cuissant de la V1 (Samedi 17/10) -->
         <section>
-          <h2>La Règle d'Or : Ne Jamais Laisser l'IA Faire ce que le Code Sait Déjà</h2>
+          <h2>L'Échec Cuissant de la V1 : La Surcharge Cognitive</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 16 : L'Architecture Hybride : Déterminisme Python + IA Sémantique
-**Titre affiché** : La Règle d'Or : Ne Jamais Laisser l'IA Faire ce que le Code Sait Déjà
+### 🎙️ Slide 15 : L'Échec Cuisant de la V1 (Samedi 17/10)
+**Titre affiché** : L'Échec Cuissant de la V1 : La Surcharge Cognitive
 
-* **Le Pivot Architectural Majeur** :
-  Une erreur fréquente dans les projets d'IA consiste à vouloir tout faire générer par le LLM : lire les PV, compter les énergies, identifier le type élémentaire. C'est une hérésie qui introduit de l'incertitude sur des données déjà parfaitement structurées.
-* **Séparation Stricte des Responsabilités** :
-  * **Pipeline Déterministe Python (100 % Fiable)** :
-    Extraction directe depuis les métadonnées brutes de TCGdex des Points de Vie (HP), types élémentaires, stades d'évolution, coûts de retraite, faiblesses et résistances.
-  * **Pipeline IA Déclaratif (Sémantique Pure)** :
-    L'IA n'est sollicitée que pour sa véritable valeur ajoutée : traduire la complexité du langage naturel des règles de texte (attaques et talents) en primitives d'effets.
-* **Bénéfices** :
-  Zéro hallucination sur les statistiques de base, réduction de 60 % de la taille des prompts et inférence deux fois plus rapide.
+* **Le Protocole de Test des 3 POCs (17-18 Octobre 2026)** :
+  Développement de 3 prototypes fonctionnels testés auprès de 6 joueurs (3 Thomas, 3 Julien).
+* **Le Samedi 17 Octobre Matin : La Débâcle de l'Interface V1** :
+  * La première interface regroupait tous les paramètres, la liste complète des 60 cartes et 4 graphiques sur un seul écran sombre aux accents néons saturés.
+  * Utilisation d'un jargon technique d'ingénieur : *« Wasm »*, *« Seed »*, *« Heuristique »*, *« Delta »*.
+* **Les Métriques de l'Échec** :
+  * Surcharge cognitive immédiate : les joueurs de boutique étaient totalement perdus.
+  * Temps moyen pour réaliser une tâche : **172,5 secondes** !
+  * Taux de complétion sans aide : seulement **66,7 %** (4 testeurs sur 6).
+  * Score d'utilisabilité SUS : **48,8 / 100** (niveau d'échec critique).
           </aside>
         </section>
 
-        <!-- Slide 17 -->
+        <!-- Slide 16 : Acte 2 - Le Pivot UX : La Victoire de la V2 (Dimanche 18/10) -->
         <section>
-          <h2>L'Audit Massif : Confrontation du Schéma à la Réalité du Métagame</h2>
+          <h2>Le Pivot UX en 24h : La Victoire du Wizard Épuré (V2)</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 17 : Le Grand Audit des 2 861 Cartes du Corpus Standard
-**Titre affiché** : L'Audit Massif : Confrontation du Schéma à la Réalité du Métagame
+### 🎙️ Slide 16 : Le Pivot UX : La Victoire de la V2
+**Titre affiché** : Le Pivot UX en 24h : La Victoire du Wizard Épuré (V2)
 
-* **L'Épreuve du Corpus Réel** :
-  Un schéma théorique ne vaut que s'il est capable d'absorber l'intégralité du métagame de tournoi officiel. Nous avons audité l'ensemble des 2 861 cartes du bloc Écarlate et Violet (sv01 à sv08).
-* **Les Données Révélées par l'Audit** :
-  * **574 Talents répertoriés** : 47,6 % sont des talents passifs permanents (modificateurs d'attaque, réductions de retraite, immunités) et 52,4 % sont des talents activables une fois par tour.
-  * **3 673 Attaques distinctes** : avec plus de 140 mécaniques d'échelles de dégâts (dégâts par énergie défaussée sur le terrain, dégâts selon les cartes en main adverse, marqueurs de dégâts placés).
-* **Conclusion d'Ingénierie** :
-  Les effets marginaux (« corner cases ») représentent plus d'un quart des cartes compétitives : notre schéma devait impérativement se doter d'un langage déclaratif compact et extensible.
+* **La Nuit du Samedi au Dimanche : Refonte Totale** :
+  Suppression intégrale du jargon mathématique, masquage de la liste des 60 cartes derrière un résumé par rôles, passage au Clean Light Mode (style éditorial presse suisse), et découpage strict en un **Wizard en 3 étapes** (1 seule action par écran).
+* **Le Dimanche Après-Midi : La Résurrection Statistique** :
+  * Temps d'exécution : chute spectaculaire de **79,3 %** (passant de 172,5 s à **35,7 secondes**) !
+  * Taux de complétion sans aide : bondit à **100 %** (zéro blocage).
+  * Score SUS moyen : passe de 48,8 à **87,5 / 100 (Grade A - Excellent)** !
+  * Compréhension du verdict auto-évaluée : grimpe de 2,8/5 à **4,8 / 5**.
+* **Enseignement Fondamental** :
+  La puissance algorithmique est inutile si l'ergonomie ne la rend pas invisible et digeste pour l'utilisateur.
           </aside>
         </section>
 
-        <!-- Slide 18 -->
-        <section>
-          <h2>Le Bug Caché de l'API : La Régulation G Déclarée Illégale</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 18 : L'Anomalie Critique TCGdex : 1 629 Cartes Ignorées
-**Titre affiché** : Le Bug Caché de l'API : La Régulation G Déclarée Illégale
+        <!-- ======================================================== -->
+        <!-- ACTE 3 : LA PISTE DE SOLUTION & OBJECTIFS DE VALIDATION  -->
+        <!-- ======================================================== -->
 
-* **La Découverte Inattendue** :
-  Lors de la première passe de compilation globale, des piliers absolus du métagame de tournoi comme *Dracaufeu ex* (sv03), *Roucarnage ex* (sv03) ou *Pepper* (sv01) étaient mystérieusement rejetés de la base compilée.
-* **L'Origine du Bug chez TCGdex** :
-  Notre audit a mis au jour une anomalie critique chez le fournisseur de données TCGdex : suite à une mise à jour de leur base lors de la rotation 2024, les 1 629 cartes marquées de la lettre de régulation G (sets sv01 à sv04.5) avaient été marquées par erreur avec l'attribut `legalStandard: false` !
-* **L'Impact de Notre Détection** :
-  Sans cet audit statistique rigoureux, plus de la moitié du métagame compétitif aurait été éliminée silencieusement du simulateur. Nous avons développé un patch d'assainissement automatique restaurant la légalité standard selon les règles officielles The Pokémon Company.
+        <!-- Slide 17 : Acte 3 - Matrice de Décision & Hybridation -->
+        <section>
+          <h2>Acte 3 : Matrice de Décision &amp; Hybridation (Piste 1 + Piste 2)</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 17 : Acte 3 — Matrice de Décision &amp; Hybridation
+**Titre affiché** : Acte 3 : Matrice de Décision &amp; Hybridation (Piste 1 + Piste 2)
+
+* **Le Bilan Comparatif des 3 POCs** :
+  * **POC 1 (PokéPulse Arena) : Note 4,70 / 5** — Plébiscité pour sa clarté, le choix de l'adversaire et le verdict en français courant avec 3 chiffres clés.
+  * **POC 2 (PokéDiff A/B) : Note 4,40 / 5** — Adoré pour sa capacité à trancher un dilemme sur 1 ou 2 cartes avec badges vert/rouge. Mais les testeurs demandent : *« Pourquoi est-ce un site à part ? Intégrez-le directement dans PokéPulse ! »*
+  * **POC 3 (PokéTuner) : Note 3,60 / 5 — Rejeté pour « effet boîte noire prescriptive »**. Les compétiteurs avancés refusent qu'un algorithme leur dicte leur deck : ils veulent garder leur liberté créative et tester leurs propres hypothèses.
+* **La Décision Stratégique de Convergence** :
+  Fusionner la Piste 1 et la Piste 2 au sein d'une même architecture : PokéPulse Arena comme colonne vertébrale, avec PokéDiff intégré comme atelier d'optimisation A/B en fin de parcours.
           </aside>
         </section>
 
-        <!-- Slide 19 -->
+        <!-- Slide 18 : Acte 3 - Le Parcours Wizard Hybride -->
         <section>
-          <h2>L'Écrasement des Énergies Multi-Types : Le Cas Ire-Foudre</h2>
+          <h2>Le Parcours Utilisateur Final : Le Wizard Hybride</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 19 : Le Problème des Coûts d'Énergie Multi-Types
-**Titre affiché** : L'Écrasement des Énergies Multi-Types : Le Cas Ire-Foudre
+### 🎙️ Slide 18 : Le Parcours Utilisateur Final
+**Titre affiché** : Le Parcours Utilisateur Final : Le Wizard Hybride
 
-* **Le Bug Silencieux d'Attaque** :
-  L'attaque vedette *Tonnerre Rugissant* d'Ire-Foudre ex nécessite exactement 1 Énergie Électrique et 1 Énergie Combat pour infliger 70 dégâts par énergie défaussée sur le terrain.
-* **L'Écrasement par Fusion d'Objets** :
-  Dans l'ancienne routine de post-processing, les coûts d'attaque étaient stockés dans un dictionnaire mal fusionné qui résumait ce coût en : `cost: { Lightning: 2 }`. L'exigence de l'énergie Combat avait tout simplement disparu !
-* **La Réfutation Immédiate** :
-  En jeu réel, un deck Ire-Foudre ne peut pas attaquer sans énergie Combat. Nous avons corrigé la structure de données pour stocker une liste exacte de coûts typés et incolores (`cost: { Lightning: 1, Fighting: 1 }`), garantissant le respect scrupuleux des conditions d'activation multi-types.
+* **L'Architecture Séquentielle en 3 Temps** :
+  1. **Étape 1 — Sélection du Deck** : Zéro saisie manuelle. Choix en 1 clic d'un archétype méta (Dracaufeu, Ire-Foudre, Gardevoir) ou import par copier-coller brut depuis Pokémon TCG Live (PTCGL).
+  2. **Étape 2 — Configuration du Duel** : Sélection de l'adversaire (test à vide ou confrontation face à un archétype méta appliquant sa pression offensive et sa perturbation de main), nombre de simulations (100 à 10 000) et ordre de jeu (J1 / J2).
+  3. **Étape 3 — Télémétrie &amp; Atelier A/B** : Restitution instantanée des KPIs, verdict en langage clair, et possibilité d'ouvrir l'Atelier A/B en un clic pour tester le remplacement de 1 à 3 cartes avec calcul instantané des deltas ($\Delta$).
           </aside>
         </section>
 
-        <!-- Slide 20 -->
+        <!-- Slide 19 : Acte 3 - Intentions Techniques Initiales -->
         <section>
-          <h2>Le Schéma Définitif : Un Langage Déclaratif Compact (DSL)</h2>
+          <h2>Intentions Techniques Initiales : L'Hypothèse WebAssembly</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 20 : L'Évolution vers les Filtres DSL et les 12 Primitives Normalisées
-**Titre affiché** : Le Schéma Définitif : Un Langage Déclaratif Compact (DSL)
+### 🎙️ Slide 19 : Intentions Techniques Initiales
+**Titre affiché** : Intentions Techniques Initiales : L'Hypothèse WebAssembly
 
-* **De la Verbosité JSON au DSL Expressif** :
-  Pour cibler des cartes (ex: chercher dans le deck avec Poffin Copain-Copain), les premiers prototypes utilisaient des sous-objets JSON imbriqués très lourds. Nous avons fait évoluer le schéma vers un DSL compact mémoïsable :
+* **Le Plan Technique d'Origine (Octobre 2026)** :
+  * Moteur de simulation développé en **Go compilé en WebAssembly (Wasm)** pour sa vitesse d'exécution théorique proche du natif.
+  * Exécution dans un **Web Worker** pour isoler le calcul du thread UI principal.
+  * Front-end moderne et réactif sous **Vue 3 (Composition API) / Nuxt**, TypeScript strict et Tailwind CSS.
+* **Les Promesses Visées** :
+  * Exécution 100 % client-side : aucun coût d'infrastructure serveur, respect absolu de la confidentialité des listes secrètes des joueurs avant tournoi, et compatibilité PWA hors-ligne.
+          </aside>
+        </section>
+
+        <!-- Slide 20 : Acte 3 - Les 3 Objectifs de Validation -->
+        <section>
+          <h2>Les 3 Protocoles de Validation Scientifique</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 20 : Les 3 Protocoles de Validation Scientifique
+**Titre affiché** : Les 3 Protocoles de Validation Scientifique
+
+* **1. Protocole de Justesse Mathématique** :
+  Vérification de la conformité des probabilités de sortie au Tour 1 générées par le moteur Monte-Carlo (10 000 itérations) en les comparant à la formule analytique hypergéométrique exacte. L'écart toléré doit être inférieur à $\pm 0,8 \%$.
+* **2. Protocole de Performance Technique** :
+  Exécution de 10 000 simulations séquentielles en moins de 3 secondes sur ordinateur portable et moins de 5 secondes sur smartphone, tout en garantissant un framerate constant à 60 FPS sur l'interface graphique.
+* **3. Protocole de Validation Utilisateur Finale** :
+  Session de tests sur le prototype fonctionnel final auprès de 8 joueurs (4 compétiteurs régionaux, 4 joueurs de boutique) avec un taux de complétion cible de 100 %, un temps de prise de décision &lt; 45 secondes et un score SUS &gt; 85 / 100.
+          </aside>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- ACTE 4 : LA CONCEPTION LOGICIELLE & L'IA LOCALE          -->
+        <!-- ======================================================== -->
+
+        <!-- Slide 21 : Acte 4 - Reprise des POCs et Mini-Projets -->
+        <section>
+          <h2>Acte 4 : La Conception — Reprise des POCs &amp; Mini-Projets</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 21 : Acte 4 — Reprise des POCs &amp; Mini-Projets
+**Titre affiché** : Acte 4 : La Conception — Reprise des POCs &amp; Mini-Projets
+
+* **La Démarche par Prototypage Rapide Découplé** :
+  Pour concevoir le système sans créer un monolithe ingérable, j'ai développé une suite de sous-projets spécialisés :
+  * `./poc-1-pokepulse/` : Validation du Wizard et du Design System Clean Light Mode.
+  * `./poc-2-pokediff/` : Expérimentation du comparateur A/B sous tirages couplés déterministes (Same-Seed).
+  * `./poc-3-poketuner/` : Banc d'essai sur les algorithmes d'équilibrage de ratios.
+  * `./poc-4-pokeengine/` : Banc d'essai moteur de règles (FSM), générateur pseudo-aléatoire déterministe Mulberry32 et mélange de Fisher-Yates sans biais.
+  * `./poc-5-decklist-parser/` : Parseur strict de listes textuelles PTCGL et tables de correspondance de sets.
+  * `./card-compiler/` : Compilateur automatique de cartes par IA.
+          </aside>
+        </section>
+
+        <!-- Slide 22 : Acte 4 - L'Écueil Wasm : Ce qui n'a pas marché -->
+        <section>
+          <h2>L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 22 : L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly
+**Titre affiché** : L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly
+
+* **Le Récit d'un Échec Formateur** :
+  Dans mes intentions de l'Étape 3, j'avais parié sur WebAssembly en Go. J'ai donc développé un banc d'essai dans le POC 4 pour confronter Wasm et TypeScript natif.
+* **Le Goulot d'Étranglement Invisible : Le Boundary Overhead** :
+  WebAssembly s'exécute dans une mémoire linéaire isolée (`ArrayBuffer`). Il ne peut pas manipuler directement les objets JavaScript complexes (cartes, états de match, listes d'actions).
+* **Le Bilan du Profiler CPU** :
+  À chaque cycle de jeu, transmettre les données entre JS et Wasm imposait des sérialisations (`JSON.stringify`/`parse`) ou des copies d'octets. **Plus de 72 % du temps CPU était gaspillé à la frontière mémoire !**
+* **La Décision de Pivot** :
+  Le compilateur JIT V8 en TypeScript pur s'est avéré plus rapide, plus simple à maintenir, et totalement affranchi de cette taxe de sérialisation. J'ai abandonné Wasm pour miser sur le multi-threading natif par Web Workers.
+          </aside>
+        </section>
+
+        <!-- Slide 23 : Acte 4 - Cartographie des Besoins Fondamentaux -->
+        <section>
+          <h2>Cartographie des Besoins Fondamentaux du Simulateur</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 23 : Cartographie des Besoins Fondamentaux
+**Titre affiché** : Cartographie des Besoins Fondamentaux du Simulateur
+
+* **Les 5 Exigences Métier Incompressibles** :
+  1. **L'Identité Complète de la Carte** : Noms bilingues, types, PV, stade d'évolution, marqueurs de régulation (G, H, I), règles spéciales (ACE SPEC, Téra, Radieux).
+  2. **Heuristiques Basées sur les Meilleurs Joueurs Humains** : Modéliser la prise de décision experte (quand battre en retraite, quand défausser, quand conserver une ressource).
+  3. **Transformation des Textes de Règles en Primitives Exécutables** : Convertir le langage naturel ("Défaussez 2 énergies pour infliger 120 dégâts au Banc") en structures de données formelles typées.
+  4. **Pondérations Stratégiques Contextuelles** : Assigner une valeur dynamique à chaque carte selon la phase du match (Tour 1 vs Fin de partie) et détecter les « cartes mortes » en main.
+  5. **Restitution Synthétique pour le Joueur** : Transformer des millions de données brutes en indicateurs décisionnels limpides.
+          </aside>
+        </section>
+
+        <!-- Slide 24 : Acte 4 - Récupération TCGdex & Le Bug de Régulation G -->
+        <section>
+          <h2>Ingestion des Données : TCGdex &amp; le Bug Caché de l'API</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 24 : TCGdex &amp; le Bug de Régulation G
+**Titre affiché** : Ingestion des Données : TCGdex &amp; le Bug Caché de l'API
+
+* **Le Moissonnage du Format Standard** :
+  Utilisation du SDK et de l'API officielle TCGdex pour aspirer et mettre en cache localement l'intégralité des ~3 500 cartes du format Standard légal (bloc Écarlate et Violet, sv01 à sv08).
+* **La Découverte d'un Bug Critique chez TCGdex** :
+  Lors de l'audit automatisé de la base brute, j'ai constaté avec stupeur que des monstres sacrés du métagame comme *Dracaufeu ex* (sv03), *Roucarnage ex* (sv03) ou *Pepper* (sv01) étaient absents de la liste Standard.
+* **Le Diagnostic** :
+  L'API TCGdex comportait une anomalie : suite à la rotation, les 1 629 cartes de régulation G avaient été marquées par erreur avec l'attribut `legalStandard: false` !
+* **La Résolution** :
+  Écriture d'un patch d'assainissement rétablissant la légalité standard selon les règles officielles de The Pokémon Company. Sans cette rigueur d'audit, la moitié du métagame disparaissait silencieusement.
+          </aside>
+        </section>
+
+        <!-- Slide 25 : Acte 4 - Le Schéma Formel : 12 Primitives & DSL -->
+        <section>
+          <h2>Le Schéma Formel : 12 Primitives Atomiques &amp; Filter DSL</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 25 : Le Schéma Formel : 12 Primitives &amp; Filter DSL
+**Titre affiché** : Le Schéma Formel : 12 Primitives Atomiques &amp; Filter DSL
+
+* **De la Complexité Textuelle à la Grammaire Formelle** :
+  Contrairement aux échecs où les règles sont fixes, chaque carte de TCG introduit ses propres micro-règles. Nous avons normalisé l'ensemble du jeu en :
+* **12 Primitives Atomiques d'Effets (`AtomicEffect`)** :
+  `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `DISRUPT_HAND`, `RECOVER_FROM_DISCARD`, `DISCARD_STADIUM`, `APPLY_STATUS_CONDITION`, `ITEM_LOCK`.
+* **Le DSL de Filtres Compact** :
+  Pour cibler les cartes sans objets JSON verbeux :
   `CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70`.
-* **Les 12 Primitives Atomiques Universelles** :
-  Toutes les interactions du JCC Pokémon ont été réduites à 12 verbes fondamentaux couvrant 100 % des actions :
-  `DRAW`, `SEARCH_DECK`, `ATTACH_ENERGY`, `SWITCH_POKEMON`, `DISCARD`, `HEAL`, `DEAL_DAMAGE`, `RECYCLE_TO_DECK`, `EVOLVE`, `APPLY_STATUS`, `DISCARD_OPPONENT_ENERGY`, `FORCE_OPPONENT_SWITCH`.
-* **Gains d'Ingénierie** :
-  Syntaxe lisible, zéro ambiguïté d'interprétation, et temps de parsing instantané côté moteur de simulation.
+  Une syntaxe concise, mémoïsable et évaluable en $O(1)$ par le moteur de simulation.
+          </aside>
+        </section>
+
+        <!-- Slide 26 : Acte 4 - Compilateur IA V1 : L'Approche Monolithique -->
+        <section>
+          <h2>Compilateur IA V1 : L'Échec de l'Approche Monolithique</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 26 : Compilateur IA V1
+**Titre affiché** : Compilateur IA V1 : L'Échec de l'Approche Monolithique
+
+* **Le Concept Initial (Single-Pass Direct)** :
+  Injecter le JSON brut TCGdex dans un prompt massif adressé à un LLM généraliste (Qwen 2.5 Coder 14B ou 32B sous llama.cpp) avec une grammaire de contrainte syntaxique GBNF pour qu'il crache directement le schéma complet `EngineCardModel`.
+* **Les 3 Échecs Majeurs Rencontrés** :
+  1. *Hallucinations sur l'évident* : Le LLM inventait des PV à 130 au lieu de 120, se trompait sur les coûts de retraite ou déformait les noms.
+  2. *L'aveuglement du GBNF* : Forcé de respecter le schéma dès le premier caractère, le LLM ne pouvait pas réfléchir aux conditions préalables : Faiblo Ball compilée avec des dégâts d'attaque !
+  3. *Goulot mémoire matériel* : Charger un modèle 32B monopolisait 20 Go sur les 24 Go de RAM unifiée de mon MacBook M4 Pro, déclenchant le swapping SSD et faisant chuter le débit de 40 tokens/s à 1 token/s !
+          </aside>
+        </section>
+
+        <!-- Slide 27 : Acte 4 - Compilateur IA V2 : Pipeline en 2 Passes Découplées -->
+        <section>
+          <h2>Compilateur IA V2 : Le Pipeline en Deux Passes Découplées</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 27 : Compilateur IA V2
+**Titre affiché** : Compilateur IA V2 : Le Pipeline en Deux Passes Découplées
+
+* **Le Découplage Réflexion vs Codage** :
+  Pour supprimer la surcharge cognitive du modèle et respecter les 24 Go de RAM :
+  * **Passe 1 (Raisonnement approfondi)** : Le modèle de pensée `DeepSeek-R1-Distill-Qwen-14B` analyse la sémantique de la carte, identifie les pièges et produit un rapport textuel complet (`reasoning_texts/{id}.json`).
+  * **Purge Mémoire Stricte** : Déchargement total de l'IA 1 de la RAM unifiée (`del llm; gc.collect()`).
+  * **Passe 2 (Codage JSON formel)** : Le modèle de programmation `Qwen 2.5 Coder 7B/14B` lit l'analyse textuelle et la transcrit en JSON formel sous décodage contraint.
+* **Les 2 Modes d'Intensité Introduits** :
+  * *Mode Soft* (~7-8 Go RAM) : DeepSeek 14B 4-bit puis Qwen 7B 8-bit, tournant de jour avec IDE ouvert.
+  * *Mode Intense* (~14-16 Go RAM) : DeepSeek 14B 8-bit puis Qwen 14B 8-bit pour les sessions AFK de nuit.
+          </aside>
+        </section>
+
+        <!-- Slide 28 : Acte 4 - Compilateur IA V3 : L'Approche Hybride Déterministe -->
+        <section>
+          <h2>Compilateur IA V3 : L'Approche Hybride Déterministe</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 28 : Compilateur IA V3
+**Titre affiché** : Compilateur IA V3 : L'Approche Hybride Déterministe
+
+* **La Règle d'Or d'Ingénierie** :
+  *« Ne jamais demander à l'IA ce que le code informatique sait déjà avec certitude. »*
+* **L'Architecture Hybride Actuelle (`deterministic_builder.py`)** :
+  * **Python Déterministe (80 % de la carte)** : Extrait sans aucune IA les PV, types, stade, faiblesses, retraites, coûts d'attaque, dégâts bruts par regex, et applique un court-circuit à 0 token pour les énergies de base.
+  * **IA Ciblée (20 % restant)** : Les LLMs ne reçoivent plus que les textes d'effets complexes non résolus et produisent un micro-payload ultra-compact (`LLMCompiledPayload`).
+* **Résultats Spectaculaires** :
+  * Débit de compilation **multiplié par 3**.
+  * **Zéro hallucination** sur les caractéristiques physiques des cartes.
+  * Fiabilité industrielle validée par **127 tests unitaires automatisés** sous Python.
           </aside>
         </section>
 
         <!-- ======================================================== -->
-        <!-- ACTE V : POC 4 — LE BANC D'ESSAI & LE DILEMME WEBASSEMBLY -->
+        <!-- ACTE 5 : LE PROTOTYPE ACTUEL (SIMULATEUR DE PRODUCTION)  -->
         <!-- ======================================================== -->
 
-        <!-- Slide 21 -->
+        <!-- Slide 29 : Acte 5 - L'Unification dans ./simulator/ -->
         <section>
-          <h2>POC 4 : Le Défi des 10 000 Parties par Seconde</h2>
+          <h2>Acte 5 : Le Prototype Actuel — L'Unification dans ./simulator/</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 21 : POC 4 : L'Exigence du Haut Débit Monte-Carlo
-**Titre affiché** : POC 4 : Le Défi des 10 000 Parties par Seconde
+### 🎙️ Slide 29 : Acte 5 — L'Unification dans ./simulator/
+**Titre affiché** : Acte 5 : Le Prototype Actuel — L'Unification dans ./simulator/
 
-* **L'Exigence Statistique du Monte-Carlo** :
-  Pour mesurer une différence de Win Rate de 2 % avec un intervalle de confiance à 95 %, un échantillon de 100 parties ne suffit pas. Il faut simuler entre 1 000 et 10 000 duels complets pour chaque scénario.
-* **La Contrainte du Temps Réel Web** :
-  Si l'utilisateur doit attendre 30 secondes à chaque modification de carte dans l'Atelier A/B, l'expérience utilisateur est brisée. Le temps de calcul doit impérativement descendre sous la barre de la seconde (≤ 1 000 ms).
-* **Le POC 4 comme Banc d'Essai** :
-  L'objectif du POC 4 était d'éprouver différentes architectures d'exécution pour déterminer la technologie capable de délivrer ce débit de calcul extrême directement dans le navigateur de l'utilisateur.
-          </aside>
-        </section>
-
-        <!-- Slide 22 -->
-        <section>
-          <h2>Le Mirage WebAssembly : Wasm Est-il Toujours Plus Rapide ?</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 22 : L'Exploration WebAssembly (Wasm) vs TypeScript
-**Titre affiché** : Le Mirage WebAssembly : Wasm Est-il Toujours Plus Rapide ?
-
-* **L'Intuition Initiale du Développeur** :
-  « JavaScript est un langage interprété de haut niveau ; compilons le moteur en Go ou Rust vers WebAssembly (Wasm) pour bénéficier de performances proches du métal ».
-* **La Réalisation du Benchmark Comparatif** :
-  Nous avons implémenté un banc d'essai confrontant un prototype de moteur en Go compilé vers WebAssembly et un moteur jumeau écrit en TypeScript natif tournant sur le moteur Google V8.
-* **Le Résultat Inattendu** :
-  Contre toute attente, le moteur Wasm s'est avéré 30 % plus lent que le moteur TypeScript natif lors de simulations massives d'arbres de décision !
-          </aside>
-        </section>
-
-        <!-- Slide 23 -->
-        <section>
-          <h2>L'Écueil Invisible : Le Coût de Sérialisation à la Frontière JS/Wasm</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 23 : Le Paradoxe de la Frontière Mémoire (Boundary Overhead)
-**Titre affiché** : L'Écueil Invisible : Le Coût de Sérialisation à la Frontière JS/Wasm
-
-* **L'Isolation de la Mémoire Wasm** :
-  WebAssembly s'exécute dans une mémoire linéaire isolée (`ArrayBuffer`). Il ne peut pas accéder directement aux objets complexes du tas JavaScript (objets cartes, états de match, listes d'actions).
-* **L'Hémorragie CPU de la Sérialisation** :
-  À chaque cycle de jeu, transmettre l'état du match entre le thread JavaScript et le module Wasm exigeait une sérialisation (`JSON.stringify`) et une désérialisation (`JSON.parse`) ou des copies d'octets répétées.
-* **Le Profilage Détaillé** :
-  Plus de 70 % du temps d'exécution était gaspillé dans la sérialisation à la frontière JS/Wasm ! En revanche, le compilateur JIT V8 optimise le TypeScript natif directement en code machine avec des structures d'objets en cache (Hidden Classes), éliminant tout surcoût de transfert.
-          </aside>
-        </section>
-
-        <!-- Slide 24 -->
-        <section>
-          <h2>La Décision d'Architecture : Concurrence Maximale par Web Workers</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 24 : Le Choix Architectural : Web Workers Multi-Threadés
-**Titre affiché** : La Décision d'Architecture : Concurrence Maximale par Web Workers
-
-* **Le Choix du Pragmatisme d'Ingénierie** :
-  Plutôt que d'introduire la friction de sérialisation Wasm, capitaliser sur le moteur JIT V8 ultra-optimisé en TypeScript pur et paralléliser l'exécution sur tous les cœurs logiques de la machine via un pool de `Web Workers`.
-* **Dimensionnement Dynamique du Matériel** :
-  Le simulateur interroge `navigator.hardwareConcurrency` pour instancier automatiquement le nombre optimal de workers (ex: 8 threads sur un MacBook Pro M4).
-* **Fluidité Totale de l'UI** :
-  Le thread principal de l'interface graphique reste à 100 % dédié au rendu à 60 FPS, sans le moindre freeze ni saccade pendant que les simulations tournent à plein régime en tâche de fond.
-          </aside>
-        </section>
-
-        <!-- ========================================================= -->
-        <!-- ACTE VI : ./simulator/ — L'UNIFICATION & LE MOTEUR 3-PLY  -->
-        <!-- ========================================================= -->
-
-        <!-- Slide 25 -->
-        <section>
-          <h2>L'Intégration Finale : La Fusion des 5 Briques Logicielles</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 25 : L'Unification des Briques dans ./simulator/
-**Titre affiché** : L'Intégration Finale : La Fusion des 5 Briques Logicielles
-
-* **Le Point de Convergence** :
-  Le projet ne s'est pas arrêté à une collection de prototypes isolés. L'ensemble des avancées a convergé dans l'application unique et cohérente déployée dans `./simulator/`.
-* **L'Assemblage des Composants** :
-  * Le Design System et le parcours Wizard issus des **POC 1 &amp; 2**.
-  * Le catalogue de données de cartes issu du compilateur **POC 3**.
-  * L'architecture multi-threadée par pool de Workers issue du **POC 4**.
-  * Le parseur de listes de decks issu du **POC 5**.
+* **La Convergence des Projets Éparpillés** :
+  Toutes les briques développées séparément ont été fusionnées au sein de l'application de production unifiée située dans `./simulator/` :
+  * L'interface Wizard et la charte Clean Light Mode issues des **POC 1 &amp; 2**.
+  * Le moteur de règles et la FSM issus du **POC 4**.
+  * Le parseur de listes PTCGL issu du **POC 5**.
+  * La base officielle de plus de 850 cartes compilées issue du **Card Compiler**.
 * **Une Single Page Application Moderne** :
-  Une application Vite / Vue 3 / TypeScript rapide, modulaire, autonome et sans backend serveur lourd.
+  Bâtie avec Vue 3 (Composition API), Vite, TypeScript strict et Tailwind CSS, entièrement exécutable dans le navigateur de l'utilisateur.
           </aside>
         </section>
 
-        <!-- Slide 26 -->
+        <!-- Slide 30 : Acte 5 - Découplage Engine vs Evaluator -->
         <section>
-          <h2>Découplage Fondamental : Moteur de Règles vs Évaluateur Stratégique</h2>
+          <h2>Découplage Fondamental : Moteur de Règles vs Évaluateur</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 26 : Séparation Stricte : Engine vs Evaluator
-**Titre affiché** : Découplage Fondamental : Moteur de Règles vs Évaluateur Stratégique
+### 🎙️ Slide 30 : Découplage Engine vs Evaluator
+**Titre affiché** : Découplage Fondamental : Moteur de Règles vs Évaluateur
 
-* **Le Principe Fondateur de Séparation des Responsabilités** :
-  Ne jamais confondre ce qui est *légal* et ce qui est *souhaitable*.
-* **Le Rôle de l'Engine (`engine.ts`)** :
-  L'Engine est un arbitre aveugle. Il ne connaît aucune notion de « bonne » ou « mauvaise » action. Il prend un `MatchState`, génère les actions strictement légales (`getLegalActions`), et applique les mutations d'état (`applyAction`) selon les règles officielles du jeu.
-* **Le Rôle de l'Evaluator (`evaluator.ts`)** :
-  L'Evaluator est le maître stratège. Il interroge l'Engine pour projeter les coups futurs possibles et attribue une note numérique heuristique à chaque plateau résultant.
-* **Bénéfice Architectural** :
-  Permet d'affiner, enrichir ou remplacer l'intelligence de décision sans toucher à la moindre ligne de code de validation des règles.
+* **Séparation Stricte des Responsabilités** :
+  * **`engine.ts` (Le Juge Arbitre)** : Machine à états finis (`MatchState`) totalement déterministe. Elle ignore tout de la stratégie et applique strictement les 5 invariants du jeu : interdiction d'attaquer ou de jouer Supporter au Tour 1 en commençant, mal d'évolution (`turnPlayed &lt; currentTurn`), limite de 5 Pokémon sur le Banc, quota de 1 Supporter et 1 énergie manuelle par tour.
+  * **`evaluator.ts` (Le Grand Maître Tacticien)** : Algorithme décisionnel qui utilise l'Engine pour simuler les coups possibles et choisir l'action optimale selon des heuristiques stratégiques inspirées des meilleurs joueurs humains.
           </aside>
         </section>
 
-        <!-- Slide 27 -->
+        <!-- Slide 31 : Acte 5 - L'Arbre Décisionnel 3-Ply & Scoring -->
         <section>
           <h2>L'Arbre Décisionnel 3-Ply : Anticiper la Riposte Adverse</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 27 : L'Anticipation 3-Ply (T -> T_adv -> T+1)
+### 🎙️ Slide 31 : L'Arbre Décisionnel 3-Ply
 **Titre affiché** : L'Arbre Décisionnel 3-Ply : Anticiper la Riposte Adverse
 
 * **La Spécificité Temporelle de Pokémon TCG** :
-  Aux échecs ou aux dames, une prise de pièce a une valeur immédiate. Dans Pokémon TCG, infliger un KO est une faute majeure si l'adversaire vous inflige un KO en retour et que vous n'avez aucun attaquant prêt à reprendre le relais au tour suivant.
-* **La Projection sur 3 Demi-Tours (3-Ply Lookahead)** :
-  * $S_T$ : L'état à la fin de notre tour courant.
-  * $S_{T_{\text{adv}}}$ : L'état après la riposte optimale adverse.
-  * $S_{T+1}$ : La capacité de notre deck à rebondir et attaquer au tour suivant.
-* **La Formule Mathématique Officielle du Score** :
-  $$\text{Score}(B) = 0.35 \cdot V(S_T) - 0.30 \cdot V_{\text{adv}}(S_{T_{\text{adv}}}) + 0.35 \cdot V(S_{T+1})$$
-  Une pondération rigoureusement équilibrée qui valorise la stabilité et la continuité d'attaque plutôt que l'agressivité aveugle à court terme.
+  Aux échecs, prendre une pièce est un gain net. Dans Pokémon TCG, infliger un K.O. est une grave erreur si votre attaquant se fait immédiatement One-Shot au tour adverse sans que vous ayez de relève prête sur le Banc.
+* **L'Horizon de Décision à 3 Demi-Tours** :
+  * $S_T$ : Fin de notre tour actif.
+  * $S_{T_{\text{adv}}}$ : Riposte optimale adverse au tour suivant.
+  * $S_{T+1}$ : Capacité de notre deck à rebondir et attaquer au tour d'après.
+* **La Formule Officielle de Pondération** :
+  > 📐 **Score(B) = 0.35 · V(S_T) - 0.30 · V_adv(S_T_adv) + 0.35 · V(S_T+1)**
+* **Gestion des Cartes Mortes** :
+  L'évaluateur calcule dynamiquement la valeur des cartes en main : au Tour 4, les tuteurs T1 deviennent des "cartes mortes", servant de combustible parfait pour payer les défausses d'Hyper Ball sans sacrifier les ressources futures.
           </aside>
         </section>
 
-        <!-- Slide 28 -->
+        <!-- Slide 32 : Acte 5 - fastState.ts : De 43 à 1 600 Parties/s -->
         <section>
-          <h2>L'Évaluation Heuristique : Scorer le Plateau et la Main en Temps Réel</h2>
+          <h2>Optimisation Bas-Niveau : De 43 à 1 600 Parties par Seconde</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 28 : Heuristiques Dynamiques et Détection des Cartes Mortes
-**Titre affiché** : L'Évaluation Heuristique : Scorer le Plateau et la Main en Temps Réel
+### 🎙️ Slide 32 : fastState.ts : De 43 à 1 600 Parties/s
+**Titre affiché** : Optimisation Bas-Niveau : De 43 à 1 600 Parties par Seconde
 
-* **La Fonction de Valeur Dynamique V(S)** :
-  L'évaluation d'un état combine :
-  * Le différentiel de cartes Récompenses (Prizes restantes).
-  * La présence d'attaquants chargés sur le Banc.
-  * La santé relative des Pokémon et les seuils de One-Shot.
-* **La Gestion Intelligente des Coûts de Défausse** :
-  Pour jouer des cartes maîtresses comme *Hyper Ball*, le joueur doit défausser 2 cartes de sa main. Comment l'IA choisit-elle ces 2 cartes sans pénaliser la suite de la partie ?
-* **Détection Dynamique des Cartes Mortes** :
-  L'Evaluator calcule la valeur temporelle de chaque carte en main. Au Tour 4, une évolution de Pokémon déjà éliminé ou un objet de recherche T1 devient une « carte morte » dont la valeur s'effondre à zéro, servant de défausse idéale pour préserver les cartes stratégiques futures.
+* **Le Goulet d'Étranglement Combinatoire Vaincu** :
+  À la première version de l'évaluateur 3-ply, le simulateur plafonnait à 43 parties/seconde : simuler 1 000 parties prenait 23 secondes, brisant le flow de l'Atelier A/B !
+* **Les 4 Leviers d'Accélération Majeurs (`fastState.ts`)** :
+  1. *Hashing Numérique Zobrist 53-bit (Murmur3 mix32)* : Remplacement des concaténations de chaînes par un hachage entier commutatif (Somme + XOR) sans allocation mémoire.
+  2. *Buffer Mémoire Plat `Int32Array(128)`* : Snapshots ultrarapides des états du plateau.
+  3. *Mutations In-Place (`mutateInPlace: true`)* : Élimination de 90 % de la pression sur le Garbage Collector V8 durant le rollout glouton.
+  4. *Pool de Web Workers Chauds Persistants* : Élimination des 300 ms de cold start à chaque clic.
+* **Résultat Benchmark** :
+  Passage à plus de **200 parties/s par cœur**, soit plus de **1 600 parties/seconde sur les 8 cœurs du M4 Pro** (1 000 parties simulées en 0,6 seconde !).
           </aside>
         </section>
 
-        <!-- ======================================================== -->
-        <!-- ACTE VII : CRISES D'INTÉGRATION & RÉSOLUTIONS            -->
-        <!-- ======================================================== -->
-
-        <!-- Slide 29 -->
+        <!-- Slide 33 : Acte 5 - Guardrail Zéro-Fallback & Énergies Natives -->
         <section>
-          <h2>Crise d'Intégration 1 : L'Écran Noir sur macOS &amp; l'Overlay Vite</h2>
+          <h2>Intégrité des Données : Règle Zéro-Fallback &amp; Énergies Natives</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 29 : La Crise de l'Écran Noir sur localhost
-**Titre affiché** : Crise d'Intégration 1 : L'Écran Noir sur macOS &amp; l'Overlay Vite
+### 🎙️ Slide 33 : Règle Zéro-Fallback &amp; Énergies Natives
+**Titre affiché** : Intégrité des Données : Règle Zéro-Fallback &amp; Énergies Natives
 
-* **Le Symptôme Déroutant** :
-  Lors de la première intégration complète du simulateur sur machine locale, l'application s'ouvrait sur un écran totalement noir et figé sur localhost.
-* **Le Diagnostic Forensique** :
-  Une conjonction perverse de 3 facteurs :
-  1. Collision Dark Mode macOS : L'OS forçait des couleurs de texte et de fond sombres en l'absence de directive explicite `color-scheme: light`.
-  2. Propriété `height: 100vh` sur le conteneur racine masquant les composants imbriqués.
-  3. L'Overlay d'erreur de Vite : Une exception non catchée lors de la phase de montage déclenchait l'overlay plein écran d'erreur de Vite, masquant l'intégralité du DOM.
-* **La Résolution** :
-  Imposition stricte du `color-scheme: light`, assainissement du layout flexbox CSS et encapsulation de l'initialisation dans des blocs `try/catch` avec logs d'erreur explicites.
+* **L'Éradication des Modèles Fictifs de Secours** :
+  Durant le développement, nous avions mis un fallback générique (100 PV, 0 effet) pour les cartes manquantes. C'était une faille inadmissible : les simulations tournaient avec des cartes fantômes faussant les résultats !
+* **Le Guardrail Pré-Simulation Absolu** :
+  Si une seule carte d'une liste de 60 cartes est absente de la base compilée, le bouton de simulation est immédiatement verrouillé (`disabled="true"`) avec un bandeau d'alerte rouge explicite. Zéro compromis avec la vérité statistique.
+* **Traitement Natif des Énergies de Base (`energy.ts`)** :
+  Les 9 énergies élémentaires sont synthétisées à la volée avec leurs propriétés universelles, sans nécessiter d'identifiant de set arbitraire.
           </aside>
         </section>
 
-        <!-- Slide 30 -->
+        <!-- Slide 34 : Acte 5 - Métriques Compétitives & Télémétrie -->
         <section>
-          <h2>Crise d'Intégration 2 : Le Crash Silencieux de la Base de Données</h2>
+          <h2>Les Métriques Compétitives Inédites issues du Terrain</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 30 : La Rupture de Schéma : Format Array vs Object
-**Titre affiché** : Crise d'Intégration 2 : Le Crash Silencieux de la Base de Données
+### 🎙️ Slide 34 : Les Métriques Compétitives Inédites
+**Titre affiché** : Les Métriques Compétitives Inédites issues du Terrain
 
-* **L'Incident Incompréhensible** :
-  Après avoir compilé plus de 800 cartes avec succès via le compilateur IA, le simulateur affichait 0 carte chargée et refusait d'importer le moindre deck.
-* **L'Origine du Bug de Schéma** :
-  * Le compilateur Python avait exporté les cartes sous la forme d'un tableau JSON direct : `[ { "id": "sv01-1", ... }, ... ]`.
-  * Le catalogue TypeScript côté simulateur attendait un dictionnaire d'objets indexé : `{ cards: { "sv01-1": { ... } } }`.
-* **Le Piège du Crash Silencieux** :
-  `db.cards` valait `undefined`. Au lieu de lever une exception claire, le code échouait silencieusement et laissait le catalogue vide.
+* **Au-Delà du Simple Win Rate Brut** :
+  Répondant directement aux besoins exprimés par les compétiteurs lors des entretiens qualitatifs :
+  * **Attacker Streaming Rate** : Capacité du deck à ré-enchaîner un attaquant chargé tour après tour sous K.O. continu (stress-test One-Shot).
+  * **Résilience Post-Perturbation** : Taux de relance après avoir subi une réduction forcée de main à 1 ou 2 cartes (*Mashynn*, *Tampon Injuste*).
+  * **Flexibilité Ordres du Boss** : Fréquence où le joueur prépare son attaquant grâce à ses Objets et son Banc, gardant son Supporter du tour 100 % libre pour cibler le Banc adverse.
+  * **Asymétrie J1 / J2 &amp; Item-Lock T1** : Mesure de l'impact de commencer en second pour bloquer les Objets avec l'attaque à 0 énergie de *Rozbouton*.
+  * **Moteur d'Alternatives (`alternativesFinder.ts`)** : Détection des cartes mortes et suggestion de substitution automatique (ex: remplacer un Supporter en excès par un Objet).
           </aside>
         </section>
 
-        <!-- Slide 31 -->
+        <!-- Slide 35 : Acte 5 - Decks Méta & Tests Unitaires Vitest -->
         <section>
-          <h2>La Solution : Le Pont Rétrocompatible et Réintégration des 11 Références</h2>
+          <h2>Les 3 Decks Méta Intégrés &amp; 34 Tests Unitaires Vitest</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 31 : Le Normaliseur Universel de Modèles
-**Titre affiché** : La Solution : Le Pont Rétrocompatible et Réintégration des 11 Références
+### 🎙️ Slide 35 : Decks Méta &amp; Tests Unitaires
+**Titre affiché** : Les 3 Decks Méta Intégrés &amp; 34 Tests Unitaires Vitest
 
-* **La Rétrocompatibilité Polymorphique** :
-  Création de `cardNormalizer.ts` et refonte de `syncCardDatabase.mjs`. Le parseur inspecte dynamiquement le format entrant :
-  `const cardList = Array.isArray(parsed) ? parsed : Object.values(parsed.cards)`.
-* **Réintégration des 11 Cartes Méta de Référence** :
-  Les premières cartes méta de test isolées dans `old_compiled_cards` (dont *Latios*, *Glaivence* et des cartes supporters critiques) ont été fusionnées et normalisées automatiquement.
-* **Automatisation dans la Pipeline** :
-  Le script `prebuild` exécute désormais systématiquement la synchronisation et la validation de schéma avant toute compilation ou test unitaire.
-          </aside>
-        </section>
-
-        <!-- Slide 32 -->
-        <section>
-          <h2>Intégrité des Données : Fin des Cartes Fantômes</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 32 : Le Verrouillage Zéro-Fallback &amp; Énergies Natives
-**Titre affiché** : Intégrité des Données : Fin des Cartes Fantômes
-
-* **Le Danger Mortel des Modèles de Secours (Fallbacks)** :
-  Au départ, si une carte était manquante dans la base, le système générait un modèle « fallback » par défaut avec 100 PV et une attaque générique. C'était une faille méthodologique grave : les simulations tournaient avec des cartes fantômes, faussant les résultats sans que l'utilisateur en soit conscient !
-* **La Règle Zéro-Fallback** :
-  Suppression intégrale de tout fallback silencieux. Si une seule carte du deck n'est pas répertoriée dans la base formelle compilée, la simulation s'interrompt immédiatement avec un message clair identifiant la carte manquante.
-* **Génération Native des Énergies de Base** :
-  Les 8 énergies de base sont synthétisées à la volée avec une garantie absolue de présence, fiabilisant l'exécution à 100 %.
-          </aside>
-        </section>
-
-        <!-- Slide 33 -->
-        <section>
-          <h2>Contrôle de l'Exécution : Interruption Propre des Web Workers</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 33 : La Maîtrise des Threads : Annulation Immédiate
-**Titre affiché** : Contrôle de l'Exécution : Interruption Propre des Web Workers
-
-* **Le Risque d'Emballement des Threads** :
-  Si un utilisateur lance une simulation de 10 000 parties par erreur ou souhaite stopper le calcul pour modifier une carte, un système mal architecturé bloque l'interface jusqu'à épuisement de la boucle.
-* **Le Mécanisme d'Arrêt Instantané** :
-  Implémentation d'un contrôleur d'annulation dans `workerPool.ts`. Lors d'un clic sur « Annuler » :
-  1. Appel immédiat de `worker.terminate()` sur l'ensemble des instances du pool.
-  2. Rejet propre des promesses asynchrones en attente sans exception non gérée.
-  3. Ré-instanciation instantanée d'un pool tout neuf prêt pour la prochaine simulation.
-* **Bénéfice** :
-  L'utilisateur conserve le contrôle total et instantané de son interface en moins de 16 millisecondes.
+* **Les 3 Archétypes Méta Officiels du Simulateur (`metaDecks.ts`)** :
+  1. *Lanssorien-ex (Spread &amp; Contrôle)* : Moteur Dispareptil, attaque Plongée Fantôme (200 Actif + 60 Banc), Munkidori et Item-Lock via Rozbouton.
+  2. *Méga-Kangourex-ex (Accélération &amp; Multi-Attaquants)* : Stade Abîme Zéro étendant le banc à 8 places, Échange d'Énergie et Crispin, Ogerpon-ex et Koraidon-ex.
+  3. *Roigada (Combo &amp; Manipulation de Deck)* : Ordonnancement du dessus du paquet avec Décodage du Cryptologue et Académie de Nuit, soutien de Métalosse et Kyurem.
+* **Garantie de Non-Régression Absolue** :
+  Une suite complète de 34 tests unitaires sous **Vitest** couvrant le parseur PTCGL, la FSM de l'Engine, l'Evaluator 3-ply, fastState et gameLoop, validée à 100 % au vert avant chaque build.
           </aside>
         </section>
 
         <!-- ======================================================== -->
-        <!-- ACTE VIII : L'OPTIMISATION EXTRÊME (DE 43 À 1 600 P/S)   -->
+        <!-- ACTE 6 : TESTS UTILISATEURS (PROCHAINES ÉTAPES)          -->
         <!-- ======================================================== -->
 
-        <!-- Slide 34 -->
+        <!-- Slide 36 : Acte 6 - Protocole des 2 Sessions de Tests -->
         <section>
-          <h2>Le Goulet d'Étranglement : L'Explosion Combinatoire W³</h2>
+          <h2>Acte 6 : Protocole des Deux Sessions de Tests Utilisateurs</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 34 : L'Obstacle de la Lenteur : Le Mur Combinatoire
-**Titre affiché** : Le Goulet d'Étranglement : L'Explosion Combinatoire W³
+### 🎙️ Slide 36 : Acte 6 — Protocole des Deux Sessions de Tests
+**Titre affiché** : Acte 6 : Protocole des Deux Sessions de Tests Utilisateurs
 
-* **Le Bilan Initial Insuffisant** :
-  À la fin du premier assemblage de l'Evaluator 3-ply, le débit plafonnait à seulement **43 parties par seconde par cœur**.
-* **Le Coût Temporel Inacceptable** :
-  Pour simuler 1 000 parties, l'utilisateur devait patienter 23 secondes ! L'Atelier A/B perdait toute son interactivité et son dynamisme.
-* **L'Origine du Mur Combinatoire** :
-  Avec une largeur de branchement moyen W de 8 à 12 actions légales par tour, déployer un arbre 3-ply naïf génère jusqu'à $W^3 \approx 1 700$ nœuds par tour de jeu.
-* **Le Verdict du Profiler CPU** :
-  Le processeur ne ramait pas sur la logique, mais sur le Garbage Collector de V8 : clonages profonds d'objets (`structuredClone`), allocations incessantes et hachage d'état par concaténation de chaînes monopolisaient 65 % des cycles CPU !
+* **La Prochaine Étape Majeure Avant Soutenance** :
+  Bien que le prototype soit pleinement fonctionnel et stabilisé techniquement, deux sessions de tests utilisateurs formelles sont programmées pour valider l'utilisabilité en situation réelle de compétition.
+* **Le Dispositif des Deux Vagues Prévues** :
+  * **Vague 1 (Joueurs de Boutique Locale — Profil Julien)** :
+    Objectif : s'assurer que le Wizard 3 étapes reste d'une simplicité enfantine et qu'un joueur sans formation mathématique comprend immédiatement les recommandations en moins de 30 secondes.
+  * **Vague 2 (Compétiteurs Régionaux / Nationaux — Profil Thomas)** :
+    Objectif : évaluer la pertinence tactique des métriques avancées (Streaming, Résilience Post-Iono, Détection de cartes mortes) et tester l'Atelier A/B sur des micro-ajustements réels de tournoi.
+* **Critères de Succès Fixés** :
+  Taux de complétion de 100 %, temps de décision &lt; 45 secondes, et maintien d'un score SUS $> 85 / 100$.
           </aside>
         </section>
 
-        <!-- Slide 35 -->
+        <!-- Slide 37 : Acte 6 - Pistes d'Amélioration & Peaufinage -->
         <section>
-          <h2>Optimisation 1 : Empreinte Binaire et Hachage Commutatif (Somme + XOR)</h2>
+          <h2>Pistes d'Amélioration : Du Retour Utilisateur à l'Outil Parfait</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 35 : Optimisation 1 : Hachage Commutatif Zobrist 53-Bit
-**Titre affiché** : Optimisation 1 : Empreinte Binaire et Hachage Commutatif (Somme + XOR)
+### 🎙️ Slide 37 : Pistes d'Amélioration
+**Titre affiché** : Pistes d'Amélioration : Du Retour Utilisateur à l'Outil Parfait
 
-* **L'Éradication des Concaténations de Chaînes** :
-  L'ancien code dédoublonnait les états en triant et concaténant des chaînes : `cards.map(c => c.id).sort().join(',')`. Un désastre d'allocations de chaînes et de tris en $O(N \log N)$.
-* **L'Algorithme de Hachage Commutatif Zobrist** :
-  * Attribution d'identifiants numériques entiers 32 bits uniques à chaque carte.
-  * Utilisation d'un mélangeur d'avalanche MurmurHash3 `mix32` avec `Math.imul`.
-* **La Combinaison Somme + XOR** :
-  L'utilisation conjointe de l'addition entière 32 bits et de l'opération XOR garantit deux propriétés cruciales :
-  1. Commutativité stricte en O(N) (l'ordre des Pokémon sur le banc ne change pas le hash).
-  2. Zéro annulation en cas de doublons (le problème classique du XOR où $A \oplus A = 0$ est neutralisé par la somme).
-* **Résultat** :
-  Hachage canonique d'état en moins de 50 nanosecondes, avec zéro allocation mémoire.
-          </aside>
-        </section>
-
-        <!-- Slide 36 -->
-        <section>
-          <h2>Optimisation 2 : Pré-Calcul de Métadonnées et Cache Double-Niveau</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 36 : Optimisation 2 : Mémoïsation WeakMap et Segments DSL
-**Titre affiché** : Optimisation 2 : Pré-Calcul de Métadonnées et Cache Double-Niveau
-
-* **Le Piège des Expressions Régulières dans la Boucle Chaude** :
-  L'évaluation initiale des conditions de recherche (ex: trouver un Pokémon de Base) ré-exécutait des expressions régulières et des normalisations Unicode (`str.normalize('NFD')`) des millions de fois par seconde.
-* **L'Architecture de Cache Double-Niveau** :
-  1. `stringHashCache` : Map globale indexant le hash numérique de chaque nom et identifiant de carte dès le chargement.
-  2. Structures `WeakMap` associant les cartes en mémoire à leurs filtres DSL déjà décodés et segmentés.
-* **Gain** :
-  Résolution des prédicats (`STAGE:BASIC`, `MAX_HP:70`) en temps constant O(1) pur, sans aucune allocation de chaîne durant le déroulement de la partie.
-          </aside>
-        </section>
-
-        <!-- Slide 37 -->
-        <section>
-          <h2>Optimisation 3 : Rollout Glouton en Place (Zéro-Clonage)</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 37 : Optimisation 3 : Élagage Asymétrique &amp; Mutation en Place
-**Titre affiché** : Optimisation 3 : Rollout Glouton en Place (Zéro-Clonage)
-
-* **Le Principe de l'Élagage Asymétrique** :
-  Déployer un arbre complet pour les projections futures est un gaspillage de ressources.
-  * **Tour T** : Exploration rigoureuse (Beam Search élagué, sélection des K = 3 meilleures feuilles de fin de tour).
-  * **Tours $T_{\text{adv}}$ et $T+1$** : Déroulement glouton unilatéral (Greedy Rollout avec largeur de faisceau W = 1).
-* **La Règle de Mutation en Place (`mutateInPlace: true`)** :
-  Au lieu de cloner intégralement l'état de jeu (`MatchState`) à chaque étape du rollout, le moteur applique les mutations directement sur un état de travail réutilisable.
-* **Économie Mémoire Mesurée** :
-  Suppression directe de 48 allocations complètes de `MatchState` par tour de jeu exploré ! Pression sur le Garbage Collector quasi-réduite à zéro.
-          </aside>
-        </section>
-
-        <!-- Slide 38 -->
-        <section>
-          <h2>Optimisation 4 : Élimination du Démarrage à Froid des Threads</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 38 : Optimisation 4 : Pool de "Warm Workers" Persistants
-**Titre affiché** : Optimisation 4 : Élimination du Démarrage à Froid des Threads
-
-* **Le Coût Caché du Cold Start** :
-  Dans l'implémentation initiale, chaque simulation réinstanciait de nouveaux Web Workers, les détruisait à la fin, puis les recréait à la simulation suivante.
-* **La Pénalité Incompressible** :
-  Chaque création de worker forçait le moteur V8 à recharger le bundle JS, à allouer un nouvel isolate de mémoire, à parser la base JSON de cartes et à recompiler le code JIT. Une perte de 300 millisecondes fixes à chaque clic !
-* **Le Pool de "Warm Workers" Persistants** :
-  Les Web Workers sont désormais instanciés une fois pour toutes au démarrage de l'application et restent « chauds » en mémoire. Ils reçoivent les nouveaux scénarios de simulation par messages structurés sans jamais être détruits.
-          </aside>
-        </section>
-
-        <!-- Slide 39 -->
-        <section>
-          <h2>Résultats du Benchmark : Accélération x40 et 34/34 Tests Unitaires</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 39 : Le Bilan des Performances : 1 000 Parties en 0,6 Seconde
-**Titre affiché** : Résultats du Benchmark : Accélération x40 et 34/34 Tests Unitaires
-
-* **La Synthèse des Gains Numériques** :
-  * Débit monocœur : Passage spectaculaire de 43 à **200 parties/seconde par cœur**.
-  * Débit global multi-threadé : Plus de **1 600 parties/seconde** en parallèle sur les 8 cœurs de l'Apple M4.
-  * Vitesse globale : **1 000 parties complètes 3-ply simulées en seulement 0,62 seconde** ! Une accélération mesurée d'un facteur 40x par rapport à la version initiale.
-* **Intégrité et Rigueur Scientifique** :
-  Cette optimisation agressive n'a pas sacrifié un seul millième de la précision des règles. La suite complète des 34 tests unitaires déterministes (calculs de dégâts, conditions d'énergie, retraite, pioche, défausse) est validée à 100 % au vert.
+* **Les Chantiers Identifiés pour le Peaufinage** :
+  1. *Affinage de la Restitution Graphique* : Traduire les métriques expertes sous forme d'infographies encore plus intuitives (jauges d'effort, courbes de tempo colorées émeraude/rubis).
+  2. *Enrichissement Continu du Catalogue de Cartes* : Poursuivre l'exécution du compilateur IA hybride pour couvrir 100 % des extensions futures dès leur sortie officielle.
+  3. *Moteur de Recommandation Prédictif* : Perfectionner l'algorithme d'`alternativesFinder.ts` pour qu'il propose automatiquement des packages d'ajustements cohérents (ex: « -1 Supporter / -1 Énergie / +2 Objets de recherche »).
           </aside>
         </section>
 
         <!-- ======================================================== -->
-        <!-- ACTE IX : CO-CONCEPTION JOUEURS & ANALYTICS COMPÉTITIFS  -->
+        <!-- ACTE 7 : LA SOLUTION FINALE                              -->
         <!-- ======================================================== -->
 
-        <!-- Slide 40 -->
+        <!-- Slide 38 : Acte 7 - Bilan Global d'Ingénierie -->
         <section>
-          <h2>Au-Delà du Win Rate : Ce que Demandent les Vrais Compétiteurs</h2>
+          <h2>Acte 7 : La Synthèse d'Ingénierie — De l'Empirisme à la Science</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 40 : L'Écoute Terrain : Les Retours des Vrais Joueurs
-**Titre affiché** : Au-Delà du Win Rate : Ce que Demandent les Vrais Compétiteurs
+### 🎙️ Slide 38 : Acte 7 — La Synthèse d'Ingénierie
+**Titre affiché** : Acte 7 : La Synthèse d'Ingénierie — De l'Empirisme à la Science
 
-* **La Confrontation avec les Joueurs d'Élite** :
-  Présenter un simulateur affichant uniquement un « Win Rate de 54.2 % » a suscité une réaction immédiate des compétiteurs : « Ce chiffre brut ne m'aide pas à choisir entre deux cartes lors de la préparation d'un tournoi régional ».
-* **Les Véritables Questions du Deckbuilder** :
-  * Si mon Pokémon actif se fait One-Shot au Tour 2, est-ce que mon deck a les ressources pour ré-attaquer immédiatement ?
-  * Si l'adversaire me joue Mashynn (Iono) et réduit ma main à 2 cartes, quel est mon pourcentage de brique ?
-  * Est-ce que mon deck a la liberté de jouer *Ordres du Boss* pour agresser le banc adverse, ou dois-je piocher à chaque tour pour simplement survivre ?
-* **La Démarche de Co-Conception** :
-  Élaborer 5 nouvelles métriques compétitives avancées traduisant fidèlement les angoisses et décisions tactiques des joueurs de tournoi.
+* **La Somme de Tous les Actes** :
+  Ce projet n'est pas un simple simulateur de plus ; il est l'aboutissement rigoureux d'un cheminement d'ingénierie complet :
+  * Partir d'un **besoin viscéral** et documenté par une enquête empirique massive (85,4 % de bricolage au feeling).
+  * Surmonter les **échecs techniques formateurs** : rejet du dashboard sombre néon V1, abandon de la taxe mémoire Wasm, et pivot du LLM monolithique vers l'IA hybride déterministe.
+  * Déboucher sur un **outil unifié haute performance**, capable de simuler 1 000 parties complètes en 0,6 seconde dans un navigateur sans aucun serveur.
+* **Le Changement de Paradigme** :
+  Les compétiteurs de Pokémon TCG disposent désormais d'un instrument objectif pour transformer le doute du vendredi soir en certitude mathématique.
           </aside>
         </section>
 
-        <!-- Slide 41 -->
+        <!-- Slide 39 : Acte 7 - Compétences Clés Mobilisées -->
         <section>
-          <h2>Métrique 1 : La Continuité d'Attaque sous KO Continu (Streaming)</h2>
+          <h2>Compétences Clés Mobilisées pour le Titre d'Ingénieur</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 41 : Métrique 1 : Continuité sous One-Shot (Streaming Attacker)
-**Titre affiché** : Métrique 1 : La Continuité d'Attaque sous KO Continu (Streaming)
+### 🎙️ Slide 39 : Compétences Clés Mobilisées
+**Titre affiché** : Compétences Clés Mobilisées pour le Titre d'Ingénieur
 
-* **La Réalité Brutale du Métagame** :
-  Dans le métagame actuel (dominé par Ire-Foudre ex, Gardevoir, Dracaufeu ex), les Pokémon s'éliminent mutuellement en un seul coup (One-Shot) quasiment à chaque tour.
-* **La Définition du Streaming Attacker** :
-  Capacité d'un deck à renvoyer immédiatement un attaquant chargé sur le Poste Actif et à déclarer une attaque légale au tour qui suit immédiatement la mise KO de son attaquant précédent.
-* **Le Stress-Test Dédié** :
-  Intégration d'un mode de simulation optionnel simulant un KO adverse à chaque tour pour éprouver la chaîne logistique du deck : accélération d'énergies, recyclage par Canne Suprême et moteurs de recherche.
+* **1. Recherche Utilisateur &amp; Design Centré Humain (UX/UI)** :
+  Enquête quantitative ($N = 106$), observations de tournois, conception d'un Design System accessible (WCAG AA) et pivot ergonomique décisif vers un Wizard 3 étapes (SUS 87,5).
+* **2. Architecture Logicielle &amp; Démarche Agile** :
+  Dé-risquage systématique par 5 POCs modulaires, découplage strict Engine / Evaluator, typage statique TypeScript rigoureux et validation par 34 tests Vitest.
+* **3. Optimisation Algorithmique Bas-Niveau** :
+  Hachage Zobrist 53-bit sans allocation, mélangeur Murmur3 mix32, encodage `Int32Array`, mutation in-place éliminant le Garbage Collector, et parallélisation massive par Web Workers.
+* **4. Ingénierie de l'IA Locale** :
+  Exploitation avancée d'Apple Silicon (Metal GPU), architecture Two-Pass avec déchargement mémoire strict, et hybridation déterministe Python + micro-payload LLM.
           </aside>
         </section>
 
-        <!-- Slide 42 -->
+        <!-- Slide 40 : Acte 7 - Perspectives & Démo Live -->
         <section>
-          <h2>Métrique 2 : L'Indice de Résilience Post-Disruption</h2>
+          <h2>Conclusion, Perspectives &amp; Démonstration Live</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 42 : Métrique 2 : Résilience Post-Perturbation (Iono/Stamp/Judge)
-**Titre affiché** : Métrique 2 : L'Indice de Résilience Post-Disruption
+### 🎙️ Slide 40 : Conclusion, Perspectives &amp; Démo Live
+**Titre affiché** : Conclusion, Perspectives &amp; Démonstration Live
 
-* **L'Arme Majeure des Fins de Partie** :
-  Les cartes de perturbation de main (*Mashynn / Iono*, *Juge*, *Tampon Injuste*) sont jouées systématiquement dans 100 % des decks de haut niveau pour réduire la main du joueur à 2 ou 3 cartes en fin de partie.
-* **La Mesure de Résilience** :
-  Pourcentage de parties où le deck réussit à attaquer au tour suivant après avoir subi une réduction forcée de sa main sous le seuil critique des 3 cartes.
-* **Ce que Révèle la Métrique** :
-  Elle met en lumière l'importance vitale des moteurs de pioche passifs sur le banc (*Roucarnage ex*, *Castorno*, *Motorizard*) : sans eux, la résilience s'effondre de 85 % à moins de 25 %.
-          </aside>
-        </section>
-
-        <!-- Slide 43 -->
-        <section>
-          <h2>Métrique 3 : La Liberté d'Agression (Boss's Orders Flexibility)</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 43 : Métrique 3 : Flexibilité "Ordres du Boss"
-**Titre affiché** : Métrique 3 : La Liberté d'Agression (Boss's Orders Flexibility)
-
-* **Le Dilemme de l'Action Unique de Supporter** :
-  Les règles officielles interdisent de jouer plus d'un Supporter par tour. Si le joueur doit impérativement jouer un Supporter de pioche (*Recherches Professorales*, *Pepper*) pour trouver ses énergies ou ses Pokémon, il ne peut pas jouer *Ordres du Boss*.
-* **La Définition de la Flexibilité** :
-  Pourcentage de tours où le joueur prépare son attaquant exclusivement grâce à ses Objets et ses talents de banc, conservant son action de Supporter entièrement libre pour jouer *Ordres du Boss* et agresser le Banc adverse.
-* **L'Impact en Tournoi** :
-  Un deck avec une grande flexibilité d'agression contrôle le tempo du match et dicte les échanges de Récompenses.
-          </aside>
-        </section>
-
-        <!-- Slide 44 -->
-        <section>
-          <h2>Métrique 4 : L'Asymétrie Joueur 1 vs Joueur 2 et l'Item-Lock T1</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 44 : Métrique 4 : Split J1/J2 &amp; Taux de Lock Tour 1 (Rozbouton)
-**Titre affiché** : Métrique 4 : L'Asymétrie Joueur 1 vs Joueur 2 et l'Item-Lock T1
-
-* **L'Asymétrie Structurelle du Jeu** :
-  Le Joueur 1 commence sans pouvoir attaquer ni jouer de Supporter lors de son premier tour. Le Joueur 2 peut attaquer et jouer un Supporter dès son premier tour.
-* **L'Analyse du Taux de Lock Tour 1 (Rozbouton / Budew)** :
-  Avec son attaque *Pollen Démangeant* coûtant 0 énergie, Rozbouton en Joueur 2 bloque totalement les cartes Objets de l'adversaire dès le Tour 1 !
-* **Le Split Statistique J1 / J2** :
-  Le simulateur ventile systématiquement toutes les métriques selon l'ordre de jeu, permettant au compétiteur de savoir s'il doit choisir de commencer ou de jouer en second lors du toss de début de match.
-          </aside>
-        </section>
-
-        <!-- Slide 45 -->
-        <section>
-          <h2>Métrique 5 : Les Combos à Forte Contrainte (Fête Battante &amp; Main Vide)</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 45 : Métrique 5 : Combos Conditionnels &amp; Attaques Multiples
-**Titre affiché** : Métrique 5 : Les Combos à Forte Contrainte (Fête Battante &amp; Main Vide)
-
-* **La Prise en Charge des Archétypes Atypiques** :
-  Le moteur ne se cantonne pas aux decks conventionnels ; il gère les mécaniques les plus contraignantes du métagame.
-* **Attaques Multiples sous Stade Spécifique** :
-  Prise en charge de la double attaque de *Pomdramour ex* ou *Poissoroy* sous le Stade *Festival Plaza*.
-* **Conditions de Main Vide** :
-  Support des cartes d'attaque ou de Supporters exigeant d'avoir exactement zéro carte en main pour s'activer. L'arbre 3-ply planifie l'ordre exact de jeu pour vider volontairement la main avant de déclencher l'effet maximal.
-          </aside>
-        </section>
-
-        <!-- Slide 46 -->
-        <section>
-          <h2>Audit d'Utilité : Traquer les Cartes Mortes &amp; Suggérer des Objets</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 46 : Audit d'Utilité Carte par Carte &amp; Recommandations Intelligentes
-**Titre affiché** : Audit d'Utilité : Traquer les Cartes Mortes &amp; Suggérer des Objets
-
-* **Le Tableau d'Utilité Carte par Carte** :
-  Pour chacune des 60 cartes du deck, le simulateur mesure son taux d'utilisation réel sur les 1 000 parties :
-  * Fréquence où la carte a été jouée pour son effet utile.
-  * Fréquence où elle a servi de simple combustible de défausse.
-  * Fréquence où elle est restée bloquée en main sans utilité (« carte morte »).
-* **Le Moteur de Recommandations Intelligentes** :
-  Détection automatique des déséquilibres : si la 4e copie d'une carte n'est jouée que dans 2 % des parties, le système suggère de la remplacer par un Objet de tutorat ou de consistance pour libérer le créneau de Supporter.
-          </aside>
-        </section>
-
-        <!-- ======================================================== -->
-        <!-- ACTE X : BÊTA-TEST & PROTOCOLE D'ÉVALUATION TERRAIN      -->
-        <!-- ======================================================== -->
-
-        <!-- Slide 47 -->
-        <section>
-          <h2>Campagne Utilisateur : Questionnaire Automatisé et Collecte Structurée</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 47 : Le Protocole de Bêta-Test Automatisé (Google Apps Script)
-**Titre affiché** : Campagne Utilisateur : Questionnaire Automatisé et Collecte Structurée
-
-* **Sortir du Laboratoire** :
-  Pour valider l'impact réel du simulateur, nous avons organisé une campagne de bêta-test auprès d'un panel de compétiteurs préparant les tournois régionaux officiels.
-* **L'Infrastructure de Collecte Automatisée** :
-  * Déploiement d'un Webhook `Google Apps Script` connecté directement à une feuille de calcul `Google Sheets`.
-  * Intégration d'un formulaire de retour ergonomique directement dans l'interface du simulateur.
-* **Les Retours Utilisateurs Structurés** :
-  Évaluation de la clarté de l'Atelier A/B, pertinence perçue des nouvelles métriques, réalisme des choix de l'IA 3-ply et remontées de cas limites non prévus.
-          </aside>
-        </section>
-
-        <!-- Slide 48 -->
-        <section>
-          <h2>L'Hétérogénéité des Machines : Neutraliser les Biais de Benchmark</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 48 : Corrélation Matériel / Performance Machine
-**Titre affiché** : L'Hétérogénéité des Machines : Neutraliser les Biais de Benchmark
-
-* **Le Risque du Biais Apple Silicon** :
-  Nos développements ont été réalisés sur une machine de pointe (MacBook Pro M4). Il était impératif de vérifier le comportement de l'application sur des machines grand public variées.
-* **Matrice de Télémétrie Matérielle** :
-  Le formulaire de retour corrélait les performances ressenties avec la configuration de la machine : type de processeur (Intel Core i5/i7, AMD Ryzen, Apple M1/M2/M3/M4), quantité de mémoire vive et navigateur (Chrome, Firefox, Safari, Edge).
-* **Les Enseignements du Terrain** :
-  Sur un PC portable bureautique standard 4 cœurs sous Windows, le simulateur maintient un débit très confortable de 350 à 450 parties/seconde, confirmant la portabilité et la légèreté de notre architecture par Web Workers natifs.
-          </aside>
-        </section>
-
-        <!-- ======================================================== -->
-        <!-- ACTE XI : BILAN, COMPÉTENCES & PERSPECTIVES              -->
-        <!-- ======================================================== -->
-
-        <!-- Slide 49 -->
-        <section>
-          <h2>Bilan : Une Plateforme Complète de la Donnée Brute à l'Aide à la Décision</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 49 : Le Bilan Technique Global
-**Titre affiché** : Bilan : Une Plateforme Complète de la Donnée Brute à l'Aide à la Décision
-
-* **La Rétrospective de l'Ouvrage Réalisé** :
-  * Un **Compilateur IA Local** ayant audité et modélisé l'intégralité du corpus de plus de 2 800 cartes du format Standard sans dépendre d'APIs cloud payantes.
-  * Un **Résolveur Ingestion Zéro-Friction** compatible avec les formats d'export officiels de Pokémon TCG Live.
-  * Un **Moteur de Simulation Monte-Carlo 3-Ply** ultra-rapide délivrant plus de 1 600 parties/seconde.
-  * Un **Atelier A/B Réactif** conçu pour guider scientifiquement les choix stratégiques des compétiteurs.
-* **L'Aboutissement** :
-  Un système robuste, testé et validé empiriquement par des joueurs réels.
-          </aside>
-        </section>
-
-        <!-- Slide 50 -->
-        <section>
-          <h2>Compétences Clés : Architecture, Algorithmique, IA Locale &amp; UX Research</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 50 : Compétences d'Ingénieur Mobilisées
-**Titre affiché** : Compétences Clés : Architecture, Algorithmique, IA Locale &amp; UX Research
-
-* **Synthèse des Compétences d'Ingénieur** :
-  * **Architecture &amp; Génie Logiciel** : Découpage modulaire par POCs, découplage Engine / Evaluator, typage strict TypeScript et industrialisation par scripts de build.
-  * **Algorithmique &amp; Optimisation Bas-Niveau** : Hachage commutatif Zobrist 53-bit, mélangeur MurmurHash3 mix32, suppression de la pression GC par mutation en place, et parallélisation par Web Workers.
-  * **Ingénierie de l'IA &amp; LLMs Locaux** : Modèles open-source sous accélération Metal (llama.cpp), décodage contraint (GBNF, Pydantic), Schema-Guided Chain-of-Thought et assainissement stateless du KV-cache.
-  * **Conception Centrée Utilisateur (UX Research)** : Design System accessible (WCAG AA) et co-conception de métriques avec les utilisateurs finaux.
-          </aside>
-        </section>
-
-        <!-- Slide 51 -->
-        <section>
-          <h2>Perspectives : Portage Rust/Wasm &amp; Assistant Temps Réel</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 51 : Perspectives : Vers le Wasm "State-in-Wasm" et le Tournoi Live
-**Titre affiché** : Perspectives : Portage Rust/Wasm &amp; Assistant Temps Réel
-
-* **L'Évolution WebAssembly « State-in-Wasm »** :
-  Notre POC 4 a montré que le coût de transfert JS/Wasm était le facteur bloquant. En encapsulant 100 % de l'état et de la boucle de jeu au sein de la mémoire interne d'un module Rust/Wasm sans aucun aller-retour, l'objectif est d'atteindre **50 000 parties par seconde**.
-* **L'Assistant Temps Réel de Tournoi (PWA Mobile)** :
-  Permettre à un joueur d'importer la liste de son adversaire en quelques secondes sur smartphone pour obtenir instantanément le guide tactique des priorités de KO et des timings d'attaque.
-* **Analyse de Métagame Global** :
-  Modéliser les matrices d'affrontements croisés entre tous les archétypes du format pour calculer les équilibres de Nash du métagame mondial.
-          </aside>
-        </section>
-
-        <!-- Slide 52 -->
-        <section>
-          <h2>Conclusion &amp; Démonstration Interactive</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 52 : Conclusion &amp; Démonstration Live
-**Titre affiché** : Conclusion &amp; Démonstration Interactive
-
+* **Perspectives Futures** :
+  * *Vers le « State-in-Wasm » complet en Rust* : Encapsuler 100 % du modèle et du moteur en mémoire linéaire interne pour franchir le cap des **50 000 parties par seconde**.
+  * *Assistant Mobile PWA pour Tournois Physiques* : Import express de la liste adverse par QR code ou scan pour obtenir en 10 secondes le plan de jeu optimal et les priorités de K.O.
 * **Remerciements au Jury** :
-  Je vous remercie très chaleureusement pour votre écoute et votre attention tout au long de cette présentation.
-* **Invitation à la Démonstration Interactive en Direct** :
-  Pour matérialiser l'ensemble de ces concepts théoriques, je vous invite maintenant à assister à la démonstration en temps réel du simulateur :
-  1. Import d'une liste de tournoi officielle Pokémon TCG Live (Dracaufeu ex face à Ire-Foudre ex).
-  2. Lancement en direct d'une simulation de 1 000 parties complètes : chrono en main, admirez la réalisation du calcul en seulement **0,6 seconde**.
-  3. Modification d'une carte dans l'Atelier A/B et visualisation instantanée des deltas de Win Rate et de résilience.
-* **Session de Questions / Réponses** :
-  Je suis désormais à votre disposition pour échanger et répondre à toutes vos questions.
+  Je vous remercie très sincèrement pour votre attention et votre écoute bienveillante.
+* **Lancement de la Démonstration Interactive** :
+  Je vous invite maintenant à passer à la pratique :
+  1. Importation instantanée d'une liste de tournoi officielle Pokémon TCG Live.
+  2. Simulation de 1 000 parties en direct sous vos yeux en **0,6 seconde**.
+  3. Démonstration de l'Atelier A/B avec substitution d'une carte et calcul immédiat des deltas de régularité et de résilience.
           </aside>
         </section>
 
