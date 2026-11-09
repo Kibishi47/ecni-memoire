@@ -9,6 +9,8 @@ const candidateSourcePaths = [
   path.resolve(__dirname, '../../card-compiler/data/cards_database.json'),
   path.resolve(process.cwd(), '../card-compiler/data/cards_database.json'),
   path.resolve(process.cwd(), 'card-compiler/data/cards_database.json'),
+  path.resolve(__dirname, '../src/data/cards_database.json'),
+  path.resolve(process.cwd(), 'src/data/cards_database.json'),
 ]
 
 const candidateOldPaths = [
