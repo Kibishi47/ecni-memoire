@@ -298,6 +298,15 @@ function handleExecuteAction(action: GameAction) {
       break
   }
 
+  // Messages additionnels enregistrés par le moteur (ex: Confusion, effets critiques)
+  if (currentState.lastActionLog && currentState.lastActionLog.length > 0) {
+    for (const extraMsg of currentState.lastActionLog) {
+      if (extraMsg && !extraMsg.startsWith('Attaque') && extraMsg !== action.label) {
+        addLog('SYSTEM', extraMsg, undefined, actingKey)
+      }
+    }
+  }
+
   // Vérification de K.O. et prise de Récompenses
   const currentOppPrizes = opponentBoard.prizes.length
   if (currentOppPrizes < prevOppPrizes) {

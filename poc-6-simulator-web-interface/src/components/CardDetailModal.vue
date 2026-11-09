@@ -165,6 +165,21 @@ const abilities = computed(() => {
                   {{ inPlayPokemon.attachedTools.map(t => t.identity.nameFr).join(', ') }}
                 </span>
               </div>
+              <div v-if="inPlayPokemon.specialConditions.length > 0" class="mt-1 flex items-center gap-1">
+                <span class="text-slate-600">États spéciaux :</span>
+                <span
+                  v-for="cond in inPlayPokemon.specialConditions"
+                  :key="cond"
+                  class="rounded bg-red-100 px-1.5 py-0.2 font-bold text-red-800 uppercase"
+                >
+                  {{ cond === 'POISONED' ? '☠️ Poison' : cond === 'BURNED' ? '🔥 Brûlure' : cond === 'ASLEEP' ? '💤 Sommeil' : cond === 'PARALYZED' ? '⚡ Paralysie' : cond === 'CONFUSED' ? '🌀 Confusion' : cond }}
+                </span>
+              </div>
+              <div v-if="inPlayPokemon.cantAttackNextTurn" class="mt-1 flex items-center gap-1">
+                <span class="rounded bg-rose-100 px-1.5 py-0.2 font-bold text-rose-800">
+                  🚫 Ce Pokémon ne peut pas attaquer ce tour
+                </span>
+              </div>
             </div>
           </div>
         </div>

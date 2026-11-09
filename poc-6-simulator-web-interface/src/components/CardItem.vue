@@ -289,13 +289,22 @@ function handleInspect(e: Event) {
             🔧 {{ tool.identity.nameFr }}
           </span>
 
-          <!-- Altérations d'état (Poison, Brûlure...) -->
+          <!-- Altérations d'état (Poison, Brûlure, Sommeil, Paralysie, Confusion...) -->
           <span
             v-for="cond in inPlayPokemon.specialConditions"
             :key="cond"
             class="rounded bg-red-100 px-1 py-0.2 text-[8px] font-bold text-red-800 uppercase"
           >
-            {{ cond === 'POISONED' ? '☠️ Poison' : cond === 'BURNED' ? '🔥 Brûlure' : cond === 'ASLEEP' ? '💤 Dodo' : cond }}
+            {{ cond === 'POISONED' ? '☠️ Poison' : cond === 'BURNED' ? '🔥 Brûlure' : cond === 'ASLEEP' ? '💤 Sommeil' : cond === 'PARALYZED' ? '⚡ Paralysie' : cond === 'CONFUSED' ? '🌀 Confusion' : cond }}
+          </span>
+
+          <!-- Verrou d'attaque spécifique (cantAttackNextTurn) -->
+          <span
+            v-if="inPlayPokemon.cantAttackNextTurn"
+            class="rounded bg-rose-100 px-1 py-0.2 text-[8px] font-bold text-rose-800 uppercase"
+            title="Pendant ce tour, ce Pokémon ne peut pas attaquer"
+          >
+            🚫 Attaque Bloquée
           </span>
         </div>
       </div>

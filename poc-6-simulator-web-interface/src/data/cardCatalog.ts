@@ -117,10 +117,23 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
   let energyProvidedType = 'incolore'
 
   if (card.category === 'ENERGY') {
-    if (normCombinedName.includes('double turbo')) {
+    if (
+      normCombinedName.includes('double turbo') ||
+      normCombinedName.includes('double colorless') ||
+      normCombinedName.includes('double incolore')
+    ) {
       energyUnitKind = 'DOUBLE_TURBO'
       energyProvidedType = 'incolore'
-    } else if (normCombinedName.includes('lumineuse') || normCombinedName.includes('luminous')) {
+    } else if (
+      normCombinedName.includes('lumineuse') ||
+      normCombinedName.includes('luminous') ||
+      normCombinedName.includes('rainbow') ||
+      normCombinedName.includes('arc en ciel') ||
+      normCombinedName.includes('aurora') ||
+      normCombinedName.includes('aurore') ||
+      normCombinedName.includes('heritage') ||
+      normCombinedName.includes('legacy')
+    ) {
       energyUnitKind = 'WILDCARD'
       energyProvidedType = 'WILDCARD'
     } else {
@@ -133,14 +146,24 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
         const raw = normalizeCardNameForMatch((card.identity?.rawRulesText || []).join(' '))
         const found = [
           'feu',
+          'fire',
           'eau',
+          'water',
           'plante',
+          'grass',
           'electrique',
+          'lightning',
+          'electrik',
           'psy',
+          'psychic',
           'combat',
+          'fighting',
           'obscurite',
+          'darkness',
+          'dark',
           'metal',
           'fee',
+          'fairy',
         ].find((t) => normCombinedName.includes(t) || raw.includes(t))
         energyProvidedType = found ? normalizeEnergyTypeInternal(found) : 'incolore'
       }

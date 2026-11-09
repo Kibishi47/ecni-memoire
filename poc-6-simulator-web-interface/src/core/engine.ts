@@ -54,6 +54,7 @@ export interface InPlayPokemon {
   evolvedThisTurn: boolean
   specialConditions: SpecialConditionType[]
   cantAttackNextTurn: boolean
+  cantAttackTurn?: number
 }
 
 export interface PlayerBoardState {
@@ -254,6 +255,116 @@ export function canPayEnergyCost(
 }
 
 /**
+ * Calcule le coût énergétique effectif d'une attaque, en intégrant les réductions
+ * de coût conditionnelles (ex: Compétence Maîtrisée d'Ursaking Lune Vermeille-ex sv06-141).
+ */
+export function getEffectiveAttackCost(
+  attacker: InPlayPokemon,
+  action: PlayableAction,
+  state: MatchState,
+  passiveBoard?: PlayerBoardState,
+): Record<string, number> {
+  const baseCost: Record<string, number> = {}
+
+  if (action.cost && typeof action.cost === 'object' && Object.keys(action.cost).length > 0) {
+    for (const [k, v] of Object.entries(action.cost)) {
+      baseCost[k] = Number(v) || 0
+    }
+  } else if (action.energyCost && typeof action.energyCost === 'object') {
+    if (Array.isArray(action.energyCost)) {
+      for (const t of action.energyCost) {
+        baseCost[t] = (baseCost[t] || 0) + 1
+      }
+    } else {
+      for (const [k, v] of Object.entries(action.energyCost)) {
+        baseCost[k] = Number(v) || 0
+      }
+    }
+  } else if ((attacker.card.pokemonStats as any)?.attacks) {
+    const matchedAtk = (attacker.card.pokemonStats as any).attacks.find(
+      (a: any) => a.actionId === action.actionId || a.name === action.label || a.nameFr === action.label,
+    )
+    if (matchedAtk) {
+      if (matchedAtk.cost && typeof matchedAtk.cost === 'object') {
+        for (const [k, v] of Object.entries(matchedAtk.cost)) {
+          baseCost[k] = Number(v) || 0
+        }
+      } else if (matchedAtk.energyCost) {
+        if (Array.isArray(matchedAtk.energyCost)) {
+          for (const t of matchedAtk.energyCost) {
+            baseCost[t] = (baseCost[t] || 0) + 1
+          }
+        }
+      }
+    }
+  }
+
+  // Talent Compétence Maîtrisée (Ursaking Lune Vermeille-ex / Bloodmoon Ursaluna ex sv06-141)
+  // Lune Rouge coûte {C} de moins pour chaque carte Récompense que votre adversaire a récupérée.
+  if (
+    (attacker.card.cardId === 'sv06-141' ||
+      /ursaking.*lune vermeille|bloodmoon.*ursaluna/i.test(attacker.card.identity.nameFr)) &&
+    /lune rouge|blood moon/i.test(`${action.label || ''} ${action.actionId || ''}`)
+  ) {
+    const oppBoard =
+      passiveBoard ||
+      (state.activePlayerIndex === 0 ? state.opponent : state.player)
+    const prizesTaken = Math.max(0, 6 - (oppBoard.prizes?.length ?? 6))
+    for (const [k, v] of Object.entries(baseCost)) {
+      if (normalizeEnergyType(k) === 'incolore') {
+        baseCost[k] = Math.max(0, v - prizesTaken)
+      }
+    }
+  }
+
+  return baseCost
+}
+
+/**
+ * Détermine si un Pokémon est actuellement bloqué et dans l'incapacité totale d'attaquer.
+ * Vérifie :
+ * - Les états spéciaux Sommeil (ASLEEP) et Paralysie (PARALYZED)
+ * - Les verrous d'attaque "Pendant votre prochain tour, ce Pokémon ne peut pas attaquer" (cantAttackNextTurn)
+ */
+export function isPokemonAttackBlocked(
+  poke: InPlayPokemon | null | undefined,
+  state: MatchState,
+): boolean {
+  if (!poke) return true
+  const conditions = poke.specialConditions || []
+  if (conditions.includes('ASLEEP') || conditions.includes('PARALYZED')) {
+    return true
+  }
+  if (poke.cantAttackNextTurn) {
+    if (poke.cantAttackTurn === undefined || poke.cantAttackTurn === state.turnNumber) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Calcule le coût de retraite effectif d'un Pokémon, en tenant compte des talents en jeu
+ * (ex: Taxi Aérien / Skyliner de Latias-ex sv08-076 conférant la retraite gratuite aux Pokémon de Base).
+ */
+export function getPokemonRetreatCost(poke: InPlayPokemon, board: PlayerBoardState): number {
+  const baseRetreat = poke.card.pokemonStats?.retreatCost ?? 1
+  if (poke.card.subCategory === 'BASIC') {
+    const hasLatias =
+      (board.activePokemon &&
+        (board.activePokemon.card.cardId === 'sv08-076' ||
+          /latias.*ex/i.test(board.activePokemon.card.identity.nameFr))) ||
+      board.bench.some(
+        (b) => b.card.cardId === 'sv08-076' || /latias.*ex/i.test(b.card.identity.nameFr),
+      )
+    if (hasLatias) {
+      return 0
+    }
+  }
+  return baseRetreat
+}
+
+/**
  * Calcule la capacité maximale de Banc (5 par défaut, 8 avec Abîme Zéro + Téracristal en jeu).
  */
 export function getMaxBenchSlots(
@@ -300,6 +411,7 @@ export function cloneInPlayPokemon(p: InPlayPokemon): InPlayPokemon {
     evolvedThisTurn: p.evolvedThisTurn,
     specialConditions: p.specialConditions ? p.specialConditions.slice() : [],
     cantAttackNextTurn: p.cantAttackNextTurn ?? false,
+    cantAttackTurn: p.cantAttackTurn,
   }
 }
 
@@ -1239,6 +1351,40 @@ export function checkActionPreconditions(
     }
   }
 
+  // Verrous stricts propres aux Attaques
+  const isAttack = action.actionType === 'ATTACK' || action.sourceType === 'ATTACK'
+  if (isAttack) {
+    // 1. Un joueur débutant ne peut jamais attaquer au Tour 1
+    if (isTurn1FirstPlayer) {
+      return false
+    }
+
+    // 2. Seul le Pokémon Actif peut déclarer une attaque
+    if (!sourcePokemon || activeBoard.activePokemon?.instanceId !== sourcePokemon.instanceId) {
+      return false
+    }
+
+    // 3. Les états spéciaux Sommeil et Paralysie bloquent totalement l'attaque
+    // 4. Verrou cantAttackNextTurn ("Pendant votre prochain tour, ce Pokémon ne peut pas attaquer")
+    if (isPokemonAttackBlocked(sourcePokemon, state)) {
+      return false
+    }
+
+    // 5. Coût énergétique de l'attaque : Le Pokémon Actif DOIT avoir les énergies nécessaires attachées
+    const effectiveCost = getEffectiveAttackCost(sourcePokemon, action, state, passiveBoard)
+    if (!canPayEnergyCost(sourcePokemon.attachedEnergies, effectiveCost)) {
+      return false
+    }
+  } else if (sourcePokemon && (action.cost || action.energyCost)) {
+    // Pour toute autre action liée à un Pokémon possédant un coût en énergie (ex: talent à coût d'énergie)
+    const cost = action.cost || action.energyCost
+    if (cost && Object.keys(cost).length > 0) {
+      if (!canPayEnergyCost(sourcePokemon.attachedEnergies, cost as any)) {
+        return false
+      }
+    }
+  }
+
   for (let pIdx = 0; pIdx < action.preconditions.length; pIdx++) {
     const rawPre = action.preconditions[pIdx]!
     const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
@@ -1818,8 +1964,8 @@ export function getLegalActions(state: MatchState): GameAction[] {
     activeBoard.bench.length > 0 &&
     !isImmobilized
   ) {
-    const retreatCost = activeBoard.activePokemon.card.pokemonStats?.retreatCost ?? 1
-    if (activeBoard.activePokemon.attachedEnergies.length >= retreatCost) {
+    const retreatCost = getPokemonRetreatCost(activeBoard.activePokemon, activeBoard)
+    if (canPayEnergyCost(activeBoard.activePokemon.attachedEnergies, { Incolore: retreatCost })) {
       const seenRetreatTargets = new Set<string>()
       activeBoard.bench.forEach((bPoke, bIdx) => {
         const key = `${bPoke.card.cardId}_${bPoke.attachedEnergies.length}_${bPoke.damage}`
@@ -1837,29 +1983,27 @@ export function getLegalActions(state: MatchState): GameAction[] {
   // ==========================================================================
   // 7. DÉCLARER UNE ATTAQUE (`DECLARE_ATTACK`) — CLÔTURE DE TOUR
   // ==========================================================================
-  if (
-    activeBoard.activePokemon &&
-    !activeBoard.activePokemon.cantAttackNextTurn &&
-    !isImmobilized
-  ) {
+  const activePoke = activeBoard.activePokemon
+  const isAttackBlocked = isPokemonAttackBlocked(activePoke, state)
+  if (activePoke && !isAttackBlocked) {
     // 7a. Attaques propres au Pokémon Actif
-    for (const pAction of activeBoard.activePokemon.card.playableActions) {
+    for (const pAction of activePoke.card.playableActions) {
       if (pAction.actionType !== 'ATTACK' && pAction.sourceType !== 'ATTACK') continue
       if (
         !checkActionPreconditions(
           state,
           activeBoard,
           passiveBoard,
-          activeBoard.activePokemon.card,
+          activePoke.card,
           pAction,
-          activeBoard.activePokemon,
+          activePoke,
         )
       ) {
         continue
       }
 
       const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction)
-      const isDoubleAtk = canPokemonAttackTwice(activeBoard.activePokemon, state)
+      const isDoubleAtk = canPokemonAttackTwice(activePoke, state)
       const totalEstimatedActiveDmg = isDoubleAtk ? dmgInfo.activeDamage * 2 : dmgInfo.activeDamage
       const totalEstimatedBenchDmg = isDoubleAtk ? dmgInfo.benchDamage * 2 : dmgInfo.benchDamage
       const oppActiveName = passiveBoard.activePokemon?.card.identity.nameFr || 'Actif adverse'
@@ -1870,16 +2014,16 @@ export function getLegalActions(state: MatchState): GameAction[] {
 
       actions.push({
         type: 'DECLARE_ATTACK',
-        cardId: activeBoard.activePokemon.card.cardId,
+        cardId: activePoke.card.cardId,
         actionId: pAction.actionId,
         estimatedDamage: totalEstimatedActiveDmg + totalEstimatedBenchDmg,
         endsTurnImmediately: true,
-        label: `Attaque ${pAction.label} (${activeBoard.activePokemon.card.identity.nameFr}) : ${dmgLabel}`,
+        label: `Attaque ${pAction.label} (${activePoke.card.identity.nameFr}) : ${dmgLabel}`,
       })
     }
 
     // 7b. Attaques conférées par les Machines Techniques attachées
-    for (const tool of activeBoard.activePokemon.attachedTools) {
+    for (const tool of activePoke.attachedTools) {
       if (
         tool.identity.isTechnicalMachine ||
         tool.playableActions.some((a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK')
@@ -1893,7 +2037,7 @@ export function getLegalActions(state: MatchState): GameAction[] {
               passiveBoard,
               tool,
               tmAction,
-              activeBoard.activePokemon,
+              activePoke,
             )
           ) {
             continue
@@ -2194,11 +2338,15 @@ export function applyAction(
       const activePoke = activeBoard.activePokemon
       const benchPoke = activeBoard.bench[benchIdx]
       if (activePoke && benchPoke && !activeBoard.retreatUsedThisTurn) {
-        const retreatCost = activePoke.card.pokemonStats?.retreatCost ?? 1
+        const retreatCost = getPokemonRetreatCost(activePoke, activeBoard)
         for (let i = 0; i < retreatCost && activePoke.attachedEnergies.length > 0; i++) {
           const discardedEn = activePoke.attachedEnergies.pop()!
           activeBoard.discard.push(discardedEn)
         }
+        activePoke.specialConditions = []
+        activePoke.cantAttackNextTurn = false
+        activePoke.cantAttackTurn = undefined
+
         activeBoard.activePokemon = benchPoke
         activeBoard.bench[benchIdx] = activePoke
         activeBoard.retreatUsedThisTurn = true
@@ -2399,6 +2547,7 @@ export function applyAction(
         } else if (cost.type === 'CANT_ATTACK_NEXT_TURN') {
           if (sourcePoke) {
             sourcePoke.cantAttackNextTurn = true
+            sourcePoke.cantAttackTurn = state.turnNumber + 2
           }
         }
       }
@@ -2431,6 +2580,8 @@ export function applyAction(
     case 'DECLARE_ATTACK': {
       const attacker = activeBoard.activePokemon
       if (!attacker) break
+      if (isPokemonAttackBlocked(attacker, state)) break
+
       const pAction =
         attacker.card.playableActions.find((a) => a.actionId === action.actionId) ||
         attacker.attachedTools
@@ -2438,7 +2589,35 @@ export function applyAction(
           .find((a) => a.actionId === action.actionId)
       if (!pAction) break
 
-      if ((pAction.costs || []).some((c) => c.type === 'CANT_ATTACK_NEXT_TURN')) {
+      const effectiveCost = getEffectiveAttackCost(attacker, pAction, state, passiveBoard)
+      if (!canPayEnergyCost(attacker.attachedEnergies, effectiveCost)) {
+        break
+      }
+
+      // Confusion : flip d'attaque (50% de chance d'échec + 30 dégâts sur soi-même)
+      if (attacker.specialConditions && attacker.specialConditions.includes('CONFUSED')) {
+        const flipSuccess = rng.nextFloat() >= 0.5
+        if (!flipSuccess) {
+          attacker.damage += 30
+          state.lastActionLog.push(`${attacker.card.identity.nameFr} est confus et s'inflige 30 dégâts !`)
+          if (attacker.damage >= getPokemonMaxHp(attacker)) {
+            handleKnockOut(state, passiveBoard, activeBoard, 'ACTIVE')
+          }
+          state.rngState = rng.getState()
+          endTurnAndAdvance(state)
+          return state
+        }
+      }
+
+      // Enregistrement de cantAttackNextTurn si l'attaque l'impose
+      const hasCantAttackNextTurnRule =
+        (pAction.costs || []).some((c) => c.type === 'CANT_ATTACK_NEXT_TURN') ||
+        (pAction.effects || []).some((e) => (e.primitive as string) === 'CANT_ATTACK_NEXT_TURN') ||
+        /ne peut pas attaquer pendant votre prochain tour|pendant votre prochain tour.*ne peut pas attaquer|during your next turn.*can'?t attack|can'?t attack during your next turn/i.test(
+          `${pAction.label} ${attacker.card.identity.rawRulesText?.join(' ') || ''}`
+        )
+      if (hasCantAttackNextTurnRule) {
+        attacker.cantAttackTurn = state.turnNumber + 2
         attacker.cantAttackNextTurn = true
       }
 
@@ -2732,6 +2911,9 @@ function resolveAtomicEffect(
         const oldOppActive = passiveBoard.activePokemon
         passiveBoard.activePokemon = newOppActive
         if (oldOppActive) {
+          oldOppActive.specialConditions = []
+          oldOppActive.cantAttackNextTurn = false
+          oldOppActive.cantAttackTurn = undefined
           passiveBoard.bench[targetBenchIdx] = oldOppActive
         } else {
           passiveBoard.bench.splice(targetBenchIdx, 1)
@@ -2754,6 +2936,9 @@ function resolveAtomicEffect(
         const oldActive = activeBoard.activePokemon
         activeBoard.activePokemon = newActive
         if (oldActive) {
+          oldActive.specialConditions = []
+          oldActive.cantAttackNextTurn = false
+          oldActive.cantAttackTurn = undefined
           activeBoard.bench[bestBenchIdx] = oldActive
         } else {
           activeBoard.bench.splice(bestBenchIdx, 1)
@@ -3133,6 +3318,9 @@ function resolveAtomicEffect(
       const oldOppActive = passiveBoard.activePokemon
       passiveBoard.activePokemon = newOppActive
       if (oldOppActive) {
+        oldOppActive.specialConditions = []
+        oldOppActive.cantAttackNextTurn = false
+        oldOppActive.cantAttackTurn = undefined
         passiveBoard.bench[targetBenchIdx] = oldOppActive
       } else {
         passiveBoard.bench.splice(targetBenchIdx, 1)
@@ -3158,6 +3346,9 @@ function resolveAtomicEffect(
       const oldActive = activeBoard.activePokemon
       activeBoard.activePokemon = newActive
       if (oldActive) {
+        oldActive.specialConditions = []
+        oldActive.cantAttackNextTurn = false
+        oldActive.cantAttackTurn = undefined
         activeBoard.bench[bestBenchIdx] = oldActive
       } else {
         activeBoard.bench.splice(bestBenchIdx, 1)
@@ -3183,6 +3374,14 @@ function resolveAtomicEffect(
             : activeBoard.activePokemon
       if (target) {
         target.damage = Math.max(0, target.damage - healAmt)
+      }
+      break
+    }
+
+    case 'CANT_ATTACK_NEXT_TURN': {
+      if (activeBoard.activePokemon) {
+        activeBoard.activePokemon.cantAttackNextTurn = true
+        activeBoard.activePokemon.cantAttackTurn = state.turnNumber + 2
       }
       break
     }
@@ -3656,7 +3855,14 @@ export function endTurnAndAdvance(state: MatchState): void {
     ...endingBoard.bench,
   ]
   for (const poke of allEndingPokes) {
-    poke.cantAttackNextTurn = false
+    if (poke.cantAttackTurn !== undefined) {
+      if (state.turnNumber >= poke.cantAttackTurn) {
+        poke.cantAttackNextTurn = false
+        poke.cantAttackTurn = undefined
+      }
+    } else {
+      poke.cantAttackNextTurn = false
+    }
     for (let i = poke.attachedTools.length - 1; i >= 0; i--) {
       const tool = poke.attachedTools[i]!
       if (tool.identity.isTechnicalMachine) {

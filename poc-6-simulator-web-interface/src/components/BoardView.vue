@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MatchState, InPlayPokemon } from '../core/engine'
+import { isPokemonAttackBlocked, getPokemonRetreatCost } from '../core/engine'
 import type { EngineCardModel } from '../types/cardModel'
 import CardItem from './CardItem.vue'
 import {
@@ -251,8 +252,15 @@ function handleCardClick(card: EngineCardModel, inPlay?: InPlayPokemon) {
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-6">
           <!-- Pokémon Actif Adverse -->
           <div class="sm:col-span-2">
-            <div class="mb-1 text-[10px] font-semibold text-red-700">
-              ⚔️ Poste Actif
+            <div class="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-red-700">
+              <span>⚔️ Poste Actif</span>
+              <span
+                v-if="state.opponent.activePokemon && isPokemonAttackBlocked(state.opponent.activePokemon, state)"
+                class="rounded bg-rose-100 px-1.5 py-0.2 text-[9px] font-bold text-rose-800"
+                title="Ce Pokémon ne peut pas attaquer ce tour"
+              >
+                🚫 Attaque Bloquée
+              </span>
             </div>
             <CardItem
               v-if="state.opponent.activePokemon"
@@ -359,8 +367,22 @@ function handleCardClick(card: EngineCardModel, inPlay?: InPlayPokemon) {
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-6">
           <!-- Pokémon Actif Joueur -->
           <div class="sm:col-span-2">
-            <div class="mb-1 text-[10px] font-semibold text-blue-700">
-              ⚔️ Votre Poste Actif
+            <div class="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-blue-700">
+              <span>⚔️ Votre Poste Actif</span>
+              <span
+                v-if="state.player.activePokemon && isPokemonAttackBlocked(state.player.activePokemon, state)"
+                class="rounded bg-rose-100 px-1.5 py-0.2 text-[9px] font-bold text-rose-800"
+                title="Votre Pokémon Actif ne peut pas attaquer ce tour"
+              >
+                🚫 Attaque Bloquée
+              </span>
+              <span
+                v-if="state.player.activePokemon && getPokemonRetreatCost(state.player.activePokemon, state.player) === 0"
+                class="rounded bg-sky-100 px-1.5 py-0.2 text-[9px] font-bold text-sky-800"
+                title="Retraite gratuite (Talent Taxi Aérien)"
+              >
+                ✈️ Retraite 0 NRJ
+              </span>
             </div>
             <CardItem
               v-if="state.player.activePokemon"

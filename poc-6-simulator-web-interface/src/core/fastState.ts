@@ -49,7 +49,7 @@ export function hashInPlayPokemon(p: InPlayPokemon): number {
   let h = mix32(cardIdNum, 0x13579bdf)
   h = mix32(p.damage, h)
   h = mix32(p.attachedEnergies.length, h)
-  h = mix32(p.evolvedThisTurn ? 1 : 0, h)
+  h = mix32((p.evolvedThisTurn ? 1 : 0) | (p.cantAttackNextTurn ? 2 : 0), h)
 
   // Hachage commutatif des outils attachés
   let toolsSum = 0
