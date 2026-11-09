@@ -20,6 +20,7 @@ export interface SimulationConfig {
 export interface CardUsageMetrics {
   cardId: string
   nameFr: string
+  nameEn?: string
   category: string
   subCategory: string
   quantityInDeck: number
@@ -154,7 +155,9 @@ export interface TracedGameRecord {
 export interface MatchupStatRecord {
   opponentId: string
   opponentName: string
+  opponentNameEn?: string
   archetypeTag: string
+  archetypeTagEn?: string
   accentColor: string
   gamesPlayed: number
   wins: number

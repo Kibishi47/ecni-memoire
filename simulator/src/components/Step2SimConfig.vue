@@ -22,7 +22,7 @@ const emit = defineEmits<{
   (e: 'cancel-simulation'): void
 }>()
 
-const { t } = useI18n()
+const { t, currentLang } = useI18n()
 
 export interface PerformanceProfile {
   id: string
@@ -139,20 +139,20 @@ const launchButtonState = computed(() => {
   if (!props.deck.isValid60 || !props.deck.isFullyResolved) {
     return {
       disabled: true,
-      label: 'Deck invalide : veuillez revenir à l\'étape 1',
+      label: t('invalidDeckStep1'),
       showSpinner: false,
     }
   }
   if (props.config.selectedOpponentIds.length === 0) {
     return {
       disabled: true,
-      label: 'Sélectionnez au moins un adversaire',
+      label: t('selectAtLeastOneOpp'),
       showSpinner: false,
     }
   }
   return {
     disabled: false,
-    label: `${t('btnLaunchSimulation')} (${props.config.iterations} parties)`,
+    label: `${t('btnLaunchSimulation')} (${props.config.iterations} ${t('gamesUnit')})`,
     showSpinner: false,
   }
 })
@@ -186,7 +186,7 @@ const launchButtonState = computed(() => {
           @click="emit('cancel-simulation')"
           class="inline-flex items-center gap-2 rounded-xl border border-rose-600 bg-rose-600 px-5 py-2.5 text-sm font-bold text-white shadow-xs transition hover:bg-rose-700 active:bg-rose-800"
         >
-          <span>Annuler la simulation</span>
+          <span>{{ t('cancelSimulation') }}</span>
         </button>
 
         <button
@@ -219,7 +219,7 @@ const launchButtonState = computed(() => {
           </p>
         </div>
         <span class="rounded-lg bg-slate-100 px-3 py-1 font-mono text-xs font-bold text-slate-700">
-          Hardware : {{ maxHardwareWorkers }} cœurs détectés
+          {{ t('hardwareDetected', { n: maxHardwareWorkers }) }}
         </span>
       </div>
 
@@ -245,7 +245,7 @@ const launchButtonState = computed(() => {
                 class="rounded px-1.5 py-0.5 text-[10px] font-bold"
                 :class="activeProfileId === profile.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
               >
-                Recommandé
+                {{ t('recommended') }}
               </span>
             </div>
 
@@ -259,7 +259,7 @@ const launchButtonState = computed(() => {
 
           <div class="mt-4 flex items-center justify-between border-t pt-3" :class="activeProfileId === profile.id ? 'border-white/20' : 'border-slate-200'">
             <span class="font-mono text-xs font-bold">
-              {{ profile.iterations }} parties
+              {{ profile.iterations }} {{ t('gamesUnit') }}
             </span>
             <span
               class="text-[11px] font-semibold"
@@ -295,7 +295,7 @@ const launchButtonState = computed(() => {
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderRandom') }}</span>
-          <span class="mt-1 text-xs opacity-75">Simule un pile ou face réaliste à chaque manche</span>
+          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderRandomDesc') }}</span>
         </button>
 
         <button
@@ -309,7 +309,7 @@ const launchButtonState = computed(() => {
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderFirst') }}</span>
-          <span class="mt-1 text-xs opacity-75">Votre deck commence 100% des parties au T1</span>
+          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderFirstDesc') }}</span>
         </button>
 
         <button
@@ -323,7 +323,7 @@ const launchButtonState = computed(() => {
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderSecond') }}</span>
-          <span class="mt-1 text-xs opacity-75">Votre deck joue toujours en second (attaque T1 autorisée)</span>
+          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderSecondDesc') }}</span>
         </button>
       </div>
     </div>
@@ -344,7 +344,7 @@ const launchButtonState = computed(() => {
           @click="selectAllOpponents"
           class="text-xs font-semibold text-indigo-700 hover:underline"
         >
-          Tout sélectionner
+          {{ t('selectAll') }}
         </button>
       </div>
 
@@ -363,7 +363,7 @@ const launchButtonState = computed(() => {
           <div>
             <div class="flex items-center justify-between">
               <span class="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
-                {{ opp.archetypeBadge }}
+                {{ currentLang === 'en' && opp.archetypeBadgeEn ? opp.archetypeBadgeEn : opp.archetypeBadge }}
               </span>
               <input
                 type="checkbox"
@@ -373,15 +373,15 @@ const launchButtonState = computed(() => {
             </div>
 
             <h4 class="mt-3 text-base font-bold text-slate-900">
-              {{ opp.name }}
+              {{ currentLang === 'en' && opp.nameEn ? opp.nameEn : opp.name }}
             </h4>
             <p class="mt-1 text-xs text-slate-600">
-              {{ opp.strategySubtitle }}
+              {{ currentLang === 'en' && opp.strategySubtitleEn ? opp.strategySubtitleEn : opp.strategySubtitle }}
             </p>
           </div>
 
           <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-            <span class="truncate">Menaces : {{ opp.keyThreats.slice(0, 2).join(', ') }}</span>
+            <span class="truncate">{{ t('threatsLabel') }} : {{ (currentLang === 'en' && opp.keyThreatsEn ? opp.keyThreatsEn : opp.keyThreats).slice(0, 2).join(', ') }}</span>
           </div>
         </div>
       </div>

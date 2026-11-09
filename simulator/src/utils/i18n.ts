@@ -1,4 +1,6 @@
 import { ref } from 'vue'
+import type { EngineCardModel } from '../types/cardModel'
+import type { ParsedDeckEntry } from '../types/deck'
 
 export type Language = 'fr' | 'en'
 
@@ -53,6 +55,14 @@ export const translations: Record<Language, Record<string, string>> = {
     ruleBasicRequired: 'Au moins 1 Pokémon de base est obligatoire.',
     ruleExact60: 'Le deck doit contenir exactement 60 cartes.',
     unresolvedCardsAlert: 'carte(s) non reconnue(s) dans la base.',
+    awaitingDecklist: 'En attente de votre decklist',
+    pasteDecklistPrompt: 'Collez votre decklist dans la zone de texte puis cliquez sur Valider.',
+    distinctCardsDetected: '{n} références de cartes distinctes détectées.',
+    deckSynergyVerification: 'Vérification des cartes requises par vos attaquants et moteurs',
+    synergiesValidated: '{done} / {total} synergies validées',
+    synergySatisfied: 'Validé',
+    synergyMissing: 'Manquant',
+    unresolvedCardsTitle: 'Cartes non reconnues ({n}) :',
 
     // Step 2 - Config
     step2Heading: 'Paramètres de Simulation',
@@ -73,11 +83,27 @@ export const translations: Record<Language, Record<string, string>> = {
     turnOrderTitle: 'Initiative du Premier Tour',
     turnOrderSub: 'Choisissez les conditions de premier tour pour les simulations',
     turnOrderRandom: 'Aléatoire (50/50 Standard)',
+    turnOrderRandomDesc: 'Simule un pile ou face réaliste à chaque manche',
     turnOrderFirst: 'Jouer en Premier (J1)',
+    turnOrderFirstDesc: 'Votre deck commence 100% des parties au T1',
     turnOrderSecond: 'Jouer en Second (J2)',
+    turnOrderSecondDesc: 'Votre deck joue toujours en second (attaque T1 autorisée)',
     metaMatchupsTitle: 'Matchups Méta à Affronter',
     metaMatchupsSub: 'Sélectionnez les decks adverses contre lesquels simuler',
     btnLaunchSimulation: 'Lancer la Simulation',
+    selectAll: 'Tout sélectionner',
+    recommended: 'Recommandé',
+    threatsLabel: 'Menaces',
+    modifyDeck: 'Modifier mon deck',
+    cancelSimulation: 'Annuler la simulation',
+    simulationCancelled: 'Simulation interrompue par l utilisateur.',
+    simulationErrorHeading: 'Une erreur est survenue pendant l exécution de la simulation',
+    closeAlert: 'Fermer l alerte',
+    debugModeBadge: 'Mode Debug',
+    hardwareDetected: 'Hardware : {n} cœurs détectés',
+    invalidDeckStep1: 'Deck invalide : veuillez revenir à l étape 1',
+    selectAtLeastOneOpp: 'Sélectionnez au moins un adversaire',
+    gamesUnit: 'parties',
 
     // Step 3 - Dashboard & Comparator
     globalPerformance: 'Performances Globales',
@@ -89,10 +115,13 @@ export const translations: Record<Language, Record<string, string>> = {
     testVariantAndCompare: 'Tester cette variante et comparer',
     adjustDeckTo60: 'Ajustez le deck ({n} / 60 cartes requises)',
     exportPtcglVariant: 'Exporter la variante PTCGL',
+    exportPtcglDeck: 'Exporter le deck PTCGL',
     simulatingProgress: 'Simulation en cours... {done} / {total} parties',
 
     // Version History
     versionHistoryTitle: 'Historique des Versions',
+    versionHistorySub: 'Cliquez sur une version pour charger ses cartes et ses statistiques',
+    baselineRef: 'Réf',
     versionLabel: 'Version {v}',
     initialVersion: 'Initiale',
     restoreVersion: 'Restaurer',
@@ -126,6 +155,7 @@ export const translations: Record<Language, Record<string, string>> = {
     turn1AttackLockJ2: 'Attaque / Item-Lock T1 en J2',
     turn1ItemLockDesc: 'Verrouillage d Objets T1 J2 (Pollen Démangeant) :',
     avgDamagePerTurn: 'Dégâts Moyens / Tour :',
+    avgDamageSub: 'Moyenne infligée par tour actif',
 
     prizeMulliganHeader: 'Économie de Récompenses & Régularité',
     avgPlayerPrizes: 'Prizes Moyens Joueur',
@@ -136,7 +166,9 @@ export const translations: Record<Language, Record<string, string>> = {
     mulliganRate: 'Taux de Mulligan',
     gamesWithMulligan: 'partie(s) avec au moins un mulligan',
     avgTurnsPerGame: 'Moyenne Tours / Match',
+    avgTurnsCount: '{turns} tours',
     simSpeed: 'Débit Simulation',
+    gamesPerSec: '{rate} parties / sec',
 
     winReasonsHeader: 'Raisons de Victoire',
     reasonPrizes: 'Toutes Récompenses Prises',
@@ -149,6 +181,8 @@ export const translations: Record<Language, Record<string, string>> = {
     comboTriggerRate: 'Taux Déclenchement',
     comboFirstTurn: '1er Tour Moyen',
     comboAvgDamage: 'Dégâts Moyens',
+    comboDamageLabel: '{dmg} dég.',
+    comboEffectLabel: 'Effet',
 
     // Card Audit
     cardAuditHeader: 'Audit d Utilité Carte par Carte',
@@ -159,6 +193,10 @@ export const translations: Record<Language, Record<string, string>> = {
     colDeadDiscardRate: 'Carte Morte / Défaussée sans effet (%)',
     colPrizedImpact: 'Impact si Prized (Tous exemplaires)',
     colAlternatives: 'Alternatives Intelligentes',
+    seenRate: 'Vue : {pct} %',
+    stuckTurns: '{n}t bloquée',
+    neverPrized: '0 % (Jamais 100% Prized)',
+    gamesPctPrized: '{pct} % des parties',
 
     // Atelier & Alternatives
     deckComposition: 'Composition du Deck',
@@ -168,9 +206,12 @@ export const translations: Record<Language, Record<string, string>> = {
     searchAddCard: 'Rechercher une carte à ajouter (ex: Mashynn, Poffin)...',
     addCard: '+ Ajouter',
     altCountBadge: '{n} alt.',
+    cardReplacedFeedback: '{oldCard} remplacé par {newCard}.',
+    matchupStats: '{wins}V - {losses}D ({total} parties)',
 
     // Export Modal
     exportModalTitle: 'Exporter la variante optimisée (60 cartes)',
+    exportModalTitleDeck: 'Exporter le deck actif (60 cartes)',
     formatReadyForPtcgl: 'Format prêt à coller dans Pokémon TCG Live :',
     copyClipboard: 'Copier dans le presse-papier',
     downloadTxt: 'Télécharger .txt',
@@ -182,6 +223,36 @@ export const translations: Record<Language, Record<string, string>> = {
     rulesAndEffects: 'Règles et Effets',
     clickToEnlarge: 'Cliquer pour agrandir',
     cardHp: 'PV',
+    noRulesText: 'Carte sans effet de règles particulier.',
+    cardsUnit: 'cartes',
+    formatQtyNameCode: 'Format : Qté Nom CODE N°',
+    tabRulesAndCard: 'Règles & Carte',
+    tabAiEngineModel: 'Modèle IA Moteur',
+    aiRoleLabel: 'Rôle Stratégique IA',
+    aiActionsTitle: 'Actions & Effets Transcrits par l IA',
+    aiCostLabel: 'Coût',
+    aiCostNone: 'Aucun coût requis',
+    aiPreconditionsLabel: 'Conditions d activation',
+    aiPreconditionsNone: 'Aucune condition spécifique',
+    aiEffectsLabel: 'Effet(s) Moteur',
+    aiEffectsNone: 'Aucun sous-effet atomique',
+    aiDeadCardCondition: 'Carte morte si',
+    aiViewCleanJson: 'Voir le JSON épuré (sans clés null)',
+    aiHideCleanJson: 'Masquer le JSON',
+    aiTurn1AllowedJ2: 'Autorisé T1 J2',
+    aiTurn1ForbiddenJ1: 'Interdit T1 J1',
+    aiNoAiModelAvailable: 'Aucun modèle IA disponible pour cette carte.',
+
+    // Subcategories
+    subcatBasic: 'Base',
+    subcatStage1: 'Niveau 1',
+    subcatStage2: 'Niveau 2',
+    subcatSupporter: 'Supporter',
+    subcatItem: 'Objet',
+    subcatTool: 'Outil Pokémon',
+    subcatStadium: 'Stade',
+    subcatBasicEnergy: 'Énergie de base',
+    subcatSpecialEnergy: 'Énergie Spéciale',
   },
   en: {
     // Header & Steps
@@ -215,6 +286,14 @@ export const translations: Record<Language, Record<string, string>> = {
     ruleBasicRequired: 'At least 1 Basic Pokémon is required.',
     ruleExact60: 'Deck must contain exactly 60 cards.',
     unresolvedCardsAlert: 'unresolved card(s) in database.',
+    awaitingDecklist: 'Awaiting your decklist',
+    pasteDecklistPrompt: 'Paste your decklist into the text box and click Validate.',
+    distinctCardsDetected: '{n} distinct card references detected.',
+    deckSynergyVerification: 'Verifying requirements for your attackers and engines',
+    synergiesValidated: '{done} / {total} synergies validated',
+    synergySatisfied: 'Satisfied',
+    synergyMissing: 'Missing',
+    unresolvedCardsTitle: 'Unresolved cards ({n}):',
 
     // Step 2 - Config
     step2Heading: 'Simulation Settings',
@@ -235,11 +314,27 @@ export const translations: Record<Language, Record<string, string>> = {
     turnOrderTitle: 'First Turn Initiative',
     turnOrderSub: 'Choose first turn conditions for the simulation runs',
     turnOrderRandom: 'Random (50/50 Standard)',
+    turnOrderRandomDesc: 'Simulates a realistic coin flip on every game',
     turnOrderFirst: 'Go First (P1)',
+    turnOrderFirstDesc: 'Your deck goes first in 100% of games (T1)',
     turnOrderSecond: 'Go Second (P2)',
+    turnOrderSecondDesc: 'Your deck goes second in 100% of games (T1 attack allowed)',
     metaMatchupsTitle: 'Meta Matchups to Face',
     metaMatchupsSub: 'Select the opponent decks to benchmark against',
     btnLaunchSimulation: 'Run Simulation',
+    selectAll: 'Select all',
+    recommended: 'Recommended',
+    threatsLabel: 'Threats',
+    modifyDeck: 'Edit my deck',
+    cancelSimulation: 'Cancel simulation',
+    simulationCancelled: 'Simulation cancelled by user.',
+    simulationErrorHeading: 'An error occurred during simulation execution',
+    closeAlert: 'Dismiss alert',
+    debugModeBadge: 'Debug Mode',
+    hardwareDetected: 'Hardware: {n} cores detected',
+    invalidDeckStep1: 'Invalid deck: please return to step 1',
+    selectAtLeastOneOpp: 'Select at least one opponent',
+    gamesUnit: 'games',
 
     // Step 3 - Dashboard & Comparator
     globalPerformance: 'Global Performance',
@@ -251,10 +346,13 @@ export const translations: Record<Language, Record<string, string>> = {
     testVariantAndCompare: 'Test this variant & compare',
     adjustDeckTo60: 'Adjust deck ({n} / 60 cards required)',
     exportPtcglVariant: 'Export PTCGL Variant',
+    exportPtcglDeck: 'Export PTCGL Deck',
     simulatingProgress: 'Simulation in progress... {done} / {total} games',
 
     // Version History
     versionHistoryTitle: 'Deck Version History',
+    versionHistorySub: 'Click on a version to inspect its cards and simulation results',
+    baselineRef: 'Ref',
     versionLabel: 'Version {v}',
     initialVersion: 'Initial',
     restoreVersion: 'Restore',
@@ -288,6 +386,7 @@ export const translations: Record<Language, Record<string, string>> = {
     turn1AttackLockJ2: 'T1 Attack / Item-Lock Going 2nd',
     turn1ItemLockDesc: 'T1 Item Lock Going 2nd (Itchy Pollen):',
     avgDamagePerTurn: 'Avg Damage / Turn:',
+    avgDamageSub: 'Average damage dealt per active turn',
 
     prizeMulliganHeader: 'Prize Trade & Consistency',
     avgPlayerPrizes: 'Avg Player Prizes Taken',
@@ -298,7 +397,9 @@ export const translations: Record<Language, Record<string, string>> = {
     mulliganRate: 'Mulligan Rate',
     gamesWithMulligan: 'game(s) with at least one mulligan',
     avgTurnsPerGame: 'Avg Turns / Game',
+    avgTurnsCount: '{turns} turns',
     simSpeed: 'Simulation Speed',
+    gamesPerSec: '{rate} games / sec',
 
     winReasonsHeader: 'Win Reasons',
     reasonPrizes: 'All Prizes Taken',
@@ -311,6 +412,8 @@ export const translations: Record<Language, Record<string, string>> = {
     comboTriggerRate: 'Trigger Rate',
     comboFirstTurn: 'Avg First Turn',
     comboAvgDamage: 'Avg Damage',
+    comboDamageLabel: '{dmg} dmg',
+    comboEffectLabel: 'Effect',
 
     // Card Audit
     cardAuditHeader: 'Card-by-Card Utility Audit',
@@ -321,6 +424,10 @@ export const translations: Record<Language, Record<string, string>> = {
     colDeadDiscardRate: 'Dead Card / Discarded Unused (%)',
     colPrizedImpact: 'Impact When Prized (All copies)',
     colAlternatives: 'Smart Alternatives',
+    seenRate: 'Seen: {pct} %',
+    stuckTurns: '{n}t stuck in hand',
+    neverPrized: '0 % (Never 100% Prized)',
+    gamesPctPrized: '{pct} % of games',
 
     // Atelier & Alternatives
     deckComposition: 'Deck Composition',
@@ -330,9 +437,12 @@ export const translations: Record<Language, Record<string, string>> = {
     searchAddCard: 'Search a card to add (e.g. Iono, Buddy-Buddy Poffin)...',
     addCard: '+ Add',
     altCountBadge: '{n} alt.',
+    cardReplacedFeedback: '{oldCard} replaced by {newCard}.',
+    matchupStats: '{wins}W - {losses}L ({total} games)',
 
     // Export Modal
     exportModalTitle: 'Export Optimized Variant (60 cards)',
+    exportModalTitleDeck: 'Export Active Deck (60 cards)',
     formatReadyForPtcgl: 'Format ready to paste in Pokémon TCG Live:',
     copyClipboard: 'Copy to clipboard',
     downloadTxt: 'Download .txt',
@@ -344,6 +454,36 @@ export const translations: Record<Language, Record<string, string>> = {
     rulesAndEffects: 'Rules & Effects',
     clickToEnlarge: 'Click to enlarge',
     cardHp: 'HP',
+    noRulesText: 'Card without any special rules effect.',
+    cardsUnit: 'cards',
+    formatQtyNameCode: 'Format: Qty Name CODE #',
+    tabRulesAndCard: 'Rules & Card',
+    tabAiEngineModel: 'AI Engine Model',
+    aiRoleLabel: 'AI Strategic Role',
+    aiActionsTitle: 'Actions & Effects Transcribed by AI',
+    aiCostLabel: 'Cost',
+    aiCostNone: 'No cost required',
+    aiPreconditionsLabel: 'Activation Conditions',
+    aiPreconditionsNone: 'No specific conditions',
+    aiEffectsLabel: 'Engine Effect(s)',
+    aiEffectsNone: 'No atomic sub-effects',
+    aiDeadCardCondition: 'Dead card if',
+    aiViewCleanJson: 'View cleaned JSON (no nulls)',
+    aiHideCleanJson: 'Hide JSON',
+    aiTurn1AllowedJ2: 'Allowed T1 P2',
+    aiTurn1ForbiddenJ1: 'Forbidden T1 P1',
+    aiNoAiModelAvailable: 'No AI model available for this card.',
+
+    // Subcategories
+    subcatBasic: 'Basic',
+    subcatStage1: 'Stage 1',
+    subcatStage2: 'Stage 2',
+    subcatSupporter: 'Supporter',
+    subcatItem: 'Item',
+    subcatTool: 'Pokémon Tool',
+    subcatStadium: 'Stadium',
+    subcatBasicEnergy: 'Basic Energy',
+    subcatSpecialEnergy: 'Special Energy',
   },
 }
 
@@ -358,11 +498,172 @@ export function t(key: string, params?: Record<string, string | number>): string
   return text
 }
 
+/**
+ * Retourne le nom localisé d'une carte selon la langue active (FR ou EN).
+ */
+export function getLocalizedCardName(
+  card:
+    | ParsedDeckEntry
+    | EngineCardModel
+    | {
+        nameFr?: string
+        nameEn?: string
+        cardNameFr?: string
+        cardNameEn?: string
+        name?: string
+        identity?: { nameFr?: string; nameEn?: string }
+        model?: { identity?: { nameFr?: string; nameEn?: string }; nameFr?: string; nameEn?: string }
+      }
+    | null
+    | undefined,
+  lang?: Language,
+): string {
+  if (!card) return ''
+  const targetLang = lang || currentLang.value
+
+  const cardObj = card as Record<string, any>
+  const nameEn =
+    (typeof cardObj.nameEn === 'string' && cardObj.nameEn) ||
+    (typeof cardObj.cardNameEn === 'string' && cardObj.cardNameEn) ||
+    (typeof cardObj.identity?.nameEn === 'string' && cardObj.identity.nameEn) ||
+    (typeof cardObj.model?.identity?.nameEn === 'string' && cardObj.model.identity.nameEn) ||
+    (typeof cardObj.model?.nameEn === 'string' && cardObj.model.nameEn) ||
+    null
+
+  const nameFr =
+    (typeof cardObj.nameFr === 'string' && cardObj.nameFr) ||
+    (typeof cardObj.cardNameFr === 'string' && cardObj.cardNameFr) ||
+    (typeof cardObj.identity?.nameFr === 'string' && cardObj.identity.nameFr) ||
+    (typeof cardObj.model?.identity?.nameFr === 'string' && cardObj.model.identity.nameFr) ||
+    (typeof cardObj.model?.nameFr === 'string' && cardObj.model.nameFr) ||
+    (typeof cardObj.name === 'string' && cardObj.name) ||
+    null
+
+  if (targetLang === 'en') {
+    return nameEn || nameFr || 'Card'
+  }
+  return nameFr || nameEn || 'Carte'
+}
+
+/**
+ * Nettoie une ligne de règle en retirant le tag de langue redondant (ex: "[Attaque FR: " -> "[Attaque: ").
+ */
+function cleanRuleLine(line: string, lang: Language): string {
+  if (lang === 'fr') {
+    return line
+      .replace(/^\[(Attaque|Talent|Dresseur|Effet|Règle|Regle)\s+FR\s*:\s*/i, '[$1: ')
+      .replace(/^\[(Effet|Énergie|Energie)\s+FR\]\s*/i, '[$1] ')
+  }
+  return line
+    .replace(/^\[(Attack|Ability|Trainer|Effect|Rule)\s+EN\s*:\s*/i, '[$1: ')
+    .replace(/^\[(Effect|Energy)\s+EN\]\s*/i, '[$1] ')
+}
+
+/**
+ * Retourne UNIQUEMENT les règles et effets de la carte correspondant à la langue sélectionnée.
+ * Élimine tout mélange de langues sur l'interface.
+ */
+export function getLocalizedCardRules(
+  card:
+    | ParsedDeckEntry
+    | EngineCardModel
+    | {
+        identity?: { rawRulesText?: string[] }
+        model?: { identity?: { rawRulesText?: string[] } }
+        rawRulesText?: string[]
+      }
+    | null
+    | undefined,
+  lang?: Language,
+): string[] {
+  if (!card) return []
+  const targetLang = lang || currentLang.value
+
+  const rawRules: string[] =
+    ('rawRulesText' in card && Array.isArray(card.rawRulesText) && card.rawRulesText) ||
+    ('identity' in card && Array.isArray(card.identity?.rawRulesText) && card.identity.rawRulesText) ||
+    ('model' in card && Array.isArray(card.model?.identity?.rawRulesText) && card.model.identity.rawRulesText) ||
+    []
+
+  if (rawRules.length === 0) return []
+
+  if (targetLang === 'en') {
+    const enRules = rawRules.filter((r) =>
+      /\[(?:Attack|Ability|Trainer|Energy|Effect|Rule)\s+EN(?::|\])|\bEN\b/i.test(r),
+    )
+    if (enRules.length > 0) {
+      return enRules.map((r) => cleanRuleLine(r, 'en'))
+    }
+    const nonFrRules = rawRules.filter(
+      (r) => !/\[(?:Attaque|Talent|Dresseur|Énergie|Effet|Règle|Regle)\s+FR|\bFR\b/i.test(r),
+    )
+    if (nonFrRules.length > 0) {
+      return nonFrRules.map((r) => cleanRuleLine(r, 'en'))
+    }
+  } else {
+    const frRules = rawRules.filter((r) =>
+      /\[(?:Attaque|Talent|Dresseur|Énergie|Effet|Règle|Regle)\s+FR(?::|\])|\bFR\b/i.test(r),
+    )
+    if (frRules.length > 0) {
+      return frRules.map((r) => cleanRuleLine(r, 'fr'))
+    }
+    const nonEnRules = rawRules.filter(
+      (r) => !/\[(?:Attack|Ability|Trainer|Energy|Effect|Rule)\s+EN|\bEN\b/i.test(r),
+    )
+    if (nonEnRules.length > 0) {
+      return nonEnRules.map((r) => cleanRuleLine(r, 'fr'))
+    }
+  }
+
+  return rawRules.map((r) => cleanRuleLine(r, targetLang))
+}
+
+/**
+ * Traduit la sous-catégorie d'une carte (BASIC, STAGE_1, SUPPORTER, ITEM, TOOL, STADIUM, etc.)
+ */
+export function getLocalizedSubCategory(rawSubCat: string | null | undefined, lang?: Language): string {
+  if (!rawSubCat) return ''
+  const targetLang = lang || currentLang.value
+  const normalized = String(rawSubCat).toUpperCase().trim()
+
+  const mapFr: Record<string, string> = {
+    BASIC: 'Base',
+    STAGE_1: 'Niveau 1',
+    STAGE_2: 'Niveau 2',
+    SUPPORTER: 'Supporter',
+    ITEM: 'Objet',
+    TOOL: 'Outil Pokémon',
+    STADIUM: 'Stade',
+    BASIC_ENERGY: 'Énergie de base',
+    SPECIAL_ENERGY: 'Énergie Spéciale',
+  }
+
+  const mapEn: Record<string, string> = {
+    BASIC: 'Basic',
+    STAGE_1: 'Stage 1',
+    STAGE_2: 'Stage 2',
+    SUPPORTER: 'Supporter',
+    ITEM: 'Item',
+    TOOL: 'Pokémon Tool',
+    STADIUM: 'Stadium',
+    BASIC_ENERGY: 'Basic Energy',
+    SPECIAL_ENERGY: 'Special Energy',
+  }
+
+  if (targetLang === 'en') {
+    return mapEn[normalized] || rawSubCat
+  }
+  return mapFr[normalized] || rawSubCat
+}
+
 export function useI18n() {
   return {
     currentLang,
     setLanguage,
     toggleLanguage,
     t,
+    getLocalizedCardName,
+    getLocalizedCardRules,
+    getLocalizedSubCategory,
   }
 }
