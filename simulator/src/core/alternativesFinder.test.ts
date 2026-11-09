@@ -132,6 +132,15 @@ describe('AlternativesFinder — Supporter-to-Item Action Economy & Attacker Com
     const deckMap = findSmartDeckAlternatives([pepperOrBolt(catalog)], catalog)
     expect(Object.keys(deckMap).length).toBe(1)
   })
+
+  it('does not suggest alternatives for a MAIN_ATTACKER (core archetype foundation)', () => {
+    const catalog = getAllCatalogModels()
+    const charizard = catalog.find((c) => c.cardId === 'sv03-125')
+    if (charizard) {
+      const alts = findAlternativesForCard(charizard, catalog)
+      expect(alts.length).toBe(0)
+    }
+  })
 })
 
 function pepperOrBolt(catalog: EngineCardModel[]): EngineCardModel {

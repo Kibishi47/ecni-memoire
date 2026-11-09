@@ -23,12 +23,11 @@ const maxHardwareWorkers =
     ? Math.max(1, Math.min(16, navigator.hardwareConcurrency))
     : 4
 
-const defaultRawPtcglText = META_OPPONENT_DECKS[0]!.ptcglText
-const rawDeckText = ref<string>(defaultRawPtcglText)
+const rawDeckText = ref<string>('')
 
-const initialParsed = parsePtcglDecklist(defaultRawPtcglText)
+const initialParsed = parsePtcglDecklist('')
 const baselineDeck = ref<ParsedDeck>(initialParsed)
-const editableDeck = ref<ParsedDeck>(parsePtcglDecklist(defaultRawPtcglText))
+const editableDeck = ref<ParsedDeck>(parsePtcglDecklist(''))
 
 const simConfig = ref<SimulationConfig>({
   iterations: 100,
@@ -87,20 +86,6 @@ function detectDebugModeFromUrl() {
   simConfig.value.debugMode = debugActive
 }
 
-function toggleDebugMode() {
-  isDebugMode.value = !isDebugMode.value
-  simConfig.value.debugMode = isDebugMode.value
-  if (typeof window !== 'undefined') {
-    const url = new URL(window.location.href)
-    if (isDebugMode.value) {
-      url.searchParams.set('debug', 'true')
-    } else {
-      url.searchParams.delete('debug')
-    }
-    window.history.replaceState({}, '', url.toString())
-  }
-}
-
 onMounted(() => {
   detectDebugModeFromUrl()
   if (typeof window !== 'undefined') {
@@ -115,7 +100,12 @@ onBeforeUnmount(() => {
   }
 })
 
-const canGoStep2 = computed(() => baselineDeck.value.isValid60)
+const canGoStep2 = computed(
+  () =>
+    baselineDeck.value.isValid60 &&
+    baselineDeck.value.isFullyResolved &&
+    baselineDeck.value.cards.length > 0,
+)
 const canGoStep3 = computed(() => currentSummary.value !== null || isSimulating.value)
 
 function handleValidateDeck(newRawText: string) {
@@ -329,7 +319,6 @@ function handleResetToBaseline() {
       :is-debug-mode="isDebugMode"
       :deck-total-cards="currentStep === 3 ? editableDeck.totalCards : baselineDeck.totalCards"
       @select-step="handleSelectStep"
-      @toggle-debug="toggleDebugMode"
     />
 
     <!-- BANDEAU DE PROGRESSION EN DIRECT (FEEDBACK VISUEL) -->
@@ -444,6 +433,7 @@ function handleResetToBaseline() {
         v-if="currentStep === 1"
         :raw-deck-text="rawDeckText"
         :validated-deck="baselineDeck"
+        :is-debug-mode="isDebugMode"
         @validate-deck="handleValidateDeck"
         @proceed-step2="currentStep = 2"
       />
