@@ -253,6 +253,27 @@ export function findAlternativesForCard(
     (m) => !(m.category === 'ENERGY' && m.subCategory === 'BASIC_ENERGY'),
   )
 
+  // Un attaquant principal (MAIN_ATTACKER) est le coeur du deck et ne doit jamais etre remplace
+  if (targetModel.category === 'POKEMON') {
+    const role = targetModel.strategicEvaluator.aiRole || targetModel.strategicEvaluator.primaryRole
+    if (role === 'MAIN_ATTACKER') {
+      return []
+    }
+    // De meme, la lignee de base / sous-evolution d'un attaquant principal ne doit pas etre remplacee
+    const chain = targetModel.pokemonStats?.evolutionChain || []
+    if (chain.length > 1 && (targetModel.subCategory === 'BASIC' || targetModel.subCategory === 'STAGE_1')) {
+      const isCoreLine = allModels.some(
+        (m) =>
+          m.category === 'POKEMON' &&
+          (m.strategicEvaluator.aiRole === 'MAIN_ATTACKER' || m.strategicEvaluator.primaryRole === 'MAIN_ATTACKER') &&
+          m.pokemonStats?.evolutionChain?.some((c) => chain.includes(c)),
+      )
+      if (isCoreLine) {
+        return []
+      }
+    }
+  }
+
   const suggestions: SmartAlternativeSuggestion[] = []
   const targetPrimitives = new Map<EffectPrimitive, CardFilter | null | undefined>()
 
@@ -266,6 +287,14 @@ export function findAlternativesForCard(
 
   for (const candidate of allModels) {
     if (candidate.cardId === targetModel.cardId) continue
+
+    // Ne pas proposer l'attaquant principal d'un autre deck pour remplacer un slot utilitaire ou tech
+    if (candidate.category === 'POKEMON') {
+      const candRole = candidate.strategicEvaluator.aiRole || candidate.strategicEvaluator.primaryRole
+      if (candRole === 'MAIN_ATTACKER') {
+        continue
+      }
+    }
 
     // Cas 1 : La carte cible est un SUPPORTER -> Priorité absolue aux alternatives OBJET / OUTIL / TALENT POKÉMON
     if (targetModel.subCategory === 'SUPPORTER') {
