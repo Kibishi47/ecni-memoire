@@ -13,7 +13,9 @@ import { SimulationWorkerPool } from './worker/workerPool'
 import WizardHeader from './components/WizardHeader.vue'
 import Step1DeckImport from './components/Step1DeckImport.vue'
 import Step2SimConfig from './components/Step2SimConfig.vue'
-import Step3DashboardAndComparator from './components/Step3DashboardAndComparator.vue'
+import Step3DashboardAndComparator, {
+  type DeckVersionEntry,
+} from './components/Step3DashboardAndComparator.vue'
 
 const currentStep = ref<1 | 2 | 3>(1)
 const isDebugMode = ref<boolean>(false)
@@ -29,8 +31,12 @@ const initialParsed = parsePtcglDecklist('')
 const baselineDeck = ref<ParsedDeck>(initialParsed)
 const editableDeck = ref<ParsedDeck>(parsePtcglDecklist(''))
 
+// HISTORIQUE COMPLET DES VERSIONS DU DECK
+const deckVersions = ref<DeckVersionEntry[]>([])
+const activeVersionId = ref<string>('')
+
 const simConfig = ref<SimulationConfig>({
-  iterations: 100,
+  iterations: 300,
   maxTurns: 15,
   maxBranches: 20,
   selectedOpponentIds: META_OPPONENT_DECKS.map((d) => d.id),
@@ -115,6 +121,18 @@ function handleValidateDeck(newRawText: string) {
   editableDeck.value = parsePtcglDecklist(newRawText)
   baselineSummary.value = null
   currentSummary.value = null
+
+  const v1: DeckVersionEntry = {
+    id: 'v1',
+    versionNumber: 1,
+    label: 'Version 1 (Initiale)',
+    deck: parsePtcglDecklist(newRawText),
+    summary: null,
+    timestamp: Date.now(),
+    isBaseline: true,
+  }
+  deckVersions.value = [v1]
+  activeVersionId.value = 'v1'
 }
 
 function handleSelectStep(step: 1 | 2 | 3) {
@@ -153,6 +171,9 @@ async function executeInitialSimulation() {
     )
     baselineSummary.value = summary
     currentSummary.value = summary
+    if (deckVersions.value.length > 0 && deckVersions.value[0]) {
+      deckVersions.value[0].summary = summary
+    }
   } catch (err) {
     if (err instanceof Error && err.message.includes('annulée')) {
       cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
@@ -174,6 +195,41 @@ async function executeComparisonSimulation() {
     isSimulating.value
   ) {
     return
+  }
+
+  // Crée automatiquement une nouvelle version si le deck a été modifié par rapport à la version active
+  const activeVer = deckVersions.value.find((v) => v.id === activeVersionId.value)
+  let targetVersion: DeckVersionEntry
+  if (activeVer && activeVer.versionNumber === 1 && deckVersions.value.length === 1) {
+    const v2: DeckVersionEntry = {
+      id: 'v2',
+      versionNumber: 2,
+      label: 'Version 2 (Variante)',
+      deck: computeDeckSummary(editableDeck.value.cards.map((c) => ({ ...c })), editableDeck.value.format),
+      summary: null,
+      timestamp: Date.now(),
+      isBaseline: false,
+    }
+    deckVersions.value.push(v2)
+    activeVersionId.value = 'v2'
+    targetVersion = v2
+  } else if (activeVer) {
+    targetVersion = activeVer
+    targetVersion.deck = computeDeckSummary(editableDeck.value.cards.map((c) => ({ ...c })), editableDeck.value.format)
+  } else {
+    const newNum = deckVersions.value.length + 1
+    const newVer: DeckVersionEntry = {
+      id: `v${newNum}`,
+      versionNumber: newNum,
+      label: `Version ${newNum}`,
+      deck: computeDeckSummary(editableDeck.value.cards.map((c) => ({ ...c })), editableDeck.value.format),
+      summary: null,
+      timestamp: Date.now(),
+      isBaseline: false,
+    }
+    deckVersions.value.push(newVer)
+    activeVersionId.value = newVer.id
+    targetVersion = newVer
   }
 
   simulationError.value = null
@@ -198,6 +254,7 @@ async function executeComparisonSimulation() {
       baselineSummary.value = summary
     }
     currentSummary.value = summary
+    targetVersion.summary = summary
   } catch (err) {
     if (err instanceof Error && err.message.includes('annulée')) {
       cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
@@ -208,6 +265,61 @@ async function executeComparisonSimulation() {
     }
   } finally {
     isSimulating.value = false
+  }
+}
+
+function handleSelectVersion(versionId: string) {
+  const found = deckVersions.value.find((v) => v.id === versionId)
+  if (!found) return
+  activeVersionId.value = versionId
+  editableDeck.value = computeDeckSummary(
+    found.deck.cards.map((c) => ({ ...c })),
+    found.deck.format,
+  )
+  if (found.summary) {
+    currentSummary.value = found.summary
+  }
+}
+
+function handleSaveAsNewVersion() {
+  const nextNum = deckVersions.value.length + 1
+  const newVer: DeckVersionEntry = {
+    id: `v${nextNum}`,
+    versionNumber: nextNum,
+    label: `Version ${nextNum}`,
+    deck: computeDeckSummary(editableDeck.value.cards.map((c) => ({ ...c })), editableDeck.value.format),
+    summary: currentSummary.value,
+    timestamp: Date.now(),
+    isBaseline: false,
+  }
+  deckVersions.value.push(newVer)
+  activeVersionId.value = newVer.id
+}
+
+function handleSetBaselineVersion(versionId: string) {
+  const target = deckVersions.value.find((v) => v.id === versionId)
+  if (!target) return
+  for (const v of deckVersions.value) {
+    v.isBaseline = v.id === versionId
+  }
+  baselineDeck.value = computeDeckSummary(
+    target.deck.cards.map((c) => ({ ...c })),
+    target.deck.format,
+  )
+  if (target.summary) {
+    baselineSummary.value = target.summary
+  }
+}
+
+function handleRestoreVersion(versionId: string) {
+  const target = deckVersions.value.find((v) => v.id === versionId)
+  if (!target) return
+  editableDeck.value = computeDeckSummary(
+    target.deck.cards.map((c) => ({ ...c })),
+    target.deck.format,
+  )
+  if (target.summary) {
+    currentSummary.value = target.summary
   }
 }
 
@@ -279,33 +391,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
   }
 
   rebuildEditableDeck(clonedCards)
-}
-
-function handleToggleStressOhko(enabled: boolean) {
-  simConfig.value = {
-    ...simConfig.value,
-    stressTestOhkoEachTurn: enabled,
-  }
-}
-
-function handlePromoteCurrentAsBaseline() {
-  baselineDeck.value = computeDeckSummary(
-    editableDeck.value.cards.map((c) => ({ ...c })),
-    editableDeck.value.format,
-  )
-  if (currentSummary.value) {
-    baselineSummary.value = currentSummary.value
-  }
-}
-
-function handleResetToBaseline() {
-  editableDeck.value = computeDeckSummary(
-    baselineDeck.value.cards.map((c) => ({ ...c })),
-    baselineDeck.value.format,
-  )
-  if (baselineSummary.value) {
-    currentSummary.value = baselineSummary.value
-  }
 }
 </script>
 
@@ -463,16 +548,18 @@ function handleResetToBaseline() {
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
         :is-debug-mode="isDebugMode"
-        :stress-test-ohko="Boolean(simConfig.stressTestOhkoEachTurn)"
+        :deck-versions="deckVersions"
+        :active-version-id="activeVersionId"
         @adjust-card-qty="handleAdjustCardQty"
         @remove-card="handleRemoveCard"
         @add-catalog-card="handleAddCatalogCard"
         @replace-card-in-deck="handleReplaceCardInDeck"
-        @toggle-stress-ohko="handleToggleStressOhko"
         @rerun-and-compare="executeComparisonSimulation"
+        @select-version="handleSelectVersion"
+        @save-as-new-version="handleSaveAsNewVersion"
+        @set-baseline-version="handleSetBaselineVersion"
+        @restore-version="handleRestoreVersion"
         @cancel-simulation="handleCancelSimulation"
-        @promote-current-as-baseline="handlePromoteCurrentAsBaseline"
-        @reset-to-baseline="handleResetToBaseline"
         @back-step2="currentStep = 2"
       />
     </main>

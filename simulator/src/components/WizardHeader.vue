@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from '../utils/i18n'
+
 defineProps<{
   currentStep: 1 | 2 | 3
   canGoStep2: boolean
@@ -11,17 +14,19 @@ const emit = defineEmits<{
   (e: 'select-step', step: 1 | 2 | 3): void
 }>()
 
-const navSteps = [
-  { num: 1 as const, label: '1. Mon Deck' },
-  { num: 2 as const, label: '2. Matchups' },
-  { num: 3 as const, label: '3. Résultats & Optimisation' },
-]
+const { currentLang, setLanguage, t } = useI18n()
+
+const navSteps = computed(() => [
+  { num: 1 as const, label: t('step1Short') },
+  { num: 2 as const, label: t('step2Short') },
+  { num: 3 as const, label: t('step3Short') },
+])
 </script>
 
 <template>
   <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
     <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6">
-      <!-- Identite de l'application -->
+      <!-- Identité de l'application -->
       <div class="flex items-center gap-3">
         <div
           class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 font-bold text-white shadow-xs"
@@ -31,7 +36,7 @@ const navSteps = [
         <div>
           <div class="flex items-center gap-2">
             <span class="text-base font-bold tracking-tight text-slate-900 sm:text-lg">
-              PokéSim
+              {{ t('appTitle') }}
             </span>
             <span
               v-if="isDebugMode"
@@ -43,13 +48,13 @@ const navSteps = [
             </span>
           </div>
           <p class="text-xs text-slate-500">
-            Simulateur stratégique &amp; comparateur de decks
+            {{ t('appSubtitle') }}
           </p>
         </div>
       </div>
 
-      <!-- Navigation par onglets simples et intuitifs -->
-      <nav aria-label="Navigation des etapes" class="flex items-center gap-1 sm:gap-2">
+      <!-- Navigation par étapes -->
+      <nav aria-label="Navigation des étapes" class="flex items-center gap-1 sm:gap-2">
         <button
           v-for="step in navSteps"
           :key="step.num"
@@ -69,8 +74,29 @@ const navSteps = [
         </button>
       </nav>
 
-      <!-- Compteur de cartes du Deck -->
-      <div class="flex items-center gap-2">
+      <!-- Contrôles droits : Sélecteur de langue & Compteur de cartes -->
+      <div class="flex items-center gap-3">
+        <!-- Bouton Sélecteur de Langue FR / EN -->
+        <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-bold">
+          <button
+            type="button"
+            @click="setLanguage('fr')"
+            class="rounded-md px-2 py-1 transition"
+            :class="currentLang === 'fr' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+          >
+            FR
+          </button>
+          <button
+            type="button"
+            @click="setLanguage('en')"
+            class="rounded-md px-2 py-1 transition"
+            :class="currentLang === 'en' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+          >
+            EN
+          </button>
+        </div>
+
+        <!-- Compteur de cartes du Deck -->
         <div
           class="rounded-lg border px-3 py-1 text-xs font-semibold"
           :class="
@@ -79,7 +105,7 @@ const navSteps = [
               : 'border-amber-200 bg-amber-50 text-amber-700'
           "
         >
-          Deck : {{ deckTotalCards }} / 60 cartes
+          {{ deckTotalCards }} / 60
         </div>
       </div>
     </div>
