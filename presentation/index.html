@@ -58,7 +58,7 @@
   * **Acte 1 : Le Sujet &amp; la Recherche Initiale** — Genèse, vulgarisation pédagogique des règles et du jargon TCG, cadrage tour fermé, limites de l'hypergéométrique et benchmark de l'existant.
   * **Acte 2 : Exploration du Terrain** — Enquête quantitative (106 répondants), diagnostic du feeling à 85 %, angoisse du brick, personas (Thomas &amp; Julien), recentrage Pokémon et échec formateur de la V1 sombre.
   * **Acte 3 : La Piste de Solution** — Matrice de décision, hybridation PokéPulse Arena + PokéDiff (A/B), Wizard 3 étapes et protocoles de validation.
-  * **Acte 4 : La Conception** — Les mini-projets, l'inspecteur visuel de règles et de double plateau (POC 4 PokéEngine Lab), l'échec de WebAssembly au profit du multi-threading TypeScript, TCGdex, et l'incroyable évolution du compilateur IA (de la V1 monolithique à la V3 hybride déterministe sur MacBook M4 Pro 24 Go).
+  * **Acte 4 : La Conception** — Mini-projets (moteur Wasm, parser PTCGL), l'écueil WebAssembly, cartographie des besoins et TCGdex, schéma formel, validation du moteur et des règles avant de compiler (POC 6 PokéEngine Lab), et l'incroyable évolution du compilateur IA (de la V1 monolithique à la V3 hybride déterministe sur MacBook M4 Pro 24 Go).
   * **Acte 5 : Le Prototype Actuel** — Le simulateur unifié (`./simulator/`), découplage Engine vs Evaluator, Minimax 3-ply, fastState (Zobrist 53-bit à 1 600 parties/s) et métriques compétitives inédites.
   * **Acte 6 : Tests Utilisateurs** — Protocole des 2 sessions de tests prévues (boutique &amp; régionaux), critères d'acceptabilité et axes de peaufinage.
   * **Acte 7 : La Solution Finale** — Synthèse d'ingénierie globale et compétences clés mobilisées pour le titre d'ingénieur.
@@ -466,63 +466,20 @@
   * `./poc-1-pokepulse/` : Validation du Wizard et du Design System Clean Light Mode.
   * `./poc-2-pokediff/` : Expérimentation du comparateur A/B sous tirages couplés déterministes (Same-Seed).
   * `./poc-3-poketuner/` : Banc d'essai sur les algorithmes d'équilibrage de ratios.
-  * `./poc-4-pokeengine/` : Banc d'essai moteur de règles (FSM), générateur pseudo-aléatoire déterministe Mulberry32 et mélange de Fisher-Yates sans biais.
+  * Un moteur lambda expérimental pour tester la simulation de partie sous WebAssembly.
   * `./poc-5-decklist-parser/` : Parseur strict de listes textuelles PTCGL et tables de correspondance de sets.
-  * `./card-compiler/` : Compilateur automatique de cartes par IA.
           </aside>
         </section>
 
-        <!-- Slide 25 : POC 4 - PokéEngine Lab & Game Inspector -->
-        <section>
-          <h2>POC 4 : PokéEngine Lab &amp; l'Inspecteur Visuel de Règles</h2>
-          <aside class="notes" data-markdown>
-### 🎙️ Slide 25 : POC 4 — PokéEngine Lab &amp; l'Inspecteur Visuel de Règles
-**Titre affiché** : POC 4 : PokéEngine Lab &amp; l'Inspecteur Visuel de Règles
-
-* **La Raison d'Être du POC 4 (`./poc-4-pokeengine/`)** :
-  Avant de concevoir le simulateur final, il était indispensable de construire un banc d'essai dédié pour tester l'engine et éprouver les règles officielles de Pokémon TCG sans dépendre d'une interface de production.
-  Pour ne pas travailler en boîte noire aveugle, j'ai développé une interface graphique d'inspection pas-à-pas permettant d'examiner chaque tour, chaque règle et chaque zone de jeu en temps réel.
-
-* **L'Inspecteur Visuel de la Position Actuelle (GameState)** :
-  L'interface restitue l'intégralité des zones de jeu d'une partie avec une granularité chirurgicale :
-  * **Notre Plateau &amp; Ressources** :
-    - **La Main (Hand)** : Affichage des 7 cartes de départ (après mulligans) et de la main résiduelle en fin de tour (ressources conservées pour le rebond à T+1).
-    - **Le Poste Actif** : Pokémon engagé, PV restants, nombre d'énergies attachées et Outil attaché (ex: Pierre Scellée Sylveroy).
-    - **Le Banc (Bench)** : Liste des Pokémon posés avec tour de jeu (`turnPlayed`), énergies et outils, en garantissant l'invariant réglementaire strict de 5 Pokémon maximum sur le banc.
-    - **La Défausse / Trash (Discard Pile)** : Traçabilité complète des ressources sacrifiées (coûts d'activation d'Ultra Ball, Recherches Professorales) et identification des cartes recyclables via Super Canne.
-    - **Le Deck** : Compteur dynamique ($60 \rightarrow 7 \rightarrow \dots$), décompte des cartes résiduelles et impact de l'épuration de deck (*Deck Thinning*).
-    - **Les 6 Récompenses (Prize Cards) &amp; « Prize Checking »** : Visualisation des 6 cartes récompenses et détection instantanée de la connaissance du joueur. Dès la première recherche de deck au Tour 1, le joueur compétiteur inspecte son deck et déduit par élimination ses 6 récompenses. L'inspecteur affiche le statut « Connu » ou « Inconnu » et alerte si une pièce maîtresse est piégée (ex: Super Bonbon ou Dracaufeu Prized).
-  * **Le Plateau Adverse en Vis-à-Vis (Double Plateau Face-à-Face)** :
-    - Affichage de l'Actif adverse et de tout son Banc avec leurs PV, énergies attachées et compteur de récompenses restantes.
-    - **Threat Scoring en direct** : Calcul algorithmique de la dangerosité de chaque cible adverse (ex: menace 140 pts sur un attaquant chargé, 80 pts sur un moteur de pioche de banc) pour aiguiller les choix tactiques d'Ordres du Boss ou d'Attrape-Riposte.
-
-* **Le Journal de Bord (Logs) &amp; l'Arbre de Toutes les Actions Possibles** :
-  * **Logs Pas-à-Pas Exhaustifs** : Historique complet tour par tour (pioche de début de tour, attachement d'énergie 1/tour, quota de 1 Supporter/tour avec interdiction au T1 pour J1, vérification du mal d'invocation d'évolution, résolutions d'attaques et K.O.).
-  * **Listing de Toutes les Actions Possibles** : Pour chaque situation, l'engine génère exhaustivement la totalité des actions légales autorisées par la Machine à États Finis (FSM).
-  * **Comparateur de Branches &amp; Anticipation Expectiminimax ($T \rightarrow T_{adv} \rightarrow T+1$)** : Visualisation de chaque branche explorée avec pastilles « RETENUE » (vert) ou « ÉCARTÉE » (gris), décomposition de la fonction d'utilité $U(S_T) = V_{immédiat}(S_T) + 0,75 \times \mathbb{E}[V_{rebond}(S_{T+1})]$, calcul des probabilités de riposte adverse (K.O., Mashynn, Boss) et détection du *Revenge Kill* prêt à T+1.
-
-* **3 Filtres Rapides d'Archétypes de Parties pour le Débogage** :
-  L'inspecteur intègre des filtres en 1 clic pour analyser les cas critiques du jeu :
-  1. `PERFECT_T2` : Visualiser instantanément une partie avec sortie parfaite au Tour 2 (Dracaufeu ex et Roucarnage ex posés et alimentés).
-  2. `BRICK` : Examiner un scénario de « main morte » (aucun tuteur de recherche, énergie bloquée, incapacité de développer le board).
-  3. `CANDY_PRIZED` : Isoler les parties où les Super Bonbons sont bloqués dans les 6 récompenses, forçant le moteur à basculer sur une ligne de jeu de secours (évolution manuelle par Reptincel).
-
-* **Garantie Mathématique Déterministe** :
-  * Générateur pseudo-aléatoire **Mulberry32** piloté par une graine unique (*Sub-Seed* affichée pour chaque partie inspectée), assurant une reproductibilité totale des tirages.
-  * Mélange sans biais de **Fisher-Yates**.
-  * Ce POC 4 a servi de colonne vertébrale pour éprouver le moteur de règles avant toute démarche d'optimisation bas-niveau dans le prototype final.
-          </aside>
-        </section>
-
-        <!-- Slide 26 : L'Écueil Wasm -->
+        <!-- Slide 25 : L'Écueil Wasm -->
         <section>
           <h2>L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 26 : L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly
+### 🎙️ Slide 25 : L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly
 **Titre affiché** : L'Écueil Wasm : Le Mirage de la Vitesse WebAssembly
 
 * **Le Récit d'un Échec Formateur** :
-  Dans mes intentions de l'Étape 3, j'avais parié sur WebAssembly en Go. J'ai donc développé un banc d'essai dans le POC 4 pour confronter Wasm et TypeScript natif.
+  Dans mes intentions de l'Étape 3, j'avais parié sur WebAssembly en Go. J'ai donc développé un moteur lambda expérimental pour confronter Wasm et TypeScript natif.
 * **Le Goulot d'Étranglement Invisible : Le Boundary Overhead** :
   WebAssembly s'exécute dans une mémoire linéaire isolée (`ArrayBuffer`). Il ne peut pas manipuler directement les objets JavaScript complexes (cartes, états de match, listes d'actions).
 * **Le Bilan du Profiler CPU** :
@@ -532,11 +489,11 @@
           </aside>
         </section>
 
-        <!-- Slide 27 : Cartographie des Besoins -->
+        <!-- Slide 26 : Cartographie des Besoins -->
         <section>
           <h2>Cartographie des Besoins Fondamentaux du Simulateur</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 27 : Cartographie des Besoins Fondamentaux
+### 🎙️ Slide 26 : Cartographie des Besoins Fondamentaux
 **Titre affiché** : Cartographie des Besoins Fondamentaux du Simulateur
 
 * **Les 5 Exigences Métier Incompressibles** :
@@ -548,11 +505,11 @@
           </aside>
         </section>
 
-        <!-- Slide 28 : TCGdex & Régulation G -->
+        <!-- Slide 27 : TCGdex & Régulation G -->
         <section>
           <h2>Ingestion des Données : TCGdex &amp; le Bug Caché de l'API</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 28 : TCGdex &amp; le Bug de Régulation G
+### 🎙️ Slide 27 : TCGdex &amp; le Bug de Régulation G
 **Titre affiché** : Ingestion des Données : TCGdex &amp; le Bug Caché de l'API
 
 * **Le Moissonnage du Format Standard** :
@@ -566,11 +523,11 @@
           </aside>
         </section>
 
-        <!-- Slide 29 : Schéma 12 Primitives & DSL -->
+        <!-- Slide 28 : Schéma 12 Primitives & DSL -->
         <section>
           <h2>Le Schéma Formel : 12 Primitives Atomiques &amp; Filter DSL</h2>
           <aside class="notes" data-markdown>
-### 🎙️ Slide 29 : Le Schéma Formel : 12 Primitives &amp; Filter DSL
+### 🎙️ Slide 28 : Le Schéma Formel : 12 Primitives &amp; Filter DSL
 **Titre affiché** : Le Schéma Formel : 12 Primitives Atomiques &amp; Filter DSL
 
 * **De la Complexité Textuelle à la Grammaire Formelle** :
@@ -581,6 +538,50 @@
   Pour cibler les cartes sans objets JSON verbeux :
   `CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70`.
   Une syntaxe concise, mémoïsable et évaluable en O(1) par le moteur de simulation.
+          </aside>
+        </section>
+
+        <!-- Slide 29 : POC 6 - PokéEngine Lab & Validation des Règles -->
+        <section>
+          <h2>POC 6 : PokéEngine Lab — Valider l'Engine &amp; les Règles avant de Compiler</h2>
+          <aside class="notes" data-markdown>
+### 🎙️ Slide 29 : POC 6 — PokéEngine Lab : Valider l'Engine &amp; les Règles avant de Compiler
+**Titre affiché** : POC 6 : PokéEngine Lab — Valider l'Engine &amp; les Règles avant de Compiler
+
+* **La Règle d'Or Méthodologique en Ingénierie** :
+  *« On ne compile pas 3 500 cartes vers un format formel si l'on n'a pas prouvé au préalable que le moteur sait les exécuter ! »*
+  Se lancer dans l'écriture d'un compilateur IA sans avoir un moteur certifié aurait été une hérésie : en cas de comportement anormal, impossible de savoir si le problème venait du prompt du LLM ou d'un bug dans la résolution des règles du jeu.
+
+* **La Mission du POC 6 (PokéEngine Lab)** :
+  Créer un banc d'essai complet pour éprouver les règles officielles de Pokémon TCG et valider la Machine à États Finis (FSM) sur un jeu de cartes étalon.
+  Pour refuser tout effet « boîte noire », j'ai conçu une interface graphique d'inspection interactive permettant d'observer en direct chaque transition d'état, chaque calcul d'action et chaque zone du jeu.
+
+* **L'Inspecteur Visuel de la Position Actuelle (GameState)** :
+  L'interface restitue l'intégralité du plateau avec une précision chirurgicale :
+  * **Notre Plateau &amp; Ressources** :
+    - **La Main (Hand)** : Affichage des 7 cartes de départ (après mulligans) et de la main résiduelle en fin de tour (ressources conservées pour le rebond à T+1).
+    - **Le Poste Actif** : Pokémon engagé, PV restants, nombre d'énergies attachées et Outil attaché (ex: Pierre Scellée Sylveroy).
+    - **Le Banc (Bench)** : Gestion rigoureuse des emplacements avec vérification stricte de l'invariant réglementaire (maximum 5 Pokémon), tour de pose (`turnPlayed`) pour le mal d'invocation d'évolution, énergies et outils.
+    - **La Défausse / Trash (Discard Pile)** : Traçabilité des cartes défaussées (coûts d'Ultra Ball, Recherches) et ressources recyclables via Super Canne.
+    - **Le Deck** : Compteur dynamique ($60 \rightarrow 7 \rightarrow \dots$), décompte des cartes résiduelles et impact de l'épuration de deck (*Deck Thinning*).
+    - **Les 6 Récompenses (Prize Cards) &amp; Mécanique de « Prize Checking »** : Affichage des 6 cartes récompenses et modélisation de l'expertise des champions : dès le premier tuteur de deck au Tour 1, le joueur compétiteur inspecte son deck et déduit par élimination ses 6 cartes emprisonnées. L'inspecteur indique si les récompenses sont « Connues » ou « Inconnues » et alerte si une pièce maîtresse est piégée (ex: Super Bonbon Prized).
+  * **Le Plateau Adverse en Vis-à-Vis (Double Plateau Face-à-Face)** :
+    - Affichage de l'Actif adverse et de tout son Banc avec leurs PV, énergies attachées et compteur de récompenses restantes ($6 \rightarrow 0$).
+    - **Threat Scoring en direct** : Calcul algorithmique de la dangerosité de chaque cible adverse (ex: menace 140 pts sur un attaquant chargé, 80 pts sur un moteur de pioche de banc) pour guider les choix tactiques d'Ordres du Boss ou d'Attrape-Riposte.
+
+* **Le Journal de Bord (Logs) &amp; l'Arbre de Toutes les Actions Légales** :
+  * **Logs Pas-à-Pas Exhaustifs** : Historique complet tour par tour (pioche de début de tour, attachement manuel 1/tour, quota de 1 Supporter/tour avec interdiction au T1 pour J1, vérification du mal d'invocation d'évolution, résolutions d'attaques et K.O.).
+  * **Listing de Toutes les Actions Possibles** : Pour chaque situation, l'engine génère exhaustivement la totalité des actions légales autorisées par la Machine à États Finis (FSM).
+  * **Comparateur de Branches &amp; Anticipation Expectiminimax ($T \rightarrow T_{adv} \rightarrow T+1$)** : Visualisation des branches explorées avec pastilles « RETENUE » (vert) ou « ÉCARTÉE » (gris), fonction d'utilité $U(S_T) = V_{immédiat}(S_T) + 0,75 \times \mathbb{E}[V_{rebond}(S_{T+1})]$, calcul des probabilités de riposte adverse (K.O., Mashynn, Boss) et détection du *Revenge Kill* prêt à T+1.
+
+* **3 Filtres Rapides d'Archétypes pour le Débogage** :
+  L'inspecteur intègre des filtres en 1 clic pour analyser les cas critiques du jeu :
+  1. `PERFECT_T2` : Visualiser instantanément une sortie parfaite au Tour 2 (Dracaufeu ex et Roucarnage ex posés et alimentés).
+  2. `BRICK` : Examiner un scénario de « main morte » (aucun tuteur de recherche, incapacité de développer le board).
+  3. `CANDY_PRIZED` : Isoler les parties où les Super Bonbons sont bloqués dans les 6 récompenses, forçant le moteur à basculer sur une ligne de jeu de secours (évolution manuelle par Reptincel).
+
+* **La Passerelle vers la Suite** :
+  Une fois ce POC 6 validé — avec son moteur déterministe sous PRNG Mulberry32 et mélange sans biais Fisher-Yates —, nous avions la preuve irréfutable que le moteur tournait sans accroc. Le feu vert était donné pour lancer le vaste chantier de la **compilation automatique de cartes par IA** !
           </aside>
         </section>
 
