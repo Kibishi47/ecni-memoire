@@ -17,11 +17,15 @@ describe('i18n — Internationalization & Translation Helper', () => {
     expect(t('pokemonCount')).toBe('Pokémon')
     expect(t('trainerCount')).toBe('Dresseurs')
     expect(t('energyCount')).toBe('Énergies')
+    expect(t('exportPtcglDeck')).toBe('Exporter le deck PTCGL')
+    expect(t('exportModalTitleDeck')).toBe('Exporter le deck actif (60 cartes)')
 
     setLanguage('en')
     expect(currentLang.value).toBe('en')
     expect(t('trainerCount')).toBe('Trainers')
     expect(t('energyCount')).toBe('Energy')
+    expect(t('exportPtcglDeck')).toBe('Export PTCGL Deck')
+    expect(t('exportModalTitleDeck')).toBe('Export Active Deck (60 cards)')
 
     toggleLanguage()
     expect(currentLang.value).toBe('fr')

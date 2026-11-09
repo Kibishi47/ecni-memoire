@@ -152,14 +152,6 @@ const cardDiffItems = computed<DeckCardContributionItem[]>(() => {
 
 const isDeckModified = computed(() => cardDiffItems.value.length > 0)
 
-const hasCalculatedVariant = computed(() => {
-  return (
-    cardDiffItems.value.length > 0 &&
-    props.currentSummary !== null &&
-    props.editableDeck.totalCards === 60
-  )
-})
-
 const hasComparisonRun = computed(() => {
   return (
     props.baselineSummary !== null &&
@@ -259,7 +251,7 @@ function downloadExportedDeckTxt() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `deck-optimise-60-${exportLang.value}.txt`
+  link.download = `${isDeckModified.value ? 'deck-optimise-60' : 'deck-60'}-${exportLang.value}.txt`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -389,14 +381,15 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <span>{{ t('saveAsNewVersion') }}</span>
           </button>
 
-          <!-- Bouton Exporter la variante : visible UNIQUEMENT si au moins une variante a été calculée -->
+          <!-- Bouton Exporter le deck actif (référence ou variante) -->
           <button
-            v-if="hasCalculatedVariant"
             type="button"
+            :disabled="editableDeck.totalCards !== 60"
             @click="showExportModal = true"
-            class="flex items-center gap-2 rounded-xl border border-indigo-600 bg-indigo-50 px-5 py-3 text-sm font-bold text-indigo-900 shadow-xs transition hover:bg-indigo-100"
+            class="flex items-center gap-2 rounded-xl border border-indigo-600 bg-indigo-50 px-5 py-3 text-sm font-bold text-indigo-900 shadow-xs transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+            :title="isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck')"
           >
-            <span>{{ t('exportPtcglVariant') }}</span>
+            <span>{{ isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck') }}</span>
           </button>
         </div>
       </div>
@@ -1149,7 +1142,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       <div class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 class="text-base font-bold text-slate-900">
-            {{ t('exportModalTitle') }}
+            {{ isDeckModified ? t('exportModalTitle') : t('exportModalTitleDeck') }}
           </h3>
           <button
             type="button"

@@ -115,6 +115,7 @@ export const translations: Record<Language, Record<string, string>> = {
     testVariantAndCompare: 'Tester cette variante et comparer',
     adjustDeckTo60: 'Ajustez le deck ({n} / 60 cartes requises)',
     exportPtcglVariant: 'Exporter la variante PTCGL',
+    exportPtcglDeck: 'Exporter le deck PTCGL',
     simulatingProgress: 'Simulation en cours... {done} / {total} parties',
 
     // Version History
@@ -210,6 +211,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // Export Modal
     exportModalTitle: 'Exporter la variante optimisée (60 cartes)',
+    exportModalTitleDeck: 'Exporter le deck actif (60 cartes)',
     formatReadyForPtcgl: 'Format prêt à coller dans Pokémon TCG Live :',
     copyClipboard: 'Copier dans le presse-papier',
     downloadTxt: 'Télécharger .txt',
@@ -344,6 +346,7 @@ export const translations: Record<Language, Record<string, string>> = {
     testVariantAndCompare: 'Test this variant & compare',
     adjustDeckTo60: 'Adjust deck ({n} / 60 cards required)',
     exportPtcglVariant: 'Export PTCGL Variant',
+    exportPtcglDeck: 'Export PTCGL Deck',
     simulatingProgress: 'Simulation in progress... {done} / {total} games',
 
     // Version History
@@ -439,6 +442,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // Export Modal
     exportModalTitle: 'Export Optimized Variant (60 cards)',
+    exportModalTitleDeck: 'Export Active Deck (60 cards)',
     formatReadyForPtcgl: 'Format ready to paste in Pokémon TCG Live:',
     copyClipboard: 'Copy to clipboard',
     downloadTxt: 'Download .txt',
