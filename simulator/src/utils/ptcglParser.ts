@@ -288,7 +288,12 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
 
       if (typeof rawReq === 'string') {
         if (rawReq.startsWith('requires_energy_type:')) {
-          const energyType = rawReq.replace('requires_energy_type:', '')
+          const energyType = rawReq.replace('requires_energy_type:', '').trim()
+          const normType = energyType.toLowerCase()
+          // L'audit des synergies ne doit pas analyser les energies incolores car toute energie convient
+          if (normType === 'incolore' || normType === 'colorless') {
+            continue
+          }
           filterDesc = `Énergie ${energyType}`
           matchingCount = activeCards
             .filter(
@@ -315,6 +320,10 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         }
       } else {
         const reqObj = rawReq as any
+        const reqEnergyType = reqObj.requiredFilter?.energyType?.trim()?.toLowerCase()
+        if (reqEnergyType === 'incolore' || reqEnergyType === 'colorless') {
+          continue
+        }
         minCount = reqObj.minCountInDeck || 1
         isCriticalZero = reqObj.ifMissingSetValueToZero || false
         filterDesc = describeCardFilterFr(reqObj.requiredFilter)
