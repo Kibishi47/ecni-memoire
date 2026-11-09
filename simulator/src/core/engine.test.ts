@@ -9,8 +9,11 @@ import {
   canPayEnergyCost,
   computeAttackDamageToActive,
   createInitialMatchState,
+  getEffectiveAttackCost,
   getLegalActions,
   getMaxBenchSlots,
+  getPokemonRetreatCost,
+  isPokemonAttackBlocked,
   runBetweenTurnsCheckup,
   startTurn,
 } from './engine'
@@ -786,5 +789,447 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
     expect(afterBudewAtk.opponent.itemLockActive).toBe(true)
     const oppActions = getLegalActions(afterBudewAtk)
     expect(oppActions.some((a) => a.type === 'PLAY_TRAINER')).toBe(false)
+  })
+
+  describe('Strict Attack Energy Costs and Attack Lock Validation', () => {
+    const fireEnergy = createNativeBasicEnergyModel('Feu')
+    const waterEnergy = createNativeBasicEnergyModel('Eau')
+    const grassEnergy = createNativeBasicEnergyModel('Plante')
+
+    const doubleTurboEnergy: EngineCardModel = {
+      cardId: 'sv01-181',
+      identity: {
+        cardId: 'sv01-181',
+        nameFr: 'Énergie Double Turbo',
+        nameEn: 'Double Turbo Energy',
+        setId: 'sv01',
+        setName: 'Écarlate et Violet',
+        localId: '181',
+        category: 'ENERGY',
+        subCategory: 'SPECIAL_ENERGY',
+        isRuleBox: false,
+        prizeCardsGiven: 0,
+        isAceSpec: false,
+        isAncient: false,
+        isFuture: false,
+        isTera: false,
+        regulationMark: 'G',
+        legalStandard: true,
+        legalExpanded: true,
+        rarity: 'Peu Commune',
+        imageUrl: null,
+        rawRulesText: [],
+      },
+      category: 'ENERGY',
+      subCategory: 'SPECIAL_ENERGY',
+      pokemonStats: null,
+      playableActions: [],
+      strategicEvaluator: {
+        aiRole: 'ENERGY_ACCELERATOR',
+        primaryRole: 'ENERGY_ACCELERATOR',
+        intrinsicBaseScore: 50,
+        turnPhaseWeights: { turn1: 1, turn2: 1, turn3: 1, turn4Plus: 1 },
+        decklistSynergyRequirements: [],
+        inGameDeadCardConditions: [],
+        discardPriorityWhenDead: 50,
+        holdForNextTurnBonus: 10,
+      },
+    }
+
+    it('validates canPayEnergyCost with colored, colorless, and double turbo energies', () => {
+      // 0 energy cannot pay colored cost
+      expect(canPayEnergyCost([], { Feu: 1 })).toBe(false)
+
+      // 1 Fire cannot pay 1 Fire + 1 Colorless
+      expect(canPayEnergyCost([fireEnergy], { Feu: 1, Incolore: 1 })).toBe(false)
+
+      // Any energy satisfies Colorless requirement (e.g. 1 Fire + 1 Water for { Feu: 1, Incolore: 1 })
+      expect(canPayEnergyCost([fireEnergy, waterEnergy], { Feu: 1, Incolore: 1 })).toBe(true)
+
+      // 1 Grass satisfies 1 Colorless requirement
+      expect(canPayEnergyCost([grassEnergy], { Incolore: 1 })).toBe(true)
+
+      // Double Turbo provides 2 Colorless
+      expect(canPayEnergyCost([doubleTurboEnergy], { Incolore: 2 })).toBe(true)
+      expect(canPayEnergyCost([doubleTurboEnergy, fireEnergy], { Feu: 1, Incolore: 2 })).toBe(true)
+
+      // Double Turbo cannot pay colored costs
+      expect(canPayEnergyCost([doubleTurboEnergy], { Feu: 1 })).toBe(false)
+
+      // 0 cost is payable with 0 energy
+      expect(canPayEnergyCost([], {})).toBe(true)
+    })
+
+    it('blocks attacks when active Pokemon lacks energy and allows attack once paid', () => {
+      const attackerCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'test-attacker-1',
+        playableActions: [
+          {
+            actionId: 'atk_flamethrower',
+            label: 'Lance-Flammes',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: { Feu: 1, Incolore: 1 },
+            sourceType: 'ATTACK',
+            timing: 'END_OF_TURN_ATTACK',
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: ['SELF_IS_ACTIVE'],
+            costs: [],
+            effects: [{ primitive: 'DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 50 }],
+            energyCost: ['Feu', 'Incolore'],
+          },
+        ],
+      }
+
+      const match = createInitialMatchState(
+        Array(60).fill(attackerCard),
+        Array(60).fill(mockTargetBasic),
+        { seed: 100, firstPlayerIndex: 0, maxTurns: 10 },
+      )
+      // Turn 2: player turn (going first player's turn 2 = match turn 3, or turn 2 going second)
+      match.turnNumber = 2
+      match.activePlayerIndex = 0
+      match.player.activePokemon = {
+        instanceId: 'char_1',
+        card: attackerCard,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      match.opponent.activePokemon = {
+        instanceId: 'target_1',
+        card: mockTargetBasic,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+
+      // 1. With 0 energy, DECLARE_ATTACK is not available
+      let actions = getLegalActions(match)
+      expect(actions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(false)
+
+      // 2. With only 1 Fire energy, DECLARE_ATTACK is still not available (needs 1 Fire + 1 Colorless)
+      match.player.activePokemon.attachedEnergies = [fireEnergy]
+      actions = getLegalActions(match)
+      expect(actions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(false)
+
+      // 3. With 1 Fire + 1 Water (Water fulfills Colorless), DECLARE_ATTACK is legal
+      match.player.activePokemon.attachedEnergies = [fireEnergy, waterEnergy]
+      actions = getLegalActions(match)
+      const attackAction = actions.find((a) => a.type === 'DECLARE_ATTACK')
+      expect(attackAction).toBeDefined()
+
+      // 4. Declaring attack deals 50 damage
+      const stateAfterAttack = applyAction(match, attackAction!)
+      expect(stateAfterAttack.opponent.activePokemon?.damage).toBe(50)
+    })
+
+    it('allows 0-cost attack (e.g. Rozbouton Pollen Demangeant) with zero attached energies', () => {
+      const freeAttackerCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'test-free-attacker',
+        playableActions: [
+          {
+            actionId: 'atk_free',
+            label: 'Pollen Démangeant',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: {},
+            sourceType: 'ATTACK',
+            timing: 'END_OF_TURN_ATTACK',
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: ['SELF_IS_ACTIVE'],
+            costs: [],
+            effects: [{ primitive: 'DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 10 }],
+            energyCost: [],
+          },
+        ],
+      }
+
+      const match = createInitialMatchState(
+        Array(60).fill(freeAttackerCard),
+        Array(60).fill(mockTargetBasic),
+        { seed: 101, firstPlayerIndex: 0, maxTurns: 10 },
+      )
+      match.turnNumber = 2
+      match.activePlayerIndex = 0
+      match.player.activePokemon = {
+        instanceId: 'free_1',
+        card: freeAttackerCard,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+
+      const actions = getLegalActions(match)
+      const freeAtk = actions.find((a) => a.type === 'DECLARE_ATTACK')
+      expect(freeAtk).toBeDefined()
+    })
+
+    it('strictly blocks attack when Pokemon is Asleep or Paralyzed', () => {
+      const attackerCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'test-attacker-status',
+        playableActions: [
+          {
+            actionId: 'atk_strike',
+            label: 'Frappe',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: { Feu: 1 },
+            sourceType: 'ATTACK',
+            timing: 'END_OF_TURN_ATTACK',
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: ['SELF_IS_ACTIVE'],
+            costs: [],
+            effects: [{ primitive: 'DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 30 }],
+            energyCost: ['Feu'],
+          },
+        ],
+      }
+
+      const match = createInitialMatchState(
+        Array(60).fill(attackerCard),
+        Array(60).fill(mockTargetBasic),
+        { seed: 102, firstPlayerIndex: 0, maxTurns: 10 },
+      )
+      match.turnNumber = 2
+      match.activePlayerIndex = 0
+      match.player.activePokemon = {
+        instanceId: 'status_1',
+        card: attackerCard,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [fireEnergy, fireEnergy],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: ['ASLEEP'],
+        cantAttackNextTurn: false,
+      }
+
+      expect(isPokemonAttackBlocked(match.player.activePokemon, match)).toBe(true)
+      let actions = getLegalActions(match)
+      expect(actions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(false)
+
+      // Test PARALYZED
+      match.player.activePokemon.specialConditions = ['PARALYZED']
+      expect(isPokemonAttackBlocked(match.player.activePokemon, match)).toBe(true)
+      actions = getLegalActions(match)
+      expect(actions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(false)
+    })
+
+    it('enforces cantAttackNextTurn on subsequent turn and clears on retreat', () => {
+      const gigaImpactCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'test-giga-impact',
+        playableActions: [
+          {
+            actionId: 'atk_giga',
+            label: 'Giga Impact',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: { Feu: 1 },
+            sourceType: 'ATTACK',
+            timing: 'END_OF_TURN_ATTACK',
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: ['SELF_IS_ACTIVE'],
+            costs: [{ type: 'CANT_ATTACK_NEXT_TURN' }],
+            effects: [
+              { primitive: 'DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 120 },
+            ],
+            energyCost: ['Feu'],
+          },
+        ],
+      }
+
+      const match = createInitialMatchState(
+        Array(60).fill(gigaImpactCard),
+        Array(60).fill(mockTargetBasic),
+        { seed: 103, firstPlayerIndex: 0, maxTurns: 10 },
+      )
+      match.turnNumber = 2
+      match.activePlayerIndex = 0
+      match.player.activePokemon = {
+        instanceId: 'giga_1',
+        card: gigaImpactCard,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [fireEnergy, fireEnergy],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+
+      // Apply attack: sets cantAttackNextTurn = true and cantAttackTurn = turnNumber + 2 (turn 4)
+      const afterAtk = applyAction(match, {
+        type: 'DECLARE_ATTACK',
+        cardId: gigaImpactCard.cardId,
+        actionId: 'atk_giga',
+        label: 'Giga Impact',
+        endsTurnImmediately: true,
+      })
+
+      const attackerPoke = afterAtk.player.activePokemon!
+      expect(attackerPoke.cantAttackNextTurn).toBe(true)
+      expect(attackerPoke.cantAttackTurn).toBe(4)
+
+      // Fast forward to turn 4 (Player turn)
+      afterAtk.turnNumber = 4
+      afterAtk.activePlayerIndex = 0
+      expect(isPokemonAttackBlocked(attackerPoke, afterAtk)).toBe(true)
+      const turn4Actions = getLegalActions(afterAtk)
+      expect(turn4Actions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(false)
+
+      // If switched or retreated to bench, lock is immediately reset
+      afterAtk.player.bench = [
+        {
+          instanceId: 'benched_1',
+          card: mockTargetBasic,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      const afterRetreat = applyAction(afterAtk, {
+        type: 'RETREAT_ACTIVE',
+        label: 'Retraite vers Banc 0',
+        targetBenchIndex: 0,
+      })
+      // Old active is now on bench, lock cleared
+      const nowBenched = afterRetreat.player.bench[0]!
+      expect(nowBenched.cantAttackNextTurn).toBe(false)
+      expect(nowBenched.cantAttackTurn).toBeUndefined()
+    })
+
+    it('handles Bloodmoon Ursaluna ex ability cost reduction based on opponent prizes taken', () => {
+      const bloodmoonCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'sv06-141',
+        identity: {
+          ...mockCharmander.identity,
+          cardId: 'sv06-141',
+          nameFr: 'Ursaking Lune Vermeille-ex',
+          nameEn: 'Bloodmoon Ursaluna ex',
+        },
+        pokemonStats: {
+          ...mockCharmander.pokemonStats!,
+        },
+        playableActions: [
+          {
+            actionId: 'atk_bloodmoon',
+            label: 'Lune Rouge',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: { Incolore: 5 },
+            sourceType: 'ATTACK',
+            timing: 'END_OF_TURN_ATTACK',
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: ['SELF_IS_ACTIVE'],
+            costs: [],
+            effects: [{ primitive: 'DAMAGE_ACTIVE', count: 1, upTo: false, baseDamage: 240 }],
+            energyCost: ['Incolore', 'Incolore', 'Incolore', 'Incolore', 'Incolore'],
+          },
+        ],
+      }
+
+      const match = createInitialMatchState(
+        Array(60).fill(bloodmoonCard),
+        Array(60).fill(mockTargetBasic),
+        { seed: 104, firstPlayerIndex: 0, maxTurns: 10 },
+      )
+      match.turnNumber = 2
+      match.activePlayerIndex = 0
+      match.player.activePokemon = {
+        instanceId: 'urs_1',
+        card: bloodmoonCard,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+
+      const attackAction = bloodmoonCard.playableActions[0]!
+
+      // Opponent has 6 prizes remaining -> 0 prizes taken -> cost is 5 Colorless
+      let effCost = getEffectiveAttackCost(match.player.activePokemon, attackAction, match)
+      expect(effCost['Incolore']).toBe(5)
+      expect(canPayEnergyCost([], effCost)).toBe(false)
+
+      // Opponent has taken 5 prizes (1 prize remaining) -> cost reduced by 5 -> 0 Colorless!
+      match.opponent.prizes = [match.opponent.prizes[0]!]
+      effCost = getEffectiveAttackCost(match.player.activePokemon, attackAction, match)
+      expect(effCost['Incolore']).toBe(0)
+      expect(canPayEnergyCost([], effCost)).toBe(true)
+
+      const actions = getLegalActions(match)
+      expect(actions.some((a) => a.actionId === 'atk_bloodmoon')).toBe(true)
+    })
+
+    it('calculates retreat cost and applies Latias-ex free retreat for basic Pokemon', () => {
+      const basicWithRetreat: EngineCardModel = {
+        ...mockCharmander,
+        pokemonStats: {
+          ...mockCharmander.pokemonStats!,
+          retreatCost: 2,
+        },
+      }
+      const poke: any = {
+        card: basicWithRetreat,
+      }
+      const boardWithoutLatias: any = {
+        activePokemon: poke,
+        bench: [],
+      }
+      expect(getPokemonRetreatCost(poke, boardWithoutLatias)).toBe(2)
+
+      const latiasCard: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'sv08-076',
+        identity: {
+          ...mockCharmander.identity,
+          cardId: 'sv08-076',
+          nameFr: 'Latias-ex',
+          nameEn: 'Latias ex',
+        },
+      }
+      const boardWithLatias: any = {
+        activePokemon: poke,
+        bench: [{ card: latiasCard }],
+      }
+      expect(getPokemonRetreatCost(poke, boardWithLatias)).toBe(0)
+    })
   })
 })
