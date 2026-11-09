@@ -1,0 +1,23 @@
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#app {
+  background-color: #f8fafc;
+  color: #0f172a;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
