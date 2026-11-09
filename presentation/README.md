@@ -27,13 +27,14 @@ Le design des diapositives est volontairement épuré (1 slide = 1 grand titre �
 
 Le projet dispose désormais d'un système multi-pages transparent géré par Vite :
 
-1. **Version Soutenance 15 Minutes (Recommandée pour le 3 décembre)** :
+1. **Version Soutenance 15-18 Minutes (Recommandée pour le 3 décembre)** :
    * **URL** : `http://localhost:5173/` (ou fichier `index.html`)
-   * **Format** : **16 diapositives percutantes** calibrées pour le jury externe (2 développeurs, 2 designers).
-   * **Notes d'orateur adaptées** : Minutage précis pour chaque slide (`⏱️ Timing cible`), langage oral fluide et direct, équilibre 50 % Design/UX - 50 % Ingénierie logicielle, et encadrement d'une **démonstration live de 3 min 30 s**.
+   * **Format** : **23 diapositives fortes conservant la structure en 8 Actes**, sans superflu ni bavardage théorique.
+   * **Focus maximal** : Mise en valeur directe des vraies réalisations d'ingénierie (l'enquête 106 rép. et 85% feeling, le crash-test V1 sombre et le pivot Clean Light Mode V2, l'abandon Wasm et le choix des Workers, le POC 6 d'inspection de GameState, l'évolution du compilateur IA V1->V3 sur M4 Pro, le découplage Engine/Minimax 3-ply, et la démo live).
+   * **Notes d'orateur adaptées** : Minutage précis pour chaque slide (`⏱️ Timing cible`), langage oral fluide et direct, équilibre 50 % Design/UX - 50 % Ingénierie logicielle, et encadrement d'une **démonstration live de 2 min 30 s à 3 min**.
 2. **Version Exhaustive Complète (Archives & Documentation)** :
    * **URL** : `http://localhost:5173/complete` (ou fichier `complete.html`)
-   * **Format** : **47 diapositives intégrales (8 Actes)** détaillant l'intégralité du parcours : sas pédagogique TCG, tour fermé, benchmark, 5 POCs, échec Wasm, TCGdex, POC 6 PokéEngine Lab, compilateur IA V1/V2/V3, fastState Zobrist 53-bit, decks méta et perspectives.
+   * **Format** : **47 diapositives intégrales (8 Actes)** détaillant l'intégralité du parcours historique : sas pédagogique TCG en 3 slides, tour fermé, benchmark, tous les POCs, échec Wasm, TCGdex, POC 6 PokéEngine Lab, compilateur IA V1/V2/V3, fastState Zobrist 53-bit, decks méta et perspectives.
 
 ---
 
