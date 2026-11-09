@@ -313,18 +313,6 @@ function handleSetBaselineVersion(versionId: string) {
   }
 }
 
-function handleRestoreVersion(versionId: string) {
-  const target = deckVersions.value.find((v) => v.id === versionId)
-  if (!target) return
-  editableDeck.value = computeDeckSummary(
-    target.deck.cards.map((c) => ({ ...c })),
-    target.deck.format,
-  )
-  if (target.summary) {
-    currentSummary.value = target.summary
-  }
-}
-
 function rebuildEditableDeck(cards: ParsedDeckEntry[]) {
   editableDeck.value = computeDeckSummary(cards, editableDeck.value.format)
 }
@@ -560,7 +548,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         @select-version="handleSelectVersion"
         @save-as-new-version="handleSaveAsNewVersion"
         @set-baseline-version="handleSetBaselineVersion"
-        @restore-version="handleRestoreVersion"
         @cancel-simulation="handleCancelSimulation"
         @back-step2="currentStep = 2"
       />
