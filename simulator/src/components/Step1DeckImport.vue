@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
 import { getCardImageUrl } from '../utils/cardImage'
+import { useI18n } from '../utils/i18n'
+import CardZoomModal from './CardZoomModal.vue'
 
 const props = defineProps<{
   rawDeckText: string
@@ -14,8 +16,11 @@ const emit = defineEmits<{
   (e: 'proceed-step2'): void
 }>()
 
+const { t } = useI18n()
+
 const localText = ref(props.rawDeckText)
 const hasValidatedCurrentInput = ref(false)
+const zoomedCard = ref<ParsedDeckEntry | null>(null)
 
 watch(
   () => props.rawDeckText,
@@ -63,6 +68,14 @@ function handleImgError(event: Event) {
     target.style.display = 'none'
   }
 }
+
+function openCardZoom(card: ParsedDeckEntry) {
+  zoomedCard.value = card
+}
+
+function closeCardZoom() {
+  zoomedCard.value = null
+}
 </script>
 
 <template>
@@ -72,14 +85,13 @@ function handleImgError(event: Event) {
       <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 px-6 py-8 text-white sm:px-8">
         <div class="max-w-3xl">
           <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-200 backdrop-blur">
-            Simulateur de match Pokémon TCG
+            {{ t('heroBadge') }}
           </span>
           <h1 class="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
-            Optimisez votre deck contre le Top Méta
+            {{ t('heroTitle') }}
           </h1>
           <p class="mt-2 text-sm leading-relaxed text-slate-300 sm:text-base">
-            Collez votre decklist au format Pokémon TCG Live pour tester la consistance de votre deck,
-            mesurer votre taux de victoire contre les meilleurs decks et découvrir les meilleures cartes de remplacement.
+            {{ t('heroDescription') }}
           </p>
 
           <div class="mt-5 flex flex-wrap gap-4 text-xs font-medium text-slate-200">
@@ -87,19 +99,19 @@ function handleImgError(event: Event) {
               <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <span>Simulation rapide par intelligence artificielle</span>
+              <span>{{ t('profileBalancedDesc') }}</span>
             </div>
             <div class="flex items-center gap-2">
               <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <span>Adversaires méta du moment</span>
+              <span>{{ t('metaMatchupsTitle') }}</span>
             </div>
             <div class="flex items-center gap-2">
               <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              <span>Atelier de comparaison de cartes A/B</span>
+              <span>{{ t('step3Title') }}</span>
             </div>
           </div>
         </div>
@@ -114,7 +126,7 @@ function handleImgError(event: Event) {
           <label for="ptcgl-decklist-input" class="text-xs font-bold uppercase tracking-wider text-slate-700">
             Decklist Pokémon TCG Live
           </label>
-          <span class="text-xs text-slate-400">
+          <span class="text-xs text-slate-400 font-mono">
             Format : Qté Nom CODE N°
           </span>
         </div>
@@ -125,7 +137,7 @@ function handleImgError(event: Event) {
           @input="onInputTextChange"
           rows="18"
           spellcheck="false"
-          placeholder="Collez ici votre liste exportée depuis Pokémon TCG Live...&#10;&#10;Exemple :&#10;Pokémon: 19&#10;4 Dreepy TWM 128&#10;4 Drakloak TWM 129&#10;3 Dragapult ex TWM 130...&#10;&#10;Trainer: 32&#10;4 Lillie's Determination MEG 119...&#10;&#10;Energy: 9&#10;3 Fire Energy MEE 10..."
+          :placeholder="t('pasteDeckPlaceholder')"
           class="w-full flex-1 rounded-xl border border-slate-200 bg-slate-50 p-3.5 font-mono text-xs leading-relaxed text-slate-800 placeholder-slate-400 transition focus:border-slate-900 focus:bg-white focus:outline-none"
         ></textarea>
 
@@ -138,7 +150,7 @@ function handleImgError(event: Event) {
             @click="handleValidateClick"
             class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
           >
-            <span>Valider le deck</span>
+            <span>{{ t('importButton') }}</span>
             <span v-if="localText.trim()" class="rounded bg-white/20 px-2 py-0.5 text-xs">
               {{ validatedDeck.totalCards }} / 60
             </span>
@@ -150,7 +162,7 @@ function handleImgError(event: Event) {
             @click="emit('proceed-step2')"
             class="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-600 bg-emerald-600 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-emerald-700 active:bg-emerald-800"
           >
-            <span>Passer à la configuration des matchups</span>
+            <span>{{ t('btnConfigure') }}</span>
             <span>→</span>
           </button>
         </div>
@@ -194,15 +206,15 @@ function handleImgError(event: Event) {
                     validatedDeck.totalCards === 0
                       ? 'En attente de votre decklist'
                       : validatedDeck.isValid60 && validatedDeck.isFullyResolved
-                        ? 'Deck complet et valide (60 / 60 cartes)'
-                        : `Deck incomplet (${validatedDeck.totalCards} / 60 cartes)`
+                        ? `${t('deckValidated')} (${t('cardsRequired')})`
+                        : `${t('deckIncomplete')} (${validatedDeck.totalCards} / 60)`
                   }}
                 </h3>
                 <p class="text-xs text-slate-600">
                   {{
                     validatedDeck.totalCards === 0
-                      ? 'Collez votre decklist dans la zone de texte puis cliquez sur Valider.'
-                      : `${validatedDeck.uniqueCardCount} références de cartes distinctes détectées.`
+                      ? t('pasteDeckPlaceholder')
+                      : `${validatedDeck.uniqueCardCount} références de cartes distinctes.`
                   }}
                 </p>
               </div>
@@ -211,13 +223,13 @@ function handleImgError(event: Event) {
             <!-- Badges récapitulatifs -->
             <div v-if="validatedDeck.totalCards > 0" class="flex flex-wrap gap-2 text-xs">
               <span class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-2xs">
-                Pokémon : {{ validatedDeck.pokemonCount }}
+                {{ t('pokemonCount') }} : {{ validatedDeck.pokemonCount }}
               </span>
               <span class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-2xs">
-                Dresseurs : {{ validatedDeck.trainerCount }}
+                {{ t('trainerCount') }} : {{ validatedDeck.trainerCount }}
               </span>
               <span class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-2xs">
-                Énergies : {{ validatedDeck.energyCount }}
+                {{ t('energyCount') }} : {{ validatedDeck.energyCount }}
               </span>
             </div>
           </div>
@@ -228,7 +240,7 @@ function handleImgError(event: Event) {
             class="mt-4 rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-900"
           >
             <div class="font-bold">
-              Cartes non reconnues ({{ validatedDeck.unresolvedCount }}) :
+              {{ validatedDeck.unresolvedCount }} {{ t('unresolvedCardsAlert') }} :
             </div>
             <div class="mt-2 flex flex-wrap gap-1.5">
               <span
@@ -257,7 +269,7 @@ function handleImgError(event: Event) {
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Synergies &amp; Cohérence du Deck
+                {{ t('synergyAuditTitle') }}
               </h3>
               <p class="text-xs text-slate-500">
                 Vérification des cartes requises par vos attaquants et moteurs
@@ -303,12 +315,12 @@ function handleImgError(event: Event) {
       </div>
     </div>
 
-    <!-- VISUALISATION DU DECK AVEC IMAGES DE CARTES -->
+    <!-- VISUALISATION DU DECK AVEC IMAGES DE CARTES ET ZOOM -->
     <div v-if="validatedDeck.cards.length > 0" class="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <!-- Pokémon -->
       <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 class="text-sm font-bold text-slate-900">Pokémon</h3>
+          <h3 class="text-sm font-bold text-slate-900">{{ t('pokemonCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
             {{ validatedDeck.pokemonCount }} cartes
           </span>
@@ -318,16 +330,18 @@ function handleImgError(event: Event) {
           <li
             v-for="card in pokemonCards"
             :key="card.uid"
-            class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-300 hover:bg-slate-50"
+            @click="openCardZoom(card)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
+            :title="t('clickToEnlarge')"
           >
-            <!-- Image de la carte -->
+            <!-- Image de la carte avec zoom au clic -->
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
               :alt="card.nameFr"
               loading="lazy"
               @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200"
+              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
             />
             <div
               v-else
@@ -341,12 +355,12 @@ function handleImgError(event: Event) {
                 <span class="rounded bg-slate-900 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
               </div>
               <div class="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
                 <span>{{ card.subCategory }}</span>
                 <span>•</span>
-                <span>{{ card.model.pokemonStats?.hp ?? 70 }} PV</span>
+                <span>{{ card.model.pokemonStats?.hp ?? 70 }} {{ t('cardHp') }}</span>
               </div>
             </div>
           </li>
@@ -356,7 +370,7 @@ function handleImgError(event: Event) {
       <!-- Dresseurs -->
       <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 class="text-sm font-bold text-slate-900">Dresseurs</h3>
+          <h3 class="text-sm font-bold text-slate-900">{{ t('trainerCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
             {{ validatedDeck.trainerCount }} cartes
           </span>
@@ -366,16 +380,18 @@ function handleImgError(event: Event) {
           <li
             v-for="card in trainerCards"
             :key="card.uid"
-            class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-300 hover:bg-slate-50"
+            @click="openCardZoom(card)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
+            :title="t('clickToEnlarge')"
           >
-            <!-- Image de la carte -->
+            <!-- Image de la carte avec zoom au clic -->
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
               :alt="card.nameFr"
               loading="lazy"
               @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200"
+              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
             />
             <div
               v-else
@@ -389,7 +405,7 @@ function handleImgError(event: Event) {
                 <span class="rounded bg-slate-800 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
               </div>
               <div class="mt-1 text-[11px] text-slate-500">
                 {{ card.subCategory }}
@@ -399,10 +415,10 @@ function handleImgError(event: Event) {
         </ul>
       </div>
 
-      <!-- Énergies -->
+      <!-- Énergies (Avec images officielles pour les énergies de base et spéciales) -->
       <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 class="text-sm font-bold text-slate-900">Énergies</h3>
+          <h3 class="text-sm font-bold text-slate-900">{{ t('energyCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
             {{ validatedDeck.energyCount }} cartes
           </span>
@@ -412,22 +428,24 @@ function handleImgError(event: Event) {
           <li
             v-for="card in energyCards"
             :key="card.uid"
-            class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-300 hover:bg-slate-50"
+            @click="openCardZoom(card)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
+            :title="t('clickToEnlarge')"
           >
-            <!-- Image de la carte -->
+            <!-- Image de l'énergie avec zoom au clic -->
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
               :alt="card.nameFr"
               loading="lazy"
               @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200"
+              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
             />
             <div
               v-else
               class="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-slate-200 font-bold text-slate-500 text-[10px]"
             >
-              ENG
+              NRG
             </div>
 
             <div class="min-w-0 flex-1">
@@ -435,7 +453,7 @@ function handleImgError(event: Event) {
                 <span class="rounded bg-slate-700 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
               </div>
               <div class="mt-1 text-[11px] text-slate-500">
                 {{ card.subCategory === 'SPECIAL_ENERGY' ? 'Énergie Spéciale' : 'Énergie de base' }}
@@ -445,5 +463,12 @@ function handleImgError(event: Event) {
         </ul>
       </div>
     </div>
+
+    <!-- Modale de Zoom de Carte -->
+    <CardZoomModal
+      :card="zoomedCard"
+      :is-open="zoomedCard !== null"
+      @close="closeCardZoom"
+    />
   </div>
 </template>
