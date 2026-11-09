@@ -57,7 +57,6 @@ const emit = defineEmits<{
   (e: 'select-version', versionId: string): void
   (e: 'save-as-new-version'): void
   (e: 'set-baseline-version', versionId: string): void
-  (e: 'restore-version', versionId: string): void
   (e: 'back-step2'): void
   (e: 'cancel-simulation'): void
 }>()
@@ -467,23 +466,14 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           </span>
 
           <!-- Actions de gestion de la version active -->
-          <div v-if="activeVersionId === v.id" class="flex items-center gap-1 ml-1" @click.stop>
+          <div v-if="activeVersionId === v.id && !v.isBaseline" class="flex items-center gap-1 ml-1" @click.stop>
             <button
-              v-if="!v.isBaseline"
               type="button"
               @click="emit('set-baseline-version', v.id)"
               class="rounded bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-white/30"
               :title="t('setAsBaseline')"
             >
               {{ t('setAsBaseline') }}
-            </button>
-            <button
-              type="button"
-              @click="emit('restore-version', v.id)"
-              class="rounded bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-white/30"
-              :title="t('restoreVersion')"
-            >
-              {{ t('restoreVersion') }}
             </button>
           </div>
         </div>
