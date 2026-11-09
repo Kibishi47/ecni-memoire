@@ -23,6 +23,20 @@ Le design des diapositives est volontairement épuré (1 slide = 1 grand titre �
 
 ---
 
+## 🌐 Deux Versions de Présentation Selon l'URL
+
+Le projet dispose désormais d'un système multi-pages transparent géré par Vite :
+
+1. **Version Soutenance 15 Minutes (Recommandée pour le 3 décembre)** :
+   * **URL** : `http://localhost:5173/` (ou fichier `index.html`)
+   * **Format** : **16 diapositives percutantes** calibrées pour le jury externe (2 développeurs, 2 designers).
+   * **Notes d'orateur adaptées** : Minutage précis pour chaque slide (`⏱️ Timing cible`), langage oral fluide et direct, équilibre 50 % Design/UX - 50 % Ingénierie logicielle, et encadrement d'une **démonstration live de 3 min 30 s**.
+2. **Version Exhaustive Complète (Archives & Documentation)** :
+   * **URL** : `http://localhost:5173/complete` (ou fichier `complete.html`)
+   * **Format** : **47 diapositives intégrales (8 Actes)** détaillant l'intégralité du parcours : sas pédagogique TCG, tour fermé, benchmark, 5 POCs, échec Wasm, TCGdex, POC 6 PokéEngine Lab, compilateur IA V1/V2/V3, fastState Zobrist 53-bit, decks méta et perspectives.
+
+---
+
 ## 🎙️ Raccourci Essentiel (Console d'Orateur)
 
 * **Appuyez sur la touche `S`** de votre clavier pour ouvrir la **console d'orateur** (Speaker View) dans une fenêtre pop-up dédiée.
