@@ -1224,6 +1224,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
     <CardZoomModal
       :card="zoomedCard"
       :is-open="zoomedCard !== null"
+      :is-debug-mode="isDebugMode"
       @close="closeZoom"
     />
 
