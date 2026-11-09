@@ -4,6 +4,7 @@ import type { SimulationConfig } from '../types/simulator'
 import type { ParsedDeck } from '../types/deck'
 import type { MaxBranchesSetting } from '../core/evaluator'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
+import { useI18n } from '../utils/i18n'
 
 const props = defineProps<{
   config: SimulationConfig
@@ -21,22 +22,24 @@ const emit = defineEmits<{
   (e: 'cancel-simulation'): void
 }>()
 
+const { t } = useI18n()
+
 export interface PerformanceProfile {
   id: string
-  label: string
-  subtitle: string
+  labelKey: string
+  descKey: string
   estimatedTime: string
   iterations: number
   maxTurns: number
   maxBranches: MaxBranchesSetting
-  recommendedBadge?: string
+  recommendedBadge?: boolean
 }
 
 const PERFORMANCE_PROFILES: PerformanceProfile[] = [
   {
     id: 'ultra_fast',
-    label: 'Éclair',
-    subtitle: 'Aperçu instantané',
+    labelKey: 'profileLightning',
+    descKey: 'profileLightningDesc',
     estimatedTime: '~2 sec',
     iterations: 60,
     maxTurns: 12,
@@ -44,18 +47,18 @@ const PERFORMANCE_PROFILES: PerformanceProfile[] = [
   },
   {
     id: 'fast',
-    label: 'Rapide',
-    subtitle: 'Idéal pour itérer',
+    labelKey: 'profileFast',
+    descKey: 'profileFastDesc',
     estimatedTime: '~5 sec',
     iterations: 150,
     maxTurns: 15,
     maxBranches: 8,
-    recommendedBadge: 'Recommandé',
+    recommendedBadge: true,
   },
   {
     id: 'balanced',
-    label: 'Équilibré',
-    subtitle: 'Précision solide',
+    labelKey: 'profileBalanced',
+    descKey: 'profileBalancedDesc',
     estimatedTime: '~10 sec',
     iterations: 300,
     maxTurns: 15,
@@ -63,8 +66,8 @@ const PERFORMANCE_PROFILES: PerformanceProfile[] = [
   },
   {
     id: 'precise',
-    label: 'Précis',
-    subtitle: 'Analyse compétitive',
+    labelKey: 'profilePrecise',
+    descKey: 'profilePreciseDesc',
     estimatedTime: '~25 sec',
     iterations: 600,
     maxTurns: 18,
@@ -72,10 +75,10 @@ const PERFORMANCE_PROFILES: PerformanceProfile[] = [
   },
   {
     id: 'tournament',
-    label: 'Tournoi',
-    subtitle: 'Robustesse maximale',
+    labelKey: 'profileTournament',
+    descKey: 'profileTournamentDesc',
     estimatedTime: '~60 sec',
-    iterations: 1500,
+    iterations: 1200,
     maxTurns: 20,
     maxBranches: 50,
   },
@@ -101,7 +104,6 @@ function applyProfile(profile: PerformanceProfile) {
 }
 
 onMounted(() => {
-  // Detection automatique basee sur les capacites materielles du client
   const cores = props.maxHardwareWorkers || 4
   if (cores >= 8) {
     applyProfile(PERFORMANCE_PROFILES[2]!) // Équilibré
@@ -130,7 +132,7 @@ const launchButtonState = computed(() => {
   if (props.isSimulating) {
     return {
       disabled: true,
-      label: `Simulation en cours... (${props.progressPercent ?? 0} %)`,
+      label: `${t('simulatingProgress', { done: Math.round(((props.progressPercent ?? 0) / 100) * props.config.iterations), total: props.config.iterations })} (${props.progressPercent ?? 0} %)`,
       showSpinner: true,
     }
   }
@@ -150,7 +152,7 @@ const launchButtonState = computed(() => {
   }
   return {
     disabled: false,
-    label: `Lancer la simulation (${props.config.iterations.toLocaleString('fr-FR')} parties)`,
+    label: `${t('btnLaunchSimulation')} (${props.config.iterations} parties)`,
     showSpinner: false,
   }
 })
@@ -162,10 +164,10 @@ const launchButtonState = computed(() => {
     <div class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
       <div>
         <h2 class="text-xl font-bold text-slate-900">
-          Configuration des Matchups &amp; Vitesse
+          {{ t('step2Heading') }}
         </h2>
         <p class="mt-1 text-sm text-slate-600">
-          Choisissez vos adversaires et le profil de précision souhaité pour lancer le simulateur.
+          {{ t('step2Subheading') }}
         </p>
       </div>
 
@@ -175,7 +177,7 @@ const launchButtonState = computed(() => {
           @click="emit('back-step1')"
           class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
         >
-          ← Modifier mon deck
+          ← {{ t('step1Short') }}
         </button>
 
         <button
@@ -199,271 +201,188 @@ const launchButtonState = computed(() => {
               : 'border-slate-900 bg-slate-900 text-white shadow-xs hover:bg-slate-800 active:bg-slate-950',
           ]"
         >
-          <svg
-            v-if="launchButtonState.showSpinner"
-            class="h-4 w-4 animate-spin text-white"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-          </svg>
           <span>{{ launchButtonState.label }}</span>
+          <span>→</span>
         </button>
       </div>
     </div>
 
-    <!-- 1. SELECTEUR DE PROFIL DE PERFORMANCE AUTOMATISE -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-      <div class="mb-4">
-        <div class="flex items-center justify-between">
-          <label class="text-xs font-bold uppercase tracking-wider text-slate-700">
-            1. Vitesse &amp; Précision de la Simulation
-          </label>
-          <span class="text-xs text-slate-500">
-            Configuration automatique adaptée à votre processeur ({{ maxHardwareWorkers }} cœurs détectés)
-          </span>
+    <!-- 1. SELECTEUR DE PROFIL DE PERFORMANCE AUTOMATIQUE -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">
+            {{ t('perfProfileTitle') }}
+          </h3>
+          <p class="mt-0.5 text-xs text-slate-500">
+            {{ t('perfProfileSub') }}
+          </p>
         </div>
-        <p class="mt-1 text-xs text-slate-500">
-          Sélectionnez un niveau de précision : le volume de parties et la profondeur de calcul s'ajustent automatiquement.
-        </p>
+        <span class="rounded-lg bg-slate-100 px-3 py-1 font-mono text-xs font-bold text-slate-700">
+          Hardware : {{ maxHardwareWorkers }} cœurs détectés
+        </span>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <button
+      <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div
           v-for="profile in PERFORMANCE_PROFILES"
           :key="profile.id"
-          type="button"
           @click="applyProfile(profile)"
-          class="flex flex-col justify-between rounded-xl border p-3.5 text-left transition"
+          class="group relative flex cursor-pointer flex-col justify-between rounded-xl border p-4 transition"
           :class="[
             activeProfileId === profile.id
-              ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
-              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100',
+              ? 'border-slate-900 bg-slate-900 text-white shadow-md'
+              : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
           ]"
         >
           <div>
             <div class="flex items-center justify-between">
-              <span class="text-sm font-bold">{{ profile.label }}</span>
+              <span class="text-sm font-bold">
+                {{ t(profile.labelKey) }}
+              </span>
               <span
                 v-if="profile.recommendedBadge"
                 class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                :class="activeProfileId === profile.id ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-800'"
+                :class="activeProfileId === profile.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
               >
-                {{ profile.recommendedBadge }}
+                Recommandé
               </span>
             </div>
-            <div
+
+            <p
               class="mt-1 text-xs"
               :class="activeProfileId === profile.id ? 'text-slate-300' : 'text-slate-500'"
             >
-              {{ profile.subtitle }}
-            </div>
+              {{ t(profile.descKey) }}
+            </p>
           </div>
 
-          <div class="mt-4 border-t pt-2" :class="activeProfileId === profile.id ? 'border-slate-800' : 'border-slate-200'">
-            <div class="font-mono text-xs font-bold" :class="activeProfileId === profile.id ? 'text-emerald-400' : 'text-emerald-700'">
-              {{ profile.estimatedTime }}
-            </div>
-            <div class="text-[10px]" :class="activeProfileId === profile.id ? 'text-slate-400' : 'text-slate-400'">
+          <div class="mt-4 flex items-center justify-between border-t pt-3" :class="activeProfileId === profile.id ? 'border-white/20' : 'border-slate-200'">
+            <span class="font-mono text-xs font-bold">
               {{ profile.iterations }} parties
-            </div>
+            </span>
+            <span
+              class="text-[11px] font-semibold"
+              :class="activeProfileId === profile.id ? 'text-emerald-300' : 'text-emerald-700'"
+            >
+              {{ profile.estimatedTime }}
+            </span>
           </div>
-        </button>
+        </div>
       </div>
     </div>
 
-    <!-- 2. ORDRE DU TOUR : PREMIER / DEUXIEME / ALEATOIRE -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-      <div class="mb-3">
-        <label class="text-xs font-bold uppercase tracking-wider text-slate-700">
-          2. Ordre de jeu initial (Tirage au sort)
-        </label>
-        <p class="mt-1 text-xs text-slate-500">
-          Choisissez si vous commencez ou jouez en second, ou conservez la règle officielle de tournoi (50/50).
+    <!-- 2. INITIATIVE DU PREMIER TOUR -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div class="border-b border-slate-100 pb-3">
+        <h3 class="text-sm font-bold text-slate-900">
+          {{ t('turnOrderTitle') }}
+        </h3>
+        <p class="mt-0.5 text-xs text-slate-500">
+          {{ t('turnOrderSub') }}
         </p>
       </div>
 
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <button
           type="button"
           @click="patchConfig({ firstPlayerMode: 'RANDOM' })"
-          class="flex items-center gap-3 rounded-xl border p-4 text-left transition"
+          class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'RANDOM'
               ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
-              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100',
+              : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
           ]"
         >
-          <div
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold"
-            :class="config.firstPlayerMode === 'RANDOM' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'"
-          >
-            50%
-          </div>
-          <div>
-            <div class="text-sm font-bold">Aléatoire (Officiel)</div>
-            <div class="text-xs" :class="config.firstPlayerMode === 'RANDOM' ? 'text-slate-300' : 'text-slate-500'">
-              50% Premier / 50% Deuxième
-            </div>
-          </div>
+          <span class="text-sm font-bold">{{ t('turnOrderRandom') }}</span>
+          <span class="mt-1 text-xs opacity-75">Simule un pile ou face réaliste à chaque manche</span>
         </button>
 
         <button
           type="button"
           @click="patchConfig({ firstPlayerMode: 'PLAYER' })"
-          class="flex items-center gap-3 rounded-xl border p-4 text-left transition"
+          class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'PLAYER'
               ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
-              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100',
+              : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
           ]"
         >
-          <div
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold"
-            :class="config.firstPlayerMode === 'PLAYER' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'"
-          >
-            T1
-          </div>
-          <div>
-            <div class="text-sm font-bold">Toujours Premier</div>
-            <div class="text-xs" :class="config.firstPlayerMode === 'PLAYER' ? 'text-slate-300' : 'text-slate-500'">
-              Posez en premier (pas d'attaque T1)
-            </div>
-          </div>
+          <span class="text-sm font-bold">{{ t('turnOrderFirst') }}</span>
+          <span class="mt-1 text-xs opacity-75">Votre deck commence 100% des parties au T1</span>
         </button>
 
         <button
           type="button"
           @click="patchConfig({ firstPlayerMode: 'OPPONENT' })"
-          class="flex items-center gap-3 rounded-xl border p-4 text-left transition"
+          class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'OPPONENT'
               ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
-              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100',
+              : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
           ]"
         >
-          <div
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold"
-            :class="config.firstPlayerMode === 'OPPONENT' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'"
-          >
-            T2
-          </div>
-          <div>
-            <div class="text-sm font-bold">Toujours Deuxième</div>
-            <div class="text-xs" :class="config.firstPlayerMode === 'OPPONENT' ? 'text-slate-300' : 'text-slate-500'">
-              Supporter et attaque dès votre T1
-            </div>
-          </div>
+          <span class="text-sm font-bold">{{ t('turnOrderSecond') }}</span>
+          <span class="mt-1 text-xs opacity-75">Votre deck joue toujours en second (attaque T1 autorisée)</span>
         </button>
       </div>
     </div>
 
-    <!-- 3. DECKS ADVERSES DU TOP META -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <!-- 3. DECKS ADVERSES TOP META DU MOMENT -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
-          <label class="text-xs font-bold uppercase tracking-wider text-slate-700">
-            3. Adversaires Méta à affronter
-          </label>
-          <p class="mt-1 text-xs text-slate-500">
-            Sélectionnez les archétypes compétitifs dominants contre lesquels votre deck sera mesuré.
+          <h3 class="text-sm font-bold text-slate-900">
+            {{ t('metaMatchupsTitle') }}
+          </h3>
+          <p class="mt-0.5 text-xs text-slate-500">
+            {{ t('metaMatchupsSub') }}
           </p>
         </div>
         <button
           type="button"
           @click="selectAllOpponents"
-          class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+          class="text-xs font-semibold text-indigo-700 hover:underline"
         >
-          Sélectionner tous les decks méta
+          Tout sélectionner
         </button>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div
-          v-for="deckItem in META_OPPONENT_DECKS"
-          :key="deckItem.id"
-          @click="toggleOpponent(deckItem.id)"
-          class="cursor-pointer rounded-xl border p-4 transition"
+          v-for="opp in META_OPPONENT_DECKS"
+          :key="opp.id"
+          @click="toggleOpponent(opp.id)"
+          class="group relative flex cursor-pointer flex-col justify-between rounded-xl border p-5 transition"
           :class="[
-            config.selectedOpponentIds.includes(deckItem.id)
-              ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
-              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300 hover:bg-slate-100',
+            config.selectedOpponentIds.includes(opp.id)
+              ? 'border-slate-900 bg-white ring-2 ring-slate-900 shadow-xs'
+              : 'border-slate-200 bg-slate-50/40 text-slate-400 opacity-60 hover:opacity-100 hover:bg-white',
           ]"
         >
-          <div class="flex items-center justify-between">
-            <span
-              class="rounded-md px-2 py-0.5 text-xs font-bold"
-              :class="config.selectedOpponentIds.includes(deckItem.id) ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'"
-            >
-              {{ deckItem.archetypeBadge }}
-            </span>
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                {{ opp.archetypeBadge }}
+              </span>
+              <input
+                type="checkbox"
+                :checked="config.selectedOpponentIds.includes(opp.id)"
+                class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900 pointer-events-none"
+              />
+            </div>
 
-            <input
-              type="checkbox"
-              :checked="config.selectedOpponentIds.includes(deckItem.id)"
-              class="h-4 w-4 rounded accent-slate-900"
-              @click.stop="toggleOpponent(deckItem.id)"
-            />
+            <h4 class="mt-3 text-base font-bold text-slate-900">
+              {{ opp.name }}
+            </h4>
+            <p class="mt-1 text-xs text-slate-600">
+              {{ opp.strategySubtitle }}
+            </p>
           </div>
 
-          <h3 class="mt-3 text-base font-bold">
-            {{ deckItem.name }}
-          </h3>
-          <p class="mt-1 text-xs" :class="config.selectedOpponentIds.includes(deckItem.id) ? 'text-slate-300' : 'text-slate-500'">
-            {{ deckItem.description }}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- PANNEAU TECHNIQUE DE DEBUG (UNIQUEMENT VISIBLE SI ?debug=true) -->
-    <div
-      v-if="isDebugMode"
-      class="rounded-2xl border border-amber-300 bg-amber-50/50 p-5 shadow-xs"
-    >
-      <div class="flex items-center justify-between border-b border-amber-200 pb-3">
-        <div class="flex items-center gap-2">
-          <span class="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">i</span>
-          <h3 class="text-xs font-bold uppercase tracking-wider text-amber-950">
-            Paramètres Granulaires Avancés (Mode Développeur)
-          </h3>
-        </div>
-        <span class="font-mono text-xs text-amber-800">?debug=true</span>
-      </div>
-
-      <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div>
-          <label class="block text-xs font-bold text-slate-700">Nombre de parties manuel</label>
-          <input
-            type="number"
-            :value="config.iterations"
-            @input="(e) => patchConfig({ iterations: Number((e.target as HTMLInputElement).value) || 100 })"
-            class="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 font-mono text-xs text-slate-800"
-          />
-        </div>
-
-        <div>
-          <label class="block text-xs font-bold text-slate-700">Tours maximum (maxTurns)</label>
-          <input
-            type="number"
-            :value="config.maxTurns"
-            @input="(e) => patchConfig({ maxTurns: Number((e.target as HTMLInputElement).value) || 15 })"
-            class="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 font-mono text-xs text-slate-800"
-          />
-        </div>
-
-        <div>
-          <label class="block text-xs font-bold text-slate-700">Workers Web (threads)</label>
-          <input
-            type="number"
-            :value="config.workerCount"
-            min="1"
-            :max="maxHardwareWorkers"
-            @input="(e) => patchConfig({ workerCount: Number((e.target as HTMLInputElement).value) || 1 })"
-            class="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 font-mono text-xs text-slate-800"
-          />
+          <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+            <span class="truncate">Menaces : {{ opp.keyThreats.slice(0, 2).join(', ') }}</span>
+          </div>
         </div>
       </div>
     </div>
