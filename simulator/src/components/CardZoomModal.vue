@@ -14,7 +14,7 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const { t } = useI18n()
+const { t, getLocalizedCardName, getLocalizedSubCategory, getLocalizedCardRules } = useI18n()
 
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.isOpen) {
@@ -34,16 +34,9 @@ onBeforeUnmount(() => {
   }
 })
 
-function getCardName(card: ParsedDeckEntry | EngineCardModel): string {
-  if ('nameFr' in card && card.nameFr) return card.nameFr
-  if ('identity' in card && card.identity?.nameFr) return card.identity.nameFr
-  return 'Carte'
-}
-
-function getCardSubCategory(card: ParsedDeckEntry | EngineCardModel): string {
-  if ('subCategory' in card && card.subCategory) return card.subCategory
-  if ('identity' in card && card.identity?.subCategory) return card.identity.subCategory
-  return ''
+function getCardSubCat(card: ParsedDeckEntry | EngineCardModel): string {
+  const raw = 'subCategory' in card && card.subCategory ? card.subCategory : ('identity' in card ? card.identity?.subCategory : '')
+  return getLocalizedSubCategory(raw)
 }
 
 function getCardHp(card: ParsedDeckEntry | EngineCardModel): number | null {
@@ -64,16 +57,6 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
   }
   return ''
 }
-
-function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
-  if ('model' in card && card.model?.identity?.rawRulesText?.length) {
-    return card.model.identity.rawRulesText
-  }
-  if ('identity' in card && card.identity?.rawRulesText?.length) {
-    return card.identity.rawRulesText
-  }
-  return []
-}
 </script>
 
 <template>
@@ -89,7 +72,7 @@ function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
       <button
         type="button"
         @click="emit('close')"
-        aria-label="Fermer"
+        :aria-label="t('closeModal')"
         class="absolute right-3.5 top-3.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition"
       >
         ✕
@@ -100,14 +83,14 @@ function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
         <img
           v-if="getCardImageUrl(card, 'high')"
           :src="getCardImageUrl(card, 'high')!"
-          :alt="getCardName(card)"
+          :alt="getLocalizedCardName(card)"
           class="max-h-[70vh] w-auto rounded-xl object-contain shadow-2xl transition hover:scale-102"
         />
         <div
           v-else
           class="flex h-72 w-52 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 font-mono text-sm text-slate-400"
         >
-          {{ getCardName(card) }}
+          {{ getLocalizedCardName(card) }}
         </div>
       </div>
 
@@ -116,7 +99,7 @@ function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
         <div>
           <div class="flex items-center gap-2">
             <span class="rounded bg-indigo-500/20 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-300">
-              {{ getCardSubCategory(card) }}
+              {{ getCardSubCat(card) }}
             </span>
             <span v-if="getCardHp(card)" class="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300">
               {{ getCardHp(card) }} {{ t('cardHp') }}
@@ -124,7 +107,7 @@ function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
           </div>
 
           <h3 class="mt-2 text-2xl font-black text-white">
-            {{ getCardName(card) }}
+            {{ getLocalizedCardName(card) }}
           </h3>
 
           <div class="mt-1 font-mono text-xs text-slate-400">
@@ -137,14 +120,14 @@ function getCardRules(card: ParsedDeckEntry | EngineCardModel): string[] {
             </h4>
             <div class="mt-2 space-y-2 text-xs leading-relaxed text-slate-300">
               <p
-                v-for="(rule, idx) in getCardRules(card)"
+                v-for="(rule, idx) in getLocalizedCardRules(card)"
                 :key="idx"
                 class="rounded-lg bg-slate-800/80 p-2.5 border border-slate-700/60"
               >
                 {{ rule }}
               </p>
-              <p v-if="getCardRules(card).length === 0" class="italic text-slate-500">
-                Aucun texte de règle spécifique.
+              <p v-if="getLocalizedCardRules(card).length === 0" class="italic text-slate-500">
+                {{ t('noRulesText') }}
               </p>
             </div>
           </div>

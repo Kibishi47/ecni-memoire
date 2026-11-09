@@ -41,7 +41,9 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
       desc = {
         id: oppMeta.id,
         name: oppMeta.name,
+        nameEn: oppMeta.nameEn || oppMeta.name,
         archetypeTag: oppMeta.archetypeBadge,
+        archetypeTagEn: oppMeta.archetypeBadgeEn || oppMeta.archetypeBadge,
         accentColor: oppMeta.badgeColor,
         models: expandParsedDeckToModels(parsed),
       }

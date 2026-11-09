@@ -106,33 +106,51 @@ export const META_OPPONENT_DECKS: MetaOpponentDeck[] = [
   {
     id: 'meta_lanssorien_ex',
     name: 'Lanssorien-ex',
+    nameEn: 'Dragapult ex',
     archetypeBadge: 'Spread & Contrôle',
+    archetypeBadgeEn: 'Spread & Control',
     strategySubtitle: 'Moteur de pioche Dispareptil + Plongée Fantôme (200 + 60 Banc)',
+    strategySubtitleEn: 'Drakloak draw engine + Phantom Dive (200 + 60 Bench)',
     description:
       'Deck méta combinant le moteur de pioche de Dispareptil avec Lanssorien-ex (Plongée Fantôme), Munkidori pour manipuler les marqueurs de dégâts, et Rozbouton pour bloquer les Objets adverses.',
+    descriptionEn:
+      'Meta deck combining Drakloak Recon Directive engine with Dragapult ex (Phantom Dive), Munkidori damage manipulation, and Budew Item Lock.',
     keyThreats: ['Lanssorien-ex (200 + 60 Spread)', 'Dispareptil (Reconnaissance Aérienne)', 'Rozbouton (Item Lock)'],
+    keyThreatsEn: ['Dragapult ex (200 + 60 Spread)', 'Drakloak (Recon Directive)', 'Budew (Item Lock)'],
     badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     ptcglText: DECK_LANSSORIEN_EX_PTCGL,
   },
   {
     id: 'meta_mega_kangourex_ex',
     name: 'Méga-Kangourex-ex',
+    nameEn: 'Mega Kangaskhan ex',
     archetypeBadge: 'Accélération & Multi-Attaquants',
+    archetypeBadgeEn: 'Acceleration & Multi-Attackers',
     strategySubtitle: 'Abîme Zéro à 8 places de Banc + Transfert d\'Énergies multi-types',
+    strategySubtitleEn: 'Area Zero Underdepths 8-bench + Multi-type Energy Switch acceleration',
     description:
       'Deck massif exploitant les 8 places de Banc conférées par Abîme Zéro, l\'accélération d\'énergies via Échange d\'Énergie / Crispin et la force de frappe de Méga-Kangourex-ex, Ogerpon-ex et Koraidon-ex.',
+    descriptionEn:
+      'Massive deck utilizing Area Zero Underdepths 8-bench capacity, Energy Switch / Crispin acceleration, and heavy hitters Mega Kangaskhan ex, Ogerpon ex, and Koraidon ex.',
     keyThreats: ['Méga-Kangourex-ex', 'Ogerpon Masque Turquoise-ex', 'Abîme Zéro'],
+    keyThreatsEn: ['Mega Kangaskhan ex', 'Teal Mask Ogerpon ex', 'Area Zero Underdepths'],
     badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
     ptcglText: DECK_MEGA_KANGOUREX_EX_PTCGL,
   },
   {
     id: 'meta_roigada',
     name: 'Roigada',
+    nameEn: 'Slowking',
     archetypeBadge: 'Combo & Manipulation de Deck',
+    archetypeBadgeEn: 'Combo & Deck Manipulation',
     strategySubtitle: 'Manipulation du dessus du deck avec Décodage du Cryptologue & Académie de Nuit',
+    strategySubtitleEn: 'Top-deck manipulation with Ciphermaniac & Academy at Night',
     description:
       'Deck combo exploitant les synergies de Roigada avec Décodage du Cryptologue et Académie de Nuit pour ordonner le dessus du deck, soutenu par Méga-Kangourex-ex, Métalosse et Kyurem.',
+    descriptionEn:
+      'Combo deck leveraging Slowking synergies with Ciphermaniac and Academy at Night for top-deck ordering, supported by Mega Kangaskhan ex, Metagross, and Kyurem.',
     keyThreats: ['Roigada', 'Décodage du Cryptologue', 'Kyurem'],
+    keyThreatsEn: ['Slowking', 'Ciphermaniac\'s Codebreaking', 'Kyurem'],
     badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
     ptcglText: DECK_ROIGADA_PTCGL,
   },

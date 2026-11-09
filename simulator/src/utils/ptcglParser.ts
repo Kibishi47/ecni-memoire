@@ -337,9 +337,11 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
       const satisfied = matchingCount >= minCount
       const criticalZeroValue = matchingCount === 0 && isCriticalZero
 
+      const nameEn = entry.nameEn || entry.nameFr
       auditItems.push({
         cardId: entry.model.cardId,
         cardNameFr: entry.nameFr,
+        cardNameEn: nameEn,
         requirement:
           typeof rawReq === 'object'
             ? rawReq
@@ -348,6 +350,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         satisfied,
         criticalZeroValue,
         description: `${entry.nameFr} attend ≥ ${minCount}× ${filterDesc} (trouvé : ${matchingCount})`,
+        descriptionEn: `${nameEn} requires ≥ ${minCount}× ${filterDesc} (found: ${matchingCount})`,
       })
     }
   }

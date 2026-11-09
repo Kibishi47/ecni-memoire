@@ -48,7 +48,9 @@ export const MAX_TRACED_GAMES = 20
 export interface OpponentDeckDescriptor {
   id: string
   name: string
+  nameEn?: string
   archetypeTag: string
+  archetypeTagEn?: string
   accentColor: string
   models: EngineCardModel[]
 }
@@ -56,6 +58,7 @@ export interface OpponentDeckDescriptor {
 export interface ShardCardCounter {
   cardId: string
   nameFr: string
+  nameEn?: string
   category: string
   subCategory: string
   quantityInDeck: number
@@ -243,6 +246,7 @@ export function createShardTelemetryAccumulator(
       cardCounters[model.cardId] = {
         cardId: model.cardId,
         nameFr: model.identity.nameFr,
+        nameEn: model.identity.nameEn || model.identity.nameFr,
         category: model.category,
         subCategory: model.subCategory,
         quantityInDeck: 1,
@@ -1109,7 +1113,9 @@ export function mergeSimulationShards(
   const matchupBreakdown: MatchupStatRecord[] = Array.from(byOpponent.values()).map((b) => ({
     opponentId: b.desc.id,
     opponentName: b.desc.name,
+    opponentNameEn: b.desc.nameEn || b.desc.name,
     archetypeTag: b.desc.archetypeTag,
+    archetypeTagEn: b.desc.archetypeTagEn || b.desc.archetypeTag,
     accentColor: b.desc.accentColor,
     gamesPlayed: b.games,
     wins: b.wins,
@@ -1141,6 +1147,7 @@ export function mergeSimulationShards(
     cardTelemetry[cardId] = {
       cardId: c.cardId,
       nameFr: c.nameFr,
+      nameEn: c.nameEn || c.nameFr,
       category: c.category,
       subCategory: c.subCategory,
       quantityInDeck: c.quantityInDeck,
