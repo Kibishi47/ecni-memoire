@@ -471,6 +471,7 @@ function closeCardZoom() {
     <CardZoomModal
       :card="zoomedCard"
       :is-open="zoomedCard !== null"
+      :is-debug-mode="isDebugMode"
       @close="closeCardZoom"
     />
   </div>
