@@ -16,7 +16,7 @@ const emit = defineEmits<{
   (e: 'proceed-step2'): void
 }>()
 
-const { t } = useI18n()
+const { t, currentLang, getLocalizedCardName, getLocalizedSubCategory } = useI18n()
 
 const localText = ref(props.rawDeckText)
 const hasValidatedCurrentInput = ref(false)
@@ -127,7 +127,7 @@ function closeCardZoom() {
             Decklist Pokémon TCG Live
           </label>
           <span class="text-xs text-slate-400 font-mono">
-            Format : Qté Nom CODE N°
+            {{ t('formatQtyNameCode') }}
           </span>
         </div>
 
@@ -204,7 +204,7 @@ function closeCardZoom() {
                 <h3 class="text-base font-bold">
                   {{
                     validatedDeck.totalCards === 0
-                      ? 'En attente de votre decklist'
+                      ? t('awaitingDecklist')
                       : validatedDeck.isValid60 && validatedDeck.isFullyResolved
                         ? `${t('deckValidated')} (${t('cardsRequired')})`
                         : `${t('deckIncomplete')} (${validatedDeck.totalCards} / 60)`
@@ -213,8 +213,8 @@ function closeCardZoom() {
                 <p class="text-xs text-slate-600">
                   {{
                     validatedDeck.totalCards === 0
-                      ? t('pasteDeckPlaceholder')
-                      : `${validatedDeck.uniqueCardCount} références de cartes distinctes.`
+                      ? t('pasteDecklistPrompt')
+                      : t('distinctCardsDetected', { n: validatedDeck.uniqueCardCount })
                   }}
                 </p>
               </div>
@@ -240,7 +240,7 @@ function closeCardZoom() {
             class="mt-4 rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-900"
           >
             <div class="font-bold">
-              {{ validatedDeck.unresolvedCount }} {{ t('unresolvedCardsAlert') }} :
+              {{ t('unresolvedCardsTitle', { n: validatedDeck.unresolvedCount }) }}
             </div>
             <div class="mt-2 flex flex-wrap gap-1.5">
               <span
@@ -272,7 +272,7 @@ function closeCardZoom() {
                 {{ t('synergyAuditTitle') }}
               </h3>
               <p class="text-xs text-slate-500">
-                Vérification des cartes requises par vos attaquants et moteurs
+                {{ t('deckSynergyVerification') }}
               </p>
             </div>
             <span
@@ -283,8 +283,7 @@ function closeCardZoom() {
                   : 'border-amber-200 bg-amber-50 text-amber-700'
               "
             >
-              {{ validatedDeck.synergyAudit.filter((s) => s.satisfied).length }} /
-              {{ validatedDeck.synergyAudit.length }} synergies validées
+              {{ t('synergiesValidated', { done: validatedDeck.synergyAudit.filter((s) => s.satisfied).length, total: validatedDeck.synergyAudit.length }) }}
             </span>
           </div>
 
@@ -300,14 +299,18 @@ function closeCardZoom() {
               "
             >
               <div>
-                <div class="font-bold text-slate-800">{{ item.cardNameFr }}</div>
-                <div class="mt-0.5 text-slate-500">{{ item.description }}</div>
+                <div class="font-bold text-slate-800">
+                  {{ currentLang === 'en' && item.cardNameEn ? item.cardNameEn : item.cardNameFr }}
+                </div>
+                <div class="mt-0.5 text-slate-500">
+                  {{ currentLang === 'en' && item.descriptionEn ? item.descriptionEn : item.description }}
+                </div>
               </div>
               <span
                 class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
                 :class="item.satisfied ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'"
               >
-                {{ item.satisfied ? 'Validé' : 'Manquant' }}
+                {{ item.satisfied ? t('synergySatisfied') : t('synergyMissing') }}
               </span>
             </div>
           </div>
@@ -322,7 +325,7 @@ function closeCardZoom() {
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 class="text-sm font-bold text-slate-900">{{ t('pokemonCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
-            {{ validatedDeck.pokemonCount }} cartes
+            {{ validatedDeck.pokemonCount }} {{ t('cardsUnit') }}
           </span>
         </div>
 
@@ -338,7 +341,7 @@ function closeCardZoom() {
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
-              :alt="card.nameFr"
+              :alt="getLocalizedCardName(card)"
               loading="lazy"
               @error="handleImgError"
               class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
@@ -355,10 +358,10 @@ function closeCardZoom() {
                 <span class="rounded bg-slate-900 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
-                <span>{{ card.subCategory }}</span>
+                <span>{{ getLocalizedSubCategory(card.subCategory) }}</span>
                 <span>•</span>
                 <span>{{ card.model.pokemonStats?.hp ?? 70 }} {{ t('cardHp') }}</span>
               </div>
@@ -372,7 +375,7 @@ function closeCardZoom() {
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 class="text-sm font-bold text-slate-900">{{ t('trainerCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
-            {{ validatedDeck.trainerCount }} cartes
+            {{ validatedDeck.trainerCount }} {{ t('cardsUnit') }}
           </span>
         </div>
 
@@ -388,7 +391,7 @@ function closeCardZoom() {
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
-              :alt="card.nameFr"
+              :alt="getLocalizedCardName(card)"
               loading="lazy"
               @error="handleImgError"
               class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
@@ -405,10 +408,10 @@ function closeCardZoom() {
                 <span class="rounded bg-slate-800 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 text-[11px] text-slate-500">
-                {{ card.subCategory }}
+                {{ getLocalizedSubCategory(card.subCategory) }}
               </div>
             </div>
           </li>
@@ -420,7 +423,7 @@ function closeCardZoom() {
         <div class="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 class="text-sm font-bold text-slate-900">{{ t('energyCount') }}</h3>
           <span class="rounded-lg bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-bold text-slate-700">
-            {{ validatedDeck.energyCount }} cartes
+            {{ validatedDeck.energyCount }} {{ t('cardsUnit') }}
           </span>
         </div>
 
@@ -436,7 +439,7 @@ function closeCardZoom() {
             <img
               v-if="getCardImageUrl(card)"
               :src="getCardImageUrl(card)!"
-              :alt="card.nameFr"
+              :alt="getLocalizedCardName(card)"
               loading="lazy"
               @error="handleImgError"
               class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
@@ -453,10 +456,10 @@ function closeCardZoom() {
                 <span class="rounded bg-slate-700 px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ card.nameFr }}</span>
+                <span class="truncate font-bold text-slate-900 group-hover:text-indigo-900">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 text-[11px] text-slate-500">
-                {{ card.subCategory === 'SPECIAL_ENERGY' ? 'Énergie Spéciale' : 'Énergie de base' }}
+                {{ getLocalizedSubCategory(card.subCategory) }}
               </div>
             </div>
           </li>
