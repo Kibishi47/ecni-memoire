@@ -44,7 +44,7 @@ const navSteps = computed(() => [
               title="Mode debug actif via ?debug=true"
             >
               <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-              Mode Debug
+              {{ t('debugModeBadge') }}
             </span>
           </div>
           <p class="text-xs text-slate-500">

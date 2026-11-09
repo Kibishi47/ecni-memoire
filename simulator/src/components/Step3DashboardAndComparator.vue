@@ -57,12 +57,11 @@ const emit = defineEmits<{
   (e: 'select-version', versionId: string): void
   (e: 'save-as-new-version'): void
   (e: 'set-baseline-version', versionId: string): void
-  (e: 'restore-version', versionId: string): void
   (e: 'back-step2'): void
   (e: 'cancel-simulation'): void
 }>()
 
-const { t, currentLang } = useI18n()
+const { t, currentLang, getLocalizedCardName, getLocalizedCardRules, getLocalizedSubCategory } = useI18n()
 
 // Onglets de navigation dans l'Étape 3
 type Step3Tab = 'overview' | 'detailed' | 'audit'
@@ -153,14 +152,6 @@ const cardDiffItems = computed<DeckCardContributionItem[]>(() => {
 
 const isDeckModified = computed(() => cardDiffItems.value.length > 0)
 
-const hasCalculatedVariant = computed(() => {
-  return (
-    cardDiffItems.value.length > 0 &&
-    props.currentSummary !== null &&
-    props.editableDeck.totalCards === 60
-  )
-})
-
 const hasComparisonRun = computed(() => {
   return (
     props.baselineSummary !== null &&
@@ -203,9 +194,11 @@ function selectCardForInspection(cardId: string) {
 }
 
 function handleReplaceWithAlternative(oldCardId: string, alt: SmartAlternativeSuggestion) {
+  const oldName = selectedCardEntry.value ? getLocalizedCardName(selectedCardEntry.value) : alt.targetCardNameFr
+  const newName = getLocalizedCardName(alt.alternativeModel)
   emit('replace-card-in-deck', oldCardId, alt.alternativeModel)
   selectedCardId.value = alt.alternativeCardId
-  replacedCardFeedback.value = `${alt.targetCardNameFr} remplacé par ${alt.alternativeNameFr}.`
+  replacedCardFeedback.value = t('cardReplacedFeedback', { oldCard: oldName, newCard: newName })
   setTimeout(() => {
     replacedCardFeedback.value = null
   }, 4000)
@@ -258,7 +251,7 @@ function downloadExportedDeckTxt() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `deck-optimise-60-${exportLang.value}.txt`
+  link.download = `${isDeckModified.value ? 'deck-optimise-60' : 'deck-60'}-${exportLang.value}.txt`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -388,14 +381,15 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <span>{{ t('saveAsNewVersion') }}</span>
           </button>
 
-          <!-- Bouton Exporter la variante : visible UNIQUEMENT si au moins une variante a été calculée -->
+          <!-- Bouton Exporter le deck actif (référence ou variante) -->
           <button
-            v-if="hasCalculatedVariant"
             type="button"
+            :disabled="editableDeck.totalCards !== 60"
             @click="showExportModal = true"
-            class="flex items-center gap-2 rounded-xl border border-indigo-600 bg-indigo-50 px-5 py-3 text-sm font-bold text-indigo-900 shadow-xs transition hover:bg-indigo-100"
+            class="flex items-center gap-2 rounded-xl border border-indigo-600 bg-indigo-50 px-5 py-3 text-sm font-bold text-indigo-900 shadow-xs transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+            :title="isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck')"
           >
-            <span>{{ t('exportPtcglVariant') }}</span>
+            <span>{{ isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck') }}</span>
           </button>
         </div>
       </div>
@@ -424,7 +418,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           </span>
         </div>
         <span class="text-xs text-slate-400">
-          Cliquez sur une version pour charger ses cartes et ses statistiques
+          {{ t('versionHistorySub') }}
         </span>
       </div>
 
@@ -441,13 +435,13 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           ]"
         >
           <div class="flex items-center gap-1.5 font-bold text-xs">
-            <span>{{ v.label }}</span>
+            <span>{{ v.versionNumber === 1 ? `${t('versionLabel', { v: 1 })} (${t('initialVersion')})` : t('versionLabel', { v: v.versionNumber }) }}</span>
             <span
               v-if="v.isBaseline"
               class="rounded px-1.5 py-0.2 text-[10px]"
               :class="activeVersionId === v.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'"
             >
-              Réf
+              {{ t('baselineRef') }}
             </span>
           </div>
 
@@ -465,23 +459,14 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           </span>
 
           <!-- Actions de gestion de la version active -->
-          <div v-if="activeVersionId === v.id" class="flex items-center gap-1 ml-1" @click.stop>
+          <div v-if="activeVersionId === v.id && !v.isBaseline" class="flex items-center gap-1 ml-1" @click.stop>
             <button
-              v-if="!v.isBaseline"
               type="button"
               @click="emit('set-baseline-version', v.id)"
               class="rounded bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-white/30"
               :title="t('setAsBaseline')"
             >
               {{ t('setAsBaseline') }}
-            </button>
-            <button
-              type="button"
-              @click="emit('restore-version', v.id)"
-              class="rounded bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-white/30"
-              :title="t('restoreVersion')"
-            >
-              {{ t('restoreVersion') }}
             </button>
           </div>
         </div>
@@ -497,7 +482,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       >
         <div class="flex items-center justify-between">
           <span class="rounded-md bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-700">
-            {{ m.archetypeTag }}
+            {{ currentLang === 'en' && m.archetypeTagEn ? m.archetypeTagEn : m.archetypeTag }}
           </span>
 
           <span
@@ -510,7 +495,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
         </div>
 
         <h3 class="mt-2 text-base font-bold text-slate-900 truncate">
-          {{ m.opponentName }}
+          {{ currentLang === 'en' && m.opponentNameEn ? m.opponentNameEn : m.opponentName }}
         </h3>
 
         <div class="mt-3 flex items-baseline justify-between">
@@ -518,7 +503,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             {{ formatRate(m.winRate) }} %
           </span>
           <span class="text-xs text-slate-500 font-medium">
-            {{ m.wins }}V - {{ m.losses }}D ({{ m.gamesPlayed }} parties)
+            {{ t('matchupStats', { wins: m.wins, losses: m.losses, total: m.gamesPlayed }) }}
           </span>
         </div>
 
@@ -662,7 +647,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <img
                   v-if="getCardImageUrl(card)"
                   :src="getCardImageUrl(card)!"
-                  :alt="card.nameFr"
+                  :alt="getLocalizedCardName(card)"
                   loading="lazy"
                   @error="handleImgError"
                   @click.stop="openZoom(card)"
@@ -680,7 +665,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="truncate text-xs font-bold">
-                      {{ card.nameFr }}
+                      {{ getLocalizedCardName(card) }}
                     </span>
 
                     <!-- INDICATEUR VISUEL D'ALTERNATIVES SUGGÉRÉES (BADGE) -->
@@ -701,7 +686,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     class="text-[10px]"
                     :class="selectedCardId === card.cardId ? 'text-slate-300' : 'text-slate-500'"
                   >
-                    {{ card.subCategory }}
+                    {{ getLocalizedSubCategory(card.subCategory) }}
                   </div>
                 </div>
               </div>
@@ -750,13 +735,13 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   <img
                     v-if="getCardImageUrl(model)"
                     :src="getCardImageUrl(model)!"
-                    :alt="model.identity.nameFr"
+                    :alt="getLocalizedCardName(model)"
                     loading="lazy"
                     @error="handleImgError"
                     @click.stop="openZoom(model)"
                     class="h-8 w-6 shrink-0 rounded object-cover cursor-zoom-in"
                   />
-                  <span class="truncate font-semibold text-slate-800">{{ model.identity.nameFr }}</span>
+                  <span class="truncate font-semibold text-slate-800">{{ getLocalizedCardName(model) }}</span>
                 </div>
                 <button
                   type="button"
@@ -778,7 +763,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <img
               v-if="getCardImageUrl(selectedCardEntry)"
               :src="getCardImageUrl(selectedCardEntry)!"
-              :alt="selectedCardEntry.nameFr"
+              :alt="getLocalizedCardName(selectedCardEntry)"
               loading="lazy"
               @error="handleImgError"
               @click="openZoom(selectedCardEntry)"
@@ -798,19 +783,19 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   {{ selectedCardEntry.quantity }}×
                 </span>
                 <h4 class="text-base font-bold text-slate-900">
-                  {{ selectedCardEntry.nameFr }}
+                  {{ getLocalizedCardName(selectedCardEntry) }}
                 </h4>
               </div>
 
               <div class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span class="font-medium text-slate-700">{{ selectedCardEntry.subCategory }}</span>
+                <span class="font-medium text-slate-700">{{ getLocalizedSubCategory(selectedCardEntry.subCategory) }}</span>
                 <span>•</span>
                 <span>{{ selectedCardEntry.setCode }} {{ selectedCardEntry.number }}</span>
                 <span v-if="selectedCardEntry.model.pokemonStats?.hp">• {{ selectedCardEntry.model.pokemonStats.hp }} {{ t('cardHp') }}</span>
               </div>
 
               <p class="mt-2 text-xs leading-relaxed text-slate-600">
-                {{ selectedCardEntry.model.identity.rawRulesText?.join(' ') || 'Carte sans effet de règles particulier.' }}
+                {{ getLocalizedCardRules(selectedCardEntry).join('\n') || t('noRulesText') }}
               </p>
             </div>
           </div>
@@ -832,7 +817,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   <img
                     v-if="getCardImageUrl(alt.alternativeModel)"
                     :src="getCardImageUrl(alt.alternativeModel)!"
-                    :alt="alt.alternativeNameFr"
+                    :alt="getLocalizedCardName(alt.alternativeModel)"
                     loading="lazy"
                     @error="handleImgError"
                     @click="openZoom(alt.alternativeModel)"
@@ -849,7 +834,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   <div class="min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-sm font-bold text-slate-900 truncate">
-                        {{ alt.alternativeNameFr }}
+                        {{ getLocalizedCardName(alt.alternativeModel) }}
                       </span>
                       <span class="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
                         {{ alt.actionEconomyBadge }}
@@ -897,7 +882,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingFirst) }} %
             </div>
             <p class="mt-1 text-xs text-slate-500 font-mono">
-              {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}V / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} parties
+              {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}{{ currentLang === 'en' ? 'W' : 'V' }} / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} {{ t('gamesUnit') }}
             </p>
           </div>
 
@@ -907,7 +892,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingSecond) }} %
             </div>
             <p class="mt-1 text-xs text-slate-500 font-mono">
-              {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}V / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} parties
+              {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}{{ currentLang === 'en' ? 'W' : 'V' }} / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} {{ t('gamesUnit') }}
             </p>
           </div>
 
@@ -924,10 +909,10 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             <div class="text-xs font-bold text-slate-600">{{ t('avgDamagePerTurn') }}</div>
             <div class="mt-2 text-2xl font-black text-slate-900">
-              {{ currentSummary.averageDamagePerTurn }} dégâts
+              {{ t('comboDamageLabel', { dmg: currentSummary.averageDamagePerTurn }) }}
             </div>
             <p class="mt-1 text-[11px] text-slate-500">
-              Moyenne infligée par tour actif
+              {{ t('avgDamageSub') }}
             </p>
           </div>
         </div>
@@ -978,10 +963,10 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             <div class="text-xs font-bold text-slate-600">{{ t('avgTurnsPerGame') }}</div>
             <div class="mt-2 text-2xl font-black text-slate-900">
-              {{ currentSummary.avgTurnsPlayed }} tours
+              {{ t('avgTurnsCount', { turns: currentSummary.avgTurnsPlayed }) }}
             </div>
             <p class="mt-1 text-[11px] text-slate-500 font-mono">
-              {{ currentSummary.gamesPerSecond }} parties / sec
+              {{ t('gamesPerSec', { rate: currentSummary.gamesPerSecond }) }}
             </p>
           </div>
         </div>
@@ -1025,7 +1010,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   {{ combo.avgTriggerTurn > 0 ? `T${formatRate(combo.avgTriggerTurn)}` : '—' }}
                 </td>
                 <td class="px-3.5 py-2.5 font-mono font-bold text-slate-900">
-                  {{ combo.avgDamageWhenTriggered > 0 ? `${combo.avgDamageWhenTriggered} dég.` : 'Effet' }}
+                  {{ combo.avgDamageWhenTriggered > 0 ? t('comboDamageLabel', { dmg: combo.avgDamageWhenTriggered }) : t('comboEffectLabel') }}
                 </td>
               </tr>
             </tbody>
@@ -1069,9 +1054,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                       {{ item.quantityInDeck }}×
                     </span>
                     <div>
-                      <div class="font-bold text-slate-900">{{ item.nameFr }}</div>
+                      <div class="font-bold text-slate-900">{{ getLocalizedCardName(item) }}</div>
                       <div class="font-mono text-[10px] text-slate-400">
-                        {{ item.cardId }} • {{ item.subCategory }}
+                        {{ item.cardId }} • {{ getLocalizedSubCategory(item.subCategory) }}
                       </div>
                     </div>
                   </div>
@@ -1090,7 +1075,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                       ></div>
                     </div>
                     <span class="font-mono text-[10px] text-slate-400">
-                      (Vue: {{ formatRate(item.drawnRate, 0) }} %)
+                      ({{ t('seenRate', { pct: formatRate(item.drawnRate, 0) }) }})
                     </span>
                   </div>
                 </td>
@@ -1113,12 +1098,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     <div class="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
                       <div
                         class="h-full rounded-full"
-                        :class="item.discardedUnusedRate >= 25 ? 'bg-rose-500' : 'bg-amber-500'"
                         :style="{ width: `${Math.min(100, Math.max(0, item.discardedUnusedRate + item.deadHandTurnRate))}%` }"
+                        :class="item.discardedUnusedRate >= 25 ? 'bg-rose-500' : 'bg-amber-500'"
                       ></div>
                     </div>
                     <span class="font-mono text-[10px] text-slate-500">
-                      ({{ item.turnsStuckDeadInHand }}t bloquée)
+                      ({{ t('stuckTurns', { n: item.turnsStuckDeadInHand }) }})
                     </span>
                   </div>
                 </td>
@@ -1126,7 +1111,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <!-- Impact Prized -->
                 <td class="px-3.5 py-3 font-mono text-xs">
                   <div v-if="item.gamesAllCopiesPrized > 0" class="flex items-center gap-1.5">
-                    <span class="text-slate-700">{{ formatRate(item.allCopiesPrizedRate) }} % des parties</span>
+                    <span class="text-slate-700">{{ t('gamesPctPrized', { pct: formatRate(item.allCopiesPrizedRate) }) }}</span>
                     <span
                       class="rounded px-1.5 py-0.5 text-[10px] font-bold"
                       :class="
@@ -1139,7 +1124,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     </span>
                   </div>
                   <span v-else class="text-[11px] text-slate-400">
-                    0 % (Jamais 100% Prized)
+                    {{ t('neverPrized') }}
                   </span>
                 </td>
               </tr>
@@ -1157,7 +1142,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       <div class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 class="text-base font-bold text-slate-900">
-            {{ t('exportModalTitle') }}
+            {{ isDeckModified ? t('exportModalTitle') : t('exportModalTitleDeck') }}
           </h3>
           <button
             type="button"
@@ -1222,6 +1207,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
     <CardZoomModal
       :card="zoomedCard"
       :is-open="zoomedCard !== null"
+      :is-debug-mode="isDebugMode"
       @close="closeZoom"
     />
 

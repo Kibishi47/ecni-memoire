@@ -42,11 +42,13 @@ export interface ParseWarning {
 export interface SynergyAuditItem {
   cardId: string
   cardNameFr: string
+  cardNameEn?: string
   requirement: SynergyRequirement
   matchingCountInDeck: number
   satisfied: boolean
   criticalZeroValue: boolean
   description: string
+  descriptionEn?: string
 }
 
 export interface ParsedDeck {
@@ -79,10 +81,15 @@ export interface ExportOptions {
 export interface MetaOpponentDeck {
   id: string
   name: string
+  nameEn?: string
   archetypeBadge: string
+  archetypeBadgeEn?: string
   strategySubtitle: string
+  strategySubtitleEn?: string
   description: string
+  descriptionEn?: string
   keyThreats: string[]
+  keyThreatsEn?: string[]
   badgeColor: string
   ptcglText: string
 }

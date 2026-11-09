@@ -10,6 +10,7 @@ import {
   parsePtcglDecklist,
 } from './utils/ptcglParser'
 import { SimulationWorkerPool } from './worker/workerPool'
+import { useI18n } from './utils/i18n'
 import WizardHeader from './components/WizardHeader.vue'
 import Step1DeckImport from './components/Step1DeckImport.vue'
 import Step2SimConfig from './components/Step2SimConfig.vue'
@@ -19,6 +20,7 @@ import Step3DashboardAndComparator, {
 
 const currentStep = ref<1 | 2 | 3>(1)
 const isDebugMode = ref<boolean>(false)
+const { t } = useI18n()
 
 const maxHardwareWorkers =
   typeof navigator !== 'undefined' && navigator.hardwareConcurrency
@@ -77,7 +79,7 @@ function handleCancelSimulation() {
   workerPool.cancelSimulation()
   isSimulating.value = false
   simulationError.value = null
-  cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+  cancelNotice.value = t('simulationCancelled')
   if (cancelNoticeTimeout) clearTimeout(cancelNoticeTimeout)
   cancelNoticeTimeout = setTimeout(() => {
     cancelNotice.value = null
@@ -176,7 +178,7 @@ async function executeInitialSimulation() {
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes('annulée')) {
-      cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+      cancelNotice.value = t('simulationCancelled')
       simulationError.value = null
     } else {
       simulationError.value = err instanceof Error ? err.message : String(err)
@@ -257,7 +259,7 @@ async function executeComparisonSimulation() {
     targetVersion.summary = summary
   } catch (err) {
     if (err instanceof Error && err.message.includes('annulée')) {
-      cancelNotice.value = 'Simulation interrompue par l\'utilisateur.'
+      cancelNotice.value = t('simulationCancelled')
       simulationError.value = null
     } else {
       simulationError.value = err instanceof Error ? err.message : String(err)
@@ -308,18 +310,6 @@ function handleSetBaselineVersion(versionId: string) {
   )
   if (target.summary) {
     baselineSummary.value = target.summary
-  }
-}
-
-function handleRestoreVersion(versionId: string) {
-  const target = deckVersions.value.find((v) => v.id === versionId)
-  if (!target) return
-  editableDeck.value = computeDeckSummary(
-    target.deck.cards.map((c) => ({ ...c })),
-    target.deck.format,
-  )
-  if (target.summary) {
-    currentSummary.value = target.summary
   }
 }
 
@@ -480,7 +470,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
           @click="cancelNotice = null"
           class="text-xs text-slate-400 hover:text-slate-600"
         >
-          Fermer
+          {{ t('closeModal') }}
         </button>
       </div>
     </div>
@@ -498,7 +488,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
           <div>
-            <div class="text-sm font-bold text-red-900">Une erreur est survenue pendant l'exécution de la simulation</div>
+            <div class="text-sm font-bold text-red-900">{{ t('simulationErrorHeading') }}</div>
             <div class="mt-0.5 font-mono text-xs text-red-800">{{ simulationError }}</div>
           </div>
         </div>
@@ -507,7 +497,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
           @click="simulationError = null"
           class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 shadow-2xs hover:bg-red-50"
         >
-          Fermer l'alerte
+          {{ t('closeAlert') }}
         </button>
       </div>
     </div>
@@ -558,7 +548,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         @select-version="handleSelectVersion"
         @save-as-new-version="handleSaveAsNewVersion"
         @set-baseline-version="handleSetBaselineVersion"
-        @restore-version="handleRestoreVersion"
         @cancel-simulation="handleCancelSimulation"
         @back-step2="currentStep = 2"
       />
