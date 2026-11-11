@@ -362,7 +362,7 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | `--limit` | — | Nombre maximum de cartes à traiter | Entier (`int`) | `None` (illimité) | — | `run`, `reason`, `code`, `re-run` |
 | `--continue-on-error` | `-k`, `--ignore-errors`, `--skip-errors` | Poursuit le traitement du lot en cas d'erreur sur une carte sans interrompre le script | Flag booléen | `False` | `CONTINUE_ON_ERROR` | `run`, `reason`, `code`, `re-run` |
 | `--parallel` | `-j`, `--concurrency` | Nombre de cartes compilées simultanément (multi-slots LM Studio uniquement) | Entier (`int`) | `1` (séquentiel) | `LM_STUDIO_PARALLEL` | `run` |
-| `--batch-size` | `-bs` | Taille de lot pour l'inférence parallèle continue Apple MLX (`BatchGenerator`) | Entier (`int`) | `4` | `MLX_BATCH_SIZE` | `run`, `reason`, `code`, `re-run` |
+| `--batch-size` | `-bs` | Taille de lot pour l'inférence parallèle continue Apple MLX (`BatchGenerator`) | Entier (`int`) | `2` | `MLX_BATCH_SIZE` | `run`, `reason`, `code`, `re-run` |
 | `--max-tokens` | — | Budget maximal de tokens générés en Passe 1 (thinking inclus, non borné) | Entier (`int`) | `8192` | `REASONING_MAX_TOKENS` | `run`, `reason`, `re-run` |
 | `--no-think` | `--disable-thinking` | Désactive le mode réflexion des modèles raisonnants (DeepSeek / Qwen) | Flag booléen | `False` | `DISABLE_THINKING` | `run` |
 | `--thinking` | `-tk` | Niveau de réflexion des modèles raisonnants | `null`, `low`, `medium`, `high`, ou nb tokens | Niveau standard | `THINKING` | `run` |

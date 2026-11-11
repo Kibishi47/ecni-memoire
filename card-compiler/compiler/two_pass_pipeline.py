@@ -504,6 +504,7 @@ def run_coding_phase(
     raw_dir = data_dir / "raw_tcgdex"
 
     pending_candidates: List[Tuple[FetchedCardBundle, Optional[str]]] = []
+    no_reasoning_candidates: List[Tuple[FetchedCardBundle, Optional[str]]] = []
     compiled_results: List[EngineCardModel] = []
     compiled_by_sig: Dict[str, EngineCardModel] = {}
     missing_reasoning: List[Tuple[str, str]] = []
@@ -539,15 +540,15 @@ def run_coding_phase(
                 pass
 
         if not has_reasoning_record(b.card_id, data_dir):
-            missing_reasoning.append((b.card_id, b.identity.nameFr))
+            no_reasoning_candidates.append((b, sig))
         else:
             pending_candidates.append((b, sig))
 
-    if pending_candidates and not force:
+    if (pending_candidates or no_reasoning_candidates) and not force:
         _index_disk_compiled_by_signature(
             compiled_dir=compiled_dir,
             raw_dir=raw_dir,
-            target_names={b.identity.nameFr for b, _ in pending_candidates},
+            target_names={b.identity.nameFr for b, _ in pending_candidates} | {b.identity.nameFr for b, _ in no_reasoning_candidates},
             cache_by_sig=compiled_by_sig,
         )
 
@@ -575,6 +576,22 @@ def run_coding_phase(
             sig_by_rep_id[b.card_id] = sig
         bundles_to_compile.append(b)
 
+    # Permet de cloner un doublon sans fiche d'analyse propre dès lors qu'un équivalent est déjà compilé ou en cours
+    for b, sig in no_reasoning_candidates:
+        if not force and sig and sig in compiled_by_sig:
+            cloned_card = _clone_compiled_card_for_bundle(compiled_by_sig[sig], b)
+            out_path = compiled_dir / f"{b.card_id}.json"
+            out_path.write_text(
+                json.dumps(cloned_card.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            compiled_results.append(cloned_card)
+            dedup_cloned_count += 1
+        elif sig and sig in dup_groups:
+            dup_groups[sig].append(b)
+        else:
+            missing_reasoning.append((b.card_id, b.identity.nameFr))
+
     planned_in_batch_dups = sum(len(v) for v in dup_groups.values())
     batch_line = (
         f"• [bold]Batching continu MLX[/bold] : [bold cyan]batch_size={eff_batch}[/bold cyan]\n"
@@ -600,6 +617,11 @@ def run_coding_phase(
             border_style="cyan",
         )
     )
+
+    if dedup_cloned_count:
+        out_console.print(
+            f"[cyan]♻️ {dedup_cloned_count} carte(s) identique(s) clonée(s) instantanément depuis le cache JSON existant (0 token).[/cyan]"
+        )
 
     if missing_reasoning:
         out_console.print(
@@ -728,10 +750,19 @@ def run_coding_phase(
                     _persist_and_clone_compiled(card_model, progress.console)
                     progress.advance(task_id)
 
+                def on_batch_error(err_bundle: FetchedCardBundle, card_err: Exception) -> None:
+                    progress.console.print(
+                        f"\n[bold red]✗ Erreur lors du codage JSON de {err_bundle.card_id} ({err_bundle.identity.nameFr}) :[/bold red] {card_err}"
+                    )
+                    failed_cards.append((err_bundle.card_id, err_bundle.identity.nameFr, str(card_err)))
+                    progress.advance(task_id)
+
                 _, batch_stats = coding_engine.compile_cards_batch(
                     batch_items,
                     batch_size=eff_batch,
+                    continue_on_error=continue_on_error,
                     on_card_done=on_batch_compiled,
+                    on_card_error=on_batch_error,
                 )
             else:
                 for b in bundles_to_compile:
@@ -784,6 +815,14 @@ def run_coding_phase(
         coding_engine.close()
         del coding_engine
         gc.collect()
+
+    if batch_stats and batch_stats.get("batch_tps"):
+        out_console.print(
+            f"[cyan]⚡ Débit batch global MLX (Passe 2) : [bold]{batch_stats['batch_tps']:.1f} t/s[/bold] • "
+            f"{batch_stats.get('generation_tokens', 0)} tokens en {batch_stats.get('wall_seconds', 0):.2f}s"
+            + (f" • Mémoire pic : {batch_stats['peak_memory_gb']:.2f} Go" if batch_stats.get("peak_memory_gb") else "")
+            + "[/cyan]"
+        )
 
     return {
         "total": len(bundles),

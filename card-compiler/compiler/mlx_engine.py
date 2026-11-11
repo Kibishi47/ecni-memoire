@@ -363,7 +363,9 @@ class MLXCardCompiler:
         items: Sequence[Tuple[FetchedCardBundle, Optional[str]]],
         batch_size: Optional[int] = None,
         max_retries: int = 2,
+        continue_on_error: bool = False,
         on_card_done: Optional[Callable[[EngineCardModel], None]] = None,
+        on_card_error: Optional[Callable[[FetchedCardBundle, Exception], None]] = None,
     ) -> Tuple[List[EngineCardModel], Dict[str, Any]]:
         """Compile un lot de cartes en continu (batching MLX) avec réessai individuel en cas d'erreur JSON."""
         if not items:
@@ -469,10 +471,16 @@ class MLXCardCompiler:
             # Réessai individuel séquentiel pour toute carte dont le JSON du lot a échoué à la validation
             for local_i in failed_indices:
                 orig_idx, target_b, reason_txt, _, _ = chunk[local_i]
-                card = self.compile_card(target_b, max_retries=max_retries, reasoning_text=reason_txt)
-                ordered_models[orig_idx] = card
-                if on_card_done is not None:
-                    on_card_done(card)
+                try:
+                    card = self.compile_card(target_b, max_retries=max_retries, reasoning_text=reason_txt)
+                    ordered_models[orig_idx] = card
+                    if on_card_done is not None:
+                        on_card_done(card)
+                except Exception as retry_err:
+                    if on_card_error is not None:
+                        on_card_error(target_b, retry_err)
+                    if not continue_on_error:
+                        raise
 
             clear_mlx_memory_cache()
 
