@@ -13,6 +13,7 @@ Ce module implémente le Principe Directeur :
 from __future__ import annotations
 
 import copy
+import hashlib
 import html
 import json
 import re
@@ -3343,3 +3344,58 @@ def merge_llm_payload_into_skeleton(
             "compilationMetadata": compilation_metadata,
         }
     )
+
+
+def compute_card_rule_signature(
+    source: Union[DeterministicCardSkeleton, Dict[str, Any], Path, Any],
+    raw_dir: Optional[Path] = None,
+) -> str:
+    """Calcule une empreinte SHA-256 canonique des règles et statistiques d'une carte.
+
+    Deux cartes partageant la même signature sont fonctionnellement identiques pour la
+    simulation (seuls l'identifiant, l'extension, le numéro, la rareté ou l'illustration
+    diffèrent) et peuvent réutiliser sans aucune perte les résultats IA des Passes 1 & 2.
+    """
+    skeleton = (
+        source
+        if isinstance(source, DeterministicCardSkeleton)
+        else build_deterministic_skeleton(source, raw_dir=raw_dir)
+    )
+    payload = {
+        "nameFr": _normalize_whitespace(skeleton.identity.nameFr),
+        "category": skeleton.category.value,
+        "subCategory": skeleton.subCategory.value,
+        "pokemonStats": (
+            skeleton.pokemonStats.model_dump(mode="json")
+            if skeleton.pokemonStats is not None
+            else None
+        ),
+        "slots": [
+            {
+                "slotId": s.slotId,
+                "actionType": s.actionType.value,
+                "label": _normalize_whitespace(s.label),
+                "textFr": _normalize_whitespace(s.textFr),
+                "textEn": _normalize_whitespace(s.textEn),
+                "baseDamage": s.baseDamage,
+                "printedDamageStr": s.printedDamageStr,
+            }
+            for s in skeleton.slots_for_llm
+        ],
+        "baseSynergies": list(skeleton.base_synergies),
+        "actionsKey": [
+            {
+                "actionId": a.actionId,
+                "actionType": a.actionType.value,
+                "cost": dict(a.cost),
+                "preconditions": list(a.preconditions),
+                "canUseTurn1GoingFirst": a.canUseTurn1GoingFirst,
+                "canUseTurn1GoingSecond": a.canUseTurn1GoingSecond,
+                "deadCardCondition": a.deadCardCondition,
+                "effects": [e.model_dump(mode="json") for e in a.effects],
+            }
+            for a in skeleton.playableActions
+        ],
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()

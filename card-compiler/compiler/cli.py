@@ -650,8 +650,12 @@ def _execute_run_pipeline(
     intensity: Optional[str] = None,
     phase: Optional[str] = None,
     ids_file: Optional[Path] = None,
+    batch_size: Optional[int] = None,
+    max_tokens: Optional[int] = None,
 ) -> None:
     """Implémentation partagée pour les commandes `run` et `compile`."""
+    eff_batch_size = batch_size if isinstance(batch_size, int) else None
+    eff_max_tokens = max_tokens if isinstance(max_tokens, int) else None
     effective_mode = mode.value
     if standard_flag:
         effective_mode = RunMode.standard.value
@@ -857,6 +861,8 @@ def _execute_run_pipeline(
             hf_token=hf_token,
             force=force,
             continue_on_error=continue_on_error,
+            batch_size=eff_batch_size,
+            max_tokens=eff_max_tokens,
             console=console,
         )
         if eff_phase in {PipelinePhase.all, PipelinePhase.code}:
@@ -1394,6 +1400,19 @@ def run_command(
         envvar=["PIPELINE_PHASE"],
         help="Phase en mode two_pass : 'all' (défaut, raisonnement puis coding), 'reason' (passe 1), 'code' (passe 2).",
     ),
+    batch_size: Optional[int] = typer.Option(
+        None,
+        "--batch-size",
+        "-bs",
+        envvar=["MLX_BATCH_SIZE"],
+        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 4 ou MLX_BATCH_SIZE).",
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-tokens",
+        envvar=["REASONING_MAX_TOKENS"],
+        help="Nombre maximum de tokens générés en Passe 1 (défaut: 8192 ou REASONING_MAX_TOKENS).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     effective_thinking = "null" if no_think else thinking
@@ -1420,6 +1439,8 @@ def run_command(
         intensity=intensity,
         phase=phase,
         ids_file=ids_file,
+        batch_size=batch_size,
+        max_tokens=max_tokens,
     )
 
 
@@ -1608,6 +1629,19 @@ def reason_command(
         help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution.",
     ),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
+    batch_size: Optional[int] = typer.Option(
+        None,
+        "--batch-size",
+        "-bs",
+        envvar=["MLX_BATCH_SIZE"],
+        help="Taille de lot MLX pour la Passe 1 (défaut: 4).",
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-tokens",
+        envvar=["REASONING_MAX_TOKENS"],
+        help="Budget max de tokens en Passe 1 (défaut: 8192).",
+    ),
 ) -> None:
     """Exécute la Passe 1 du pipeline Two-Pass : Génère tous les textes d'analyse de règles dans data/reasoning_texts/."""
     _execute_run_pipeline(
@@ -1629,6 +1663,8 @@ def reason_command(
         intensity=intensity,
         phase="reason",
         ids_file=ids_file,
+        batch_size=batch_size,
+        max_tokens=max_tokens,
     )
 
 
@@ -1683,6 +1719,13 @@ def code_command(
         help="Ignore les erreurs d'une carte et passe à la suivante au lieu d'interrompre l'exécution.",
     ),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
+    batch_size: Optional[int] = typer.Option(
+        None,
+        "--batch-size",
+        "-bs",
+        envvar=["MLX_BATCH_SIZE"],
+        help="Taille de lot MLX pour la Passe 2 (défaut: 4).",
+    ),
 ) -> None:
     """Exécute la Passe 2 du pipeline Two-Pass : Transforme les textes d'analyse en code JSON formel validé."""
     _execute_run_pipeline(
@@ -1704,6 +1747,7 @@ def code_command(
         intensity=intensity,
         phase="code",
         ids_file=ids_file,
+        batch_size=batch_size,
     )
 
 
@@ -1799,6 +1843,19 @@ def re_run_command(
         "--hf-token",
         envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         help="Jeton d'authentification Hugging Face.",
+    ),
+    batch_size: Optional[int] = typer.Option(
+        None,
+        "--batch-size",
+        "-bs",
+        envvar=["MLX_BATCH_SIZE"],
+        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 4).",
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-tokens",
+        envvar=["REASONING_MAX_TOKENS"],
+        help="Nombre maximum de tokens générés en Passe 1 (défaut: 8192).",
     ),
 ) -> None:
     """Réexécute une phase ou les deux phases du pipeline Two-Pass sur les cartes cibles.
@@ -1975,6 +2032,8 @@ def re_run_command(
                 hf_token=hf_token,
                 force=False,
                 continue_on_error=continue_on_error,
+                batch_size=batch_size if isinstance(batch_size, int) else None,
+                max_tokens=max_tokens if isinstance(max_tokens, int) else None,
                 console=console,
             )
 
@@ -1989,6 +2048,8 @@ def re_run_command(
         hf_token=hf_token,
         force=force,
         continue_on_error=continue_on_error,
+        batch_size=batch_size if isinstance(batch_size, int) else None,
+        max_tokens=max_tokens if isinstance(max_tokens, int) else None,
         console=console,
     )
 
