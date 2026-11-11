@@ -481,4 +481,145 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     const safeDecision = selectBestTurnBranch(sacrificeState, 8, false)
     expect(safeDecision.chosenActions.some((a) => a.cardId === 'sv08.5-037')).toBe(false)
   })
+
+  it('contourne Mimiriqui avec Ordres du Boss, débloque la Retraite sous cantAttackNextTurn et conserve Tampon Injuste en main', () => {
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const state = createInitialMatchState(deckA, deckB, { seed: 505, firstPlayerIndex: 0, maxTurns: 14 })
+    state.turnNumber = 3
+    state.activePlayerIndex = 0
+
+    const bossOrders = UNIFIED_CARD_REGISTRY['me01-114']!
+    const mimikyu = UNIFIED_CARD_REGISTRY['me02-042']!
+    const ursalunaEx = UNIFIED_CARD_REGISTRY['sv06-141']!
+    const latiasEx = UNIFIED_CARD_REGISTRY['sv08-076']!
+    const unfairStamp = UNIFIED_CARD_REGISTRY['sv06-165']!
+    const ultraBall = UNIFIED_CARD_REGISTRY['30th-128']!
+
+    // 1. Cas Mimiriqui adverse en Actif vs Attaquant ex : Ordres du Boss sur une cible du Banc à 70 PV doit être joué pour gagner
+    state.player.prizes = [state.player.prizes[0]!]
+    state.player.activePokemon = {
+      instanceId: 'ex_attacker',
+      card: UNIFIED_CARD_REGISTRY['sv03-125']!, // Dracaufeu-ex
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [createNativeBasicEnergyModel('Feu'), createNativeBasicEnergyModel('Feu')],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    state.player.bench = []
+    state.player.hand = [bossOrders]
+    state.opponent.activePokemon = {
+      instanceId: 'opp_mimikyu',
+      card: { ...mimikyu, identity: { ...mimikyu.identity, nameFr: 'Mimiqui', nameEn: 'Mimikyu' }, pokemonStats: { ...mimikyu.pokemonStats!, hp: 70 } },
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 2,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    state.opponent.bench = [
+      {
+        instanceId: 'opp_squishy_bench',
+        card: mockTargetBasic,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 2,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+    ]
+
+    const bossDecision = selectBestTurnBranch(state, 20, true)
+    expect(bossDecision.chosenActions.some((a) => a.cardId === bossOrders.cardId)).toBe(true)
+    expect(bossDecision.chosenActions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(true)
+
+    // 2. Cas Retraite avec cantAttackNextTurn + Latias-ex sur le Banc : l'IA doit battre en retraite vers un attaquant prêt !
+    const retreatLockState = createInitialMatchState(deckA, deckB, { seed: 606, firstPlayerIndex: 0, maxTurns: 14 })
+    retreatLockState.turnNumber = 3
+    retreatLockState.activePlayerIndex = 0
+    retreatLockState.player.hand = []
+    retreatLockState.player.activePokemon = {
+      instanceId: 'ursa_locked',
+      card: ursalunaEx,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 1,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: true,
+      cantAttackTurn: 3,
+    }
+    retreatLockState.player.bench = [
+      {
+        instanceId: 'zard_ready',
+        card: UNIFIED_CARD_REGISTRY['sv03-125']!,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [createNativeBasicEnergyModel('Feu'), createNativeBasicEnergyModel('Feu')],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+      {
+        instanceId: 'latias_free',
+        card: latiasEx,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+    ]
+    retreatLockState.opponent.activePokemon = {
+      instanceId: 'opp_b1',
+      card: mockTargetBasic,
+      previousStages: [],
+      damage: 0,
+      attachedEnergies: [],
+      attachedTools: [],
+      turnPlayed: 2,
+      evolvedThisTurn: false,
+      specialConditions: [],
+      cantAttackNextTurn: false,
+    }
+    const retreatDecision = selectBestTurnBranch(retreatLockState, 20, true)
+    expect(retreatDecision.chosenActions.some((a) => a.type === 'RETREAT_ACTIVE')).toBe(true)
+    expect(retreatDecision.chosenActions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(true)
+
+    // 3. Hyper Ball ne doit pas défausser Tampon Injuste en priorité avant une carte morte ou une énergie de base
+    const costState = createInitialMatchState(deckA, deckB, { seed: 707, firstPlayerIndex: 0, maxTurns: 14 })
+    costState.turnNumber = 3
+    costState.activePlayerIndex = 0
+    costState.player.koSufferedLastOpponentTurn = false
+    costState.player.hand = [
+      ultraBall,
+      unfairStamp,
+      createNativeBasicEnergyModel('Feu'),
+      createNativeBasicEnergyModel('Eau'),
+    ]
+    const afterUltraBall = applyAction(costState, {
+      type: 'PLAY_TRAINER',
+      cardId: ultraBall.cardId,
+      handIndex: 0,
+      label: 'Hyper Ball',
+    })
+    expect(afterUltraBall.player.hand.some((c) => c.cardId === unfairStamp.cardId)).toBe(true)
+  })
 })

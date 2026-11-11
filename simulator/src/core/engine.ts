@@ -81,6 +81,7 @@ export interface PlayerBoardState {
   abilityLockTurn?: number
   maxBenchSlotsOverride?: number | null
   supporterPlayedThisTurn: boolean
+  stadiumPlayedThisTurn?: boolean
   energyAttachedThisTurn: boolean
   retreatUsedThisTurn: boolean
   usedOncePerTurnAbilities: Set<string>
@@ -556,6 +557,78 @@ export function getMaxBenchSlots(
 }
 
 /**
+ * Purge tous les États Spéciaux et effets temporaires d'attaques affectant un Pokémon
+ * (appelé officiellement lors d'une Retraite, d'un Échange, d'une Évolution ou d'une Désévolution).
+ */
+export function clearPokemonStatusAndAttackEffects(poke: InPlayPokemon): void {
+  poke.specialConditions = []
+  poke.cantAttackNextTurn = false
+  poke.cantAttackTurn = undefined
+  poke.cantRetreatNextTurn = false
+  poke.cantRetreatTurn = undefined
+  poke.preventDamageOrEffectsNextTurn = false
+  poke.preventDamageOrEffectsTurn = undefined
+  poke.damageTakenModifierNextTurn = 0
+  poke.damageTakenModifierTurn = undefined
+  poke.damageDealtModifierNextTurn = 0
+  poke.damageDealtModifierTurn = undefined
+  poke.retreatCostModifier = 0
+}
+
+function findSlotForPokemon(board: PlayerBoardState, poke: InPlayPokemon): 'ACTIVE' | number | null {
+  if (board.activePokemon?.instanceId === poke.instanceId) return 'ACTIVE'
+  const bIdx = board.bench.findIndex((b) => b.instanceId === poke.instanceId)
+  return bIdx !== -1 ? bIdx : null
+}
+
+function pushCardToDestinationZone(
+  board: PlayerBoardState,
+  card: EngineCardModel,
+  destinationZone?: string | null,
+): void {
+  const dz = (destinationZone || '').toUpperCase()
+  if (dz === 'LOST_ZONE') {
+    board.lostZone = board.lostZone || []
+    board.lostZone.push(card)
+  } else if (dz === 'TOP_OF_DECK') {
+    board.deck.unshift(card)
+  } else if (dz === 'BOTTOM_OF_DECK' || dz === 'DECK') {
+    board.deck.push(card)
+  } else if (dz === 'HAND') {
+    board.hand.push(card)
+  } else {
+    board.discard.push(card)
+  }
+}
+
+function discardEnergyCardsForCost(
+  attachedEnergies: EngineCardModel[],
+  energyUnitsToPay: number,
+  discardPile: EngineCardModel[],
+): void {
+  let remaining = energyUnitsToPay
+  while (remaining > 0 && attachedEnergies.length > 0) {
+    // Préfère défausser une énergie à 1 unité si le coût restant est impair/1 afin de ne pas gaspiller une Double Turbo
+    let pickIdx = attachedEnergies.length - 1
+    if (remaining === 1) {
+      const singleIdx = attachedEnergies.findIndex(
+        (en) => getCardFastMeta(en).energyUnitKind !== 'DOUBLE_TURBO',
+      )
+      if (singleIdx !== -1) pickIdx = singleIdx
+    }
+    const discarded = attachedEnergies.splice(pickIdx, 1)[0]!
+    discardPile.push(discarded)
+    const unitVal = getCardFastMeta(discarded).energyUnitKind === 'DOUBLE_TURBO' ? 2 : 1
+    remaining -= unitVal
+  }
+}
+
+function resolveBoardBenchShrinkIfNeeded(state: MatchState): void {
+  enforceBenchCapacity(state.player, getMaxBenchSlots(state.player, state.activeStadium))
+  enforceBenchCapacity(state.opponent, getMaxBenchSlots(state.opponent, state.activeStadium))
+}
+
+/**
  * Réduit le banc à sa capacité max si elle a diminué (défausse les Pokémon excédentaires).
  */
 export function enforceBenchCapacity(board: PlayerBoardState, maxSlots: number): void {
@@ -617,6 +690,7 @@ export function clonePlayerBoard(b: PlayerBoardState): PlayerBoardState {
     abilityLockTurn: b.abilityLockTurn,
     maxBenchSlotsOverride: b.maxBenchSlotsOverride ?? null,
     supporterPlayedThisTurn: b.supporterPlayedThisTurn,
+    stadiumPlayedThisTurn: b.stadiumPlayedThisTurn ?? false,
     energyAttachedThisTurn: b.energyAttachedThisTurn,
     retreatUsedThisTurn: b.retreatUsedThisTurn,
     usedOncePerTurnAbilities: new Set(b.usedOncePerTurnAbilities),
@@ -705,9 +779,12 @@ export function canPokemonEvolveInto(
   evoCard: EngineCardModel,
   currentTurnNumber: number,
   allowRareCandySkipStage1 = false,
+  ignoreTurnPlayedRestriction = false,
 ): boolean {
-  if (poke.evolvedThisTurn) return false
-  if (poke.turnPlayed >= currentTurnNumber) return false
+  if (!ignoreTurnPlayedRestriction) {
+    if (poke.evolvedThisTurn) return false
+    if (poke.turnPlayed >= currentTurnNumber) return false
+  }
   if (evoCard.category !== 'POKEMON' || !evoCard.pokemonStats) return false
 
   const pokeMeta = getCardFastMeta(poke.card)
@@ -1220,25 +1297,46 @@ export function computeAttackDamageToActive(
       (eff as any).primitive === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH' ||
       (eff as any).primitive === 'DEAL_DAMAGE_BENCH'
     ) {
-      let bDmg = eff.value ?? eff.baseDamage ?? (eff.count ? eff.count * 10 : 0)
-      if (eff.scalingMetric) {
-        const { units } = resolveEffectScalingUnits(
-          eff.scalingMetric,
-          eff,
-          action,
-          attackerBoard,
-          defenderBoard,
-          state,
-        )
-        const bonusVal = eff.bonusValue ?? bDmg
-        bDmg = eff.scalingOperator === 'MULTIPLY' ? units * bonusVal : bDmg + units * bonusVal
+      const targetUpper = (eff.target || '').toUpperCase()
+      const isOwnBenchOnly =
+        targetUpper === 'OWN_BENCH_SINGLE' ||
+        targetUpper === 'OWN_BENCH_ALL' ||
+        targetUpper === 'OWN_ALL_POKEMON' ||
+        targetUpper === 'SELF'
+      if (!isOwnBenchOnly) {
+        let bDmg = eff.value ?? eff.baseDamage ?? (eff.count ? eff.count * 10 : 0)
+        if (eff.scalingMetric) {
+          const { units } = resolveEffectScalingUnits(
+            eff.scalingMetric,
+            eff,
+            action,
+            attackerBoard,
+            defenderBoard,
+            state,
+          )
+          const bonusVal = eff.bonusValue ?? bDmg
+          bDmg = eff.scalingOperator === 'MULTIPLY' ? units * bonusVal : bDmg + units * bonusVal
+        }
+        // Double Énergie Turbo réduit aussi les dégâts d'attaque (pas les marqueurs de dégâts) sur le Banc adverse
+        if (
+          bDmg > 0 &&
+          (eff.primitive === 'DAMAGE_BENCH' || (eff as any).primitive === 'DEAL_DAMAGE_BENCH')
+        ) {
+          let dtPenalty = 0
+          for (let eIdx = 0; eIdx < attacker.attachedEnergies.length; eIdx++) {
+            if (getCardFastMeta(attacker.attachedEnergies[eIdx]!).energyUnitKind === 'DOUBLE_TURBO') {
+              dtPenalty += 20
+            }
+          }
+          bDmg = Math.max(0, bDmg - dtPenalty)
+        }
+        benchDamage += Math.max(0, bDmg)
+        expectedBenchDamage += Math.max(0, bDmg)
       }
-      benchDamage += Math.max(0, bDmg)
-      expectedBenchDamage += Math.max(0, bDmg)
     }
   }
 
-  // Application des modificateurs globaux, faiblesses, résistances et protections aux dégâts adverses
+  // Application des modificateurs globaux, faiblesses, résistances et protections aux dégâts adverses (Ordre officiel en 6 étapes)
   if (activeDamage > 0 || expectedActiveDamage > 0) {
     let flatBonus = 0
     if (attackerBoard.turnDamageBoost) {
@@ -1246,6 +1344,13 @@ export function computeAttackDamageToActive(
     }
     if (attacker.damageDealtModifierNextTurn) {
       flatBonus += attacker.damageDealtModifierNextTurn
+    }
+
+    // Double Énergie Turbo : -20 dégâts infligés par attaque avant Faiblesse/Résistance
+    for (let eIdx = 0; eIdx < attacker.attachedEnergies.length; eIdx++) {
+      if (getCardFastMeta(attacker.attachedEnergies[eIdx]!).energyUnitKind === 'DOUBLE_TURBO') {
+        flatBonus -= 20
+      }
     }
 
     // Outils attaquant (désactivés par Tour de Brouillage)
@@ -1289,10 +1394,14 @@ export function computeAttackDamageToActive(
     }
 
     const applyPipeline = (raw: number): number => {
+      // Étape 1 & 2 : si les dégâts de base ou après bonus attaquant sont <= 0, on s'arrête avant Faiblesse/Résistance
       if (raw <= 0) return 0
       let d = raw + flatBonus
+      if (d <= 0) return 0
+
       const defMeta = getCardFastMeta(defender.card)
-      const defAbilityActive = !isAbilityLockedByPassive(state || ({ player: attackerBoard, opponent: defenderBoard, activeStadium: null } as any), defender, defenderBoard)
+      const evalState = state || ({ player: attackerBoard, opponent: defenderBoard, activeStadium: null } as any)
+      const defAbilityActive = !isAbilityLockedByPassive(evalState, defender, defenderBoard)
 
       // Prévention de dégâts next-turn (ex: Espièglerie de Margie, Mimiriqui, Pingoléon-ex)
       if (defender.preventDamageOrEffectsNextTurn) {
@@ -1300,45 +1409,70 @@ export function computeAttackDamageToActive(
       }
       if (
         defAbilityActive &&
-        (defMeta.normNameFr.includes('mimiriqui') || defMeta.normNameEn.includes('mimikyu')) &&
+        (defMeta.normNameFr.includes('mimiriqui') ||
+          defMeta.normNameFr.includes('mimiqui') ||
+          defMeta.normNameEn.includes('mimikyu')) &&
         attacker.card.pokemonStats?.isRuleBox
       ) {
         return 0
       }
 
+      // Étape 3 : Faiblesse (y compris Zone Féérique / Fairy Zone de Mélofée-ex de Lilie sur les Pokémon Dragon)
       const atkTypes = getCardFastMeta(attacker.card).normPokeTypes
       const rawWeaknesses = defender.card.pokemonStats?.weaknesses
-      if (rawWeaknesses && rawWeaknesses.length > 0 && atkTypes.length > 0) {
-        let weakHit = false
+      let fairyZoneDragonWeakness = false
+      if (defMeta.normPokeTypes.includes('dragon') && atkTypes.includes('psy')) {
+        const atkInPlay = [
+          ...(attackerBoard.activePokemon ? [attackerBoard.activePokemon] : []),
+          ...attackerBoard.bench,
+        ]
+        fairyZoneDragonWeakness = atkInPlay.some(
+          (p) =>
+            getCardFastMeta(p.card).hasFairyZonePassive &&
+            !isAbilityLockedByPassive(evalState, p, attackerBoard),
+        )
+      }
+
+      if (fairyZoneDragonWeakness) {
+        d *= 2
+      } else if (rawWeaknesses && rawWeaknesses.length > 0 && atkTypes.length > 0) {
         for (let wIdx = 0; wIdx < rawWeaknesses.length; wIdx++) {
           const wRaw = rawWeaknesses[wIdx] as any
           const wNorm = normalizeCardNameForMatch(typeof wRaw === 'string' ? wRaw : wRaw?.type || '')
           if (atkTypes.includes(wNorm)) {
-            weakHit = true
+            const wVal = typeof wRaw === 'object' ? wRaw?.value : undefined
+            if (typeof wVal === 'string' && wVal.trim().startsWith('+')) {
+              const bonus = parseInt(wVal.trim().slice(1), 10)
+              d += !Number.isNaN(bonus) ? bonus : 20
+            } else {
+              d *= 2
+            }
             break
           }
         }
-        if (weakHit) d *= 2
       }
 
+      // Étape 4 : Résistance (dynamique selon rRaw.value)
       const rawResistances = defender.card.pokemonStats?.resistances
       if (rawResistances && rawResistances.length > 0 && atkTypes.length > 0) {
-        let resHit = false
         for (let rIdx = 0; rIdx < rawResistances.length; rIdx++) {
           const rRaw = rawResistances[rIdx] as any
           const rNorm = normalizeCardNameForMatch(typeof rRaw === 'string' ? rRaw : rRaw?.type || '')
           if (atkTypes.includes(rNorm)) {
-            resHit = true
+            let resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
+            if (typeof rRaw === 'object' && rRaw?.value !== undefined && rRaw?.value !== null) {
+              const parsed = parseInt(String(rRaw.value).replace(/[^\d-]/g, ''), 10)
+              if (!Number.isNaN(parsed) && parsed !== 0) {
+                resMod = parsed < 0 ? parsed : -parsed
+              }
+            }
+            d = Math.max(0, d + resMod)
             break
           }
         }
-        if (resHit) {
-          const resMod = defender.card.pokemonStats?.resistanceModifier ?? -30
-          d = Math.max(0, d + resMod)
-        }
       }
 
-      // Réductions de dégâts subis (next-turn + Outils + Passifs comme Némélios / Pikachu / Méga-Diancie-ex)
+      // Étape 5 : Réductions de dégâts subis (next-turn + Outils + Passifs)
       if (defender.damageTakenModifierNextTurn) {
         d = Math.max(0, d + defender.damageTakenModifierNextTurn)
       }
@@ -1388,6 +1522,68 @@ export function countMatchingEnergiesInPlay(
     }
   }
   return count
+}
+
+const TEMPORAL_DEAD_CONDITION_TOKENS = new Set([
+  'NOT_BEHIND_ON_PRIZES',
+  'PLAYER_NOT_BEHIND_ON_PRIZES',
+  'NO_KO_LAST_TURN',
+  'NO_KO_SUFFERED_LAST_TURN',
+  'NOT_HAND_HAS_MORE_PRIZES_THAN_OPPONENT',
+  'PLAYER_PRIZES_LEFT_<=_OPPONENT_PRIZES_LEFT',
+  'HAND_HAS_NOT_MORE_PRIZES_THAN_OPPONENT',
+])
+
+/**
+ * Détermine si une carte est uniquement en attente d'un déclencheur temporel (K.O. subi / retard aux Récompenses)
+ * comme *Tampon Injuste* ou *Attrape-Riposte*, afin de ne pas la considérer comme un déchet à défausser.
+ */
+export function isCardTemporallyWaiting(
+  card: EngineCardModel,
+  myBoard: PlayerBoardState,
+  oppBoard: PlayerBoardState,
+  activeStadium?: ActiveStadiumState | null,
+): boolean {
+  let hasTemporalTriggerDead = false
+  let hasPermanentDead = false
+
+  for (const act of card.playableActions) {
+    if (
+      act.actionType !== 'PLAY_FROM_HAND' &&
+      act.actionType !== 'EVOLVE' &&
+      act.actionType !== 'ATTACH_ENERGY'
+    ) {
+      continue
+    }
+    if (act.deadCardCondition) {
+      const condUpper = act.deadCardCondition.trim().toUpperCase()
+      if (act.actionType === 'EVOLVE' && condUpper.startsWith('NO_') && condUpper.endsWith('_IN_PLAY')) {
+        continue
+      }
+      const parts = condUpper.split('|')
+      for (const rawPart of parts) {
+        const part = rawPart.trim()
+        if (!part) continue
+        if (!evaluateDeadStringCondition(part, myBoard, oppBoard, activeStadium, card)) continue
+        if (TEMPORAL_DEAD_CONDITION_TOKENS.has(part)) {
+          hasTemporalTriggerDead = true
+        } else {
+          hasPermanentDead = true
+        }
+      }
+    }
+  }
+
+  for (const cond of card.strategicEvaluator.inGameDeadCardConditions || []) {
+    if (!evaluateDeadCondition(cond, myBoard, oppBoard, activeStadium, card)) continue
+    if (TEMPORAL_DEAD_CONDITION_TOKENS.has(cond.reason)) {
+      hasTemporalTriggerDead = true
+    } else {
+      hasPermanentDead = true
+    }
+  }
+
+  return hasTemporalTriggerDead && !hasPermanentDead
 }
 
 /**
@@ -1461,9 +1657,15 @@ function evaluateDeadStringCondition(
       if (myBoard.bench.length >= maxSlots) return true
     } else if (p === 'BENCH_IS_EMPTY' || p === 'NO_POKEMON_ON_BENCH') {
       if (myBoard.bench.length === 0) return true
-    } else if (p === 'OPPONENT_BENCH_EMPTY' || p === 'NO_POKEMON_ON_OPPONENT_BENCH') {
+    } else if (p === 'OPPONENT_BENCH_EMPTY' || p === 'OPPONENT_BENCH_IS_EMPTY' || p === 'NO_POKEMON_ON_OPPONENT_BENCH') {
       if (oppBoard.bench.length === 0) return true
-    } else if (p === 'NOT_BEHIND_ON_PRIZES' || p === 'PLAYER_NOT_BEHIND_ON_PRIZES') {
+    } else if (
+      p === 'NOT_BEHIND_ON_PRIZES' ||
+      p === 'PLAYER_NOT_BEHIND_ON_PRIZES' ||
+      p === 'NOT_HAND_HAS_MORE_PRIZES_THAN_OPPONENT' ||
+      p === 'PLAYER_PRIZES_LEFT_<=_OPPONENT_PRIZES_LEFT' ||
+      p === 'HAND_HAS_NOT_MORE_PRIZES_THAN_OPPONENT'
+    ) {
       if (myBoard.prizes.length <= oppBoard.prizes.length) return true
     } else if (p === 'NO_KO_LAST_TURN' || p === 'NO_KO_SUFFERED_LAST_TURN') {
       if (!myBoard.koSufferedLastOpponentTurn) return true
@@ -1495,6 +1697,14 @@ function evaluateDeadStringCondition(
       if (!allInPlay.some((x) => Boolean(x.card.identity.isTera || x.card.pokemonStats?.isTera))) return true
     } else if (p === 'DISCARD_EMPTY' || p === 'DISCARD_PILE_EMPTY') {
       if (myBoard.discard.length === 0) return true
+    } else if (p === 'NO_POKEMON_OR_BASIC_ENERGY_IN_DISCARD') {
+      if (
+        !myBoard.discard.some(
+          (c) => c.category === 'POKEMON' || (c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY'),
+        )
+      ) {
+        return true
+      }
     } else if (p === 'NO_ENERGY_IN_DISCARD') {
       if (!myBoard.discard.some((c) => c.category === 'ENERGY')) return true
     } else if (p === 'NO_POKEMON_IN_DISCARD') {
@@ -1686,7 +1896,7 @@ export function createInitialMatchState(
       }
     })
 
-    // Préfère en Actif un Pokémon de mobilité (Mélofée 0 retraite) ou un attaquant de base solide (Ire-Foudre, Ogerpon, Salamèche)
+    // Préfère en Actif un Pokémon de mobilité (0 retraite) sans Talent déclenché à la pose de la main
     basicIndices.sort((idxA, idxB) => {
       const a = hand[idxA]!
       const b = hand[idxB]!
@@ -1694,10 +1904,12 @@ export function createInitialMatchState(
         const ret = c.pokemonStats?.retreatCost ?? 1
         const hp = c.pokemonStats?.hp ?? 70
         const role = c.strategicEvaluator.primaryRole
-        if (ret === 0) return 120
-        if (role === 'MAIN_ATTACKER') return 110
-        if (role === 'ENERGY_ACCELERATOR') return 95
-        return hp - ret * 10
+        const meta = getCardFastMeta(c)
+        const triggerPenalty = meta.hasOnPlayFromHandTrigger ? -60 : 0
+        if (ret === 0 && !meta.hasOnPlayFromHandTrigger) return 120
+        if (role === 'MAIN_ATTACKER') return 110 + triggerPenalty
+        if (role === 'ENERGY_ACCELERATOR') return 95 + triggerPenalty
+        return hp - ret * 10 + triggerPenalty
       }
       return scoreStartActive(b) - scoreStartActive(a)
     })
@@ -1717,14 +1929,13 @@ export function createInitialMatchState(
       cantAttackNextTurn: false,
     }
 
-    // Pose les autres Pokémon de Base de la main initiale sur le Banc (en gardant Luminéon V en main pour son talent)
+    // Pose les Pokémon de Base initiaux sur le Banc tout en conservant en main ceux ayant un talent ON_PLAY_FROM_HAND_TRIGGER (Luminéon V, Tapatoès-ex, Miaouss-ex, etc.)
     const bench: InPlayPokemon[] = []
     for (let i = hand.length - 1; i >= 0; i--) {
       if (bench.length >= 5) break
       const c = hand[i]!
       if (c.category === 'POKEMON' && c.subCategory === 'BASIC') {
-        const normName = normalizeCardNameForMatch(c.identity.nameFr)
-        if (normName.includes('lumineon')) continue
+        if (getCardFastMeta(c).hasOnPlayFromHandTrigger) continue
         hand.splice(i, 1)
         bench.push({
           instanceId: `p_${instanceSeq++}`,
@@ -1782,6 +1993,7 @@ export function createInitialMatchState(
       extraTurnGranted: false,
       itemLockActive: false,
       supporterPlayedThisTurn: false,
+      stadiumPlayedThisTurn: false,
       energyAttachedThisTurn: false,
       retreatUsedThisTurn: false,
       usedOncePerTurnAbilities: new Set<string>(),
@@ -1801,14 +2013,16 @@ export function createInitialMatchState(
   const playerBoard = setupSingleBoard(playerDeckModels, forceKeyPrized)
   const opponentBoard = setupSingleBoard(opponentDeckModels, false)
 
-  // Compensation officielle de Mulligan : le joueur ayant subi moins de mulligans pioche jusqu'à la différence (max 2 pour ne pas se meuler)
+  // Compensation officielle de Mulligan : le joueur ayant subi moins de mulligans peut piocher jusqu'à la différence nette (|mA - mB|) tout en préservant la pioche
   if (opponentBoard.mulliganCount > playerBoard.mulliganCount) {
-    const bonusDraws = Math.min(2, opponentBoard.mulliganCount - playerBoard.mulliganCount)
+    const netDiff = opponentBoard.mulliganCount - playerBoard.mulliganCount
+    const bonusDraws = Math.min(netDiff, Math.max(0, playerBoard.deck.length - 10))
     for (let i = 0; i < bonusDraws && playerBoard.deck.length > 0; i++) {
       playerBoard.hand.push(playerBoard.deck.shift()!)
     }
   } else if (playerBoard.mulliganCount > opponentBoard.mulliganCount) {
-    const bonusDraws = Math.min(2, playerBoard.mulliganCount - opponentBoard.mulliganCount)
+    const netDiff = playerBoard.mulliganCount - opponentBoard.mulliganCount
+    const bonusDraws = Math.min(netDiff, Math.max(0, opponentBoard.deck.length - 10))
     for (let i = 0; i < bonusDraws && opponentBoard.deck.length > 0; i++) {
       opponentBoard.hand.push(opponentBoard.deck.shift()!)
     }
@@ -1842,6 +2056,7 @@ export function startTurn(state: MatchState): { drawnCard: EngineCardModel | nul
 
   const activeBoard = getActiveBoard(state)
   activeBoard.supporterPlayedThisTurn = false
+  activeBoard.stadiumPlayedThisTurn = false
   activeBoard.energyAttachedThisTurn = false
   activeBoard.retreatUsedThisTurn = false
   activeBoard.turnDamageBoost = 0
@@ -1963,6 +2178,16 @@ export function checkActionPreconditions(
   }
   if (isSupporter && isTurn1FirstPlayer) {
     return false
+  }
+  if (sourceCard.subCategory === 'STADIUM') {
+    if (activeBoard.stadiumPlayedThisTurn) return false
+    if (
+      state.activeStadium &&
+      normalizeCardNameForMatch(state.activeStadium.card.identity.nameFr) ===
+        normalizeCardNameForMatch(sourceCard.identity.nameFr)
+    ) {
+      return false
+    }
   }
   if (action.actionId.includes('vstar') && activeBoard.vstarPowerUsed) {
     return false
@@ -2169,6 +2394,14 @@ export function checkActionPreconditions(
       }
     } else if (preUpper === 'BENCH_HAS_POKEMON') {
       if (activeBoard.bench.length === 0) return false
+    } else if (preUpper === 'BENCH_HAS_POKEMON_WITH_ENERGY') {
+      const hasInPlayEnergy =
+        (activeBoard.activePokemon?.attachedEnergies.length || 0) > 0 ||
+        activeBoard.bench.some((b) => b.attachedEnergies.length > 0)
+      if (!hasInPlayEnergy) return false
+    } else if (preUpper === 'BENCH_HAS_OTHER_POKEMON') {
+      const inPlayCount = (activeBoard.activePokemon ? 1 : 0) + activeBoard.bench.length
+      if (inPlayCount < 2) return false
     } else if (
       preUpper === 'OPPONENT_HAS_BENCH_POKEMON' ||
       preUpper === 'OPPONENT_HAS_BENCHED_POKEMON' ||
@@ -2280,6 +2513,25 @@ export function checkActionPreconditions(
       if (isOwnSwitch && activeBoard.bench.length === 0) {
         return false
       }
+    }
+  }
+
+  // Règle officielle de zone publique (Défausse) : impossible de jouer un récupérateur de Défausse s'il n'y a aucune cible légale
+  if (action.actionType === 'PLAY_FROM_HAND' && sourceCard.category === 'TRAINER' && action.effects.length > 0) {
+    const primaryEff = action.effects[0]!
+    if (
+      primaryEff.primitive === 'RECOVER_FROM_DISCARD' &&
+      !primaryEff.optional &&
+      !action.effects.some((e) => e.primitive === 'DRAW_CARDS' || e.primitive === 'SEARCH_DECK')
+    ) {
+      const hasTargetInDiscard = activeBoard.discard.some(
+        (c) =>
+          cardMatchesEffectFilter(c, primaryEff) ||
+          (!primaryEff.filter &&
+            !primaryEff.targetFilter &&
+            (c.category === 'POKEMON' || (c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY'))),
+      )
+      if (!hasTargetInDiscard) return false
     }
   }
 
@@ -2413,8 +2665,9 @@ export function getLegalActions(state: MatchState): GameAction[] {
     // Blocage par Item Lock (attaque ou talent passif)
     if (card.subCategory === 'ITEM' && hasEffectiveItemLock(state, activeBoard)) return
 
-    // Cas des cartes Stade : impossible de poser un stade du même nom
+    // Cas des cartes Stade : 1 seul Stade par tour et impossible de poser un stade du même nom
     if (card.subCategory === 'STADIUM') {
+      if (activeBoard.stadiumPlayedThisTurn) return
       if (
         state.activeStadium &&
         normalizeCardNameForMatch(state.activeStadium.card.identity.nameFr) ===
@@ -2938,13 +3191,17 @@ function discardCardsFromHandForCost(
         return
       }
       const isDead = isCardDeadInHand(c, activeBoard, passiveBoard)
-      // Dans un deck Gardevoir/Ire-Foudre, défausser une Énergie de base est souvent synergique !
+      const isTemporalWait =
+        isDead && isCardTemporallyWaiting(c, activeBoard, passiveBoard)
+      // Dans un deck Gardevoir/Ire-Foudre, défausser une Énergie de base est souvent synergique ; ne pas jeter les cartes de riposte (Tampon Injuste / Attrape-Riposte) comme des déchets !
       const isSynergisticBasicEnergy = c.category === 'ENERGY' && c.subCategory === 'BASIC_ENERGY'
-      const discardScore = isDead
+      const discardScore = isDead && !isTemporalWait
         ? 1000 + (c.strategicEvaluator.discardPriorityWhenDead ?? 10)
-        : isSynergisticBasicEnergy
-          ? 220 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
-          : 120 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
+        : isTemporalWait
+          ? 70 - (c.strategicEvaluator.intrinsicBaseScore ?? 85)
+          : isSynergisticBasicEnergy
+            ? 220 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
+            : 120 - (c.strategicEvaluator.intrinsicBaseScore ?? 70)
       if (discardScore > bestDiscardScore) {
         bestDiscardScore = discardScore
         bestDiscardIdx = idx
@@ -3124,15 +3381,8 @@ export function applyAction(
       const benchPoke = activeBoard.bench[benchIdx]
       if (activePoke && benchPoke && !activeBoard.retreatUsedThisTurn && !activePoke.cantRetreatNextTurn) {
         const retreatCost = getPokemonRetreatCost(activePoke, activeBoard, state)
-        for (let i = 0; i < retreatCost && activePoke.attachedEnergies.length > 0; i++) {
-          const discardedEn = activePoke.attachedEnergies.pop()!
-          activeBoard.discard.push(discardedEn)
-        }
-        activePoke.specialConditions = []
-        activePoke.cantAttackNextTurn = false
-        activePoke.cantAttackTurn = undefined
-        activePoke.cantRetreatNextTurn = false
-        activePoke.cantRetreatTurn = undefined
+        discardEnergyCardsForCost(activePoke.attachedEnergies, retreatCost, activeBoard.discard)
+        clearPokemonStatusAndAttackEffects(activePoke)
 
         activeBoard.activePokemon = benchPoke
         activeBoard.bench[benchIdx] = activePoke
@@ -3153,12 +3403,18 @@ export function applyAction(
           : activeBoard.hand.findIndex((c) => c.cardId === action.cardId)
       if (idx === -1) break
 
-      const trainerCard = activeBoard.hand.splice(idx, 1)[0]!
+      const trainerCard = activeBoard.hand[idx]!
 
-      // Cas d'un Stade
+      // Cas d'un Stade (1 par tour maximum, remplacement de l'ancien et fin de ses effets)
       if (trainerCard.subCategory === 'STADIUM') {
+        if (activeBoard.stadiumPlayedThisTurn) break
+        activeBoard.hand.splice(idx, 1)
         if (state.activeStadium) {
           const prevOwner = state.activeStadium.ownerIndex === 0 ? state.player : state.opponent
+          if (getCardFastMeta(state.activeStadium.card).expandsBenchToEight) {
+            activeBoard.maxBenchSlotsOverride = null
+            passiveBoard.maxBenchSlotsOverride = null
+          }
           prevOwner.discard.push(state.activeStadium.card)
         }
         state.activeStadium = {
@@ -3166,13 +3422,16 @@ export function applyAction(
           ownerIndex: state.activePlayerIndex,
           usedThisTurn: false,
         }
+        activeBoard.stadiumPlayedThisTurn = true
         enforceBenchCapacity(activeBoard, getMaxBenchSlots(activeBoard, state.activeStadium))
         enforceBenchCapacity(passiveBoard, getMaxBenchSlots(passiveBoard, state.activeStadium))
         state.lastActionLog.push(action.label)
         break
       }
 
-      // Tout Outil Pokémon s'attache au Pokémon ciblé (même si le modèle déclare des effets passifs)
+      activeBoard.hand.splice(idx, 1)
+
+      // Tout Outil Pokémon s'attache au Pokémon ciblé (limite officielle : 1 Outil maximum par Pokémon)
       if (trainerCard.subCategory === 'TOOL') {
         const targetPoke =
           action.targetSlot === 'ACTIVE'
@@ -3180,7 +3439,7 @@ export function applyAction(
             : typeof action.targetSlot === 'number'
               ? activeBoard.bench[action.targetSlot] ?? activeBoard.activePokemon
               : activeBoard.activePokemon
-        if (targetPoke) {
+        if (targetPoke && targetPoke.attachedTools.length === 0) {
           targetPoke.attachedTools.push(trainerCard)
           state.lastActionLog.push(action.label)
         } else {
@@ -3353,9 +3612,11 @@ export function applyAction(
         } else if (cost.type === 'SELF_DAMAGE') {
           if (sourcePoke) {
             sourcePoke.damage += (cost.count || 1) * 10
-            if (sourcePoke.damage >= getPokemonMaxHp(sourcePoke)) {
-              const isSourceActive = activeBoard.activePokemon?.instanceId === sourcePoke.instanceId
-              handleKnockOut(state, passiveBoard, activeBoard, isSourceActive ? 'ACTIVE' : 0)
+            if (sourcePoke.damage >= getPokemonMaxHp(sourcePoke, state)) {
+              const realSlot = findSlotForPokemon(activeBoard, sourcePoke)
+              if (realSlot !== null) {
+                handleKnockOut(state, passiveBoard, activeBoard, realSlot, false)
+              }
             }
           }
         } else if (cost.type === 'SHUFFLE_ATTACHED_ENERGY_TO_DECK') {
@@ -3426,8 +3687,8 @@ export function applyAction(
         if (!flipSuccess) {
           attacker.damage += 30
           state.lastActionLog.push(`${attacker.card.identity.nameFr} est confus et s'inflige 30 dégâts !`)
-          if (attacker.damage >= getPokemonMaxHp(attacker)) {
-            handleKnockOut(state, passiveBoard, activeBoard, 'ACTIVE')
+          if (attacker.damage >= getPokemonMaxHp(attacker, state)) {
+            handleKnockOut(state, passiveBoard, activeBoard, 'ACTIVE', false)
           }
           state.rngState = rng.getState()
           endTurnAndAdvance(state)
@@ -3463,7 +3724,8 @@ export function applyAction(
         }
 
         const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction, state, rng)
-        let enemyKnockedOutThisAttack = false
+        let pendingExtraPrizes = 0
+        const directKoTargets = new Set<InPlayPokemon>()
 
         // Défausse d'énergies en jeu si coût d'attaque (ex: Tempête Éclats d'Ire-Foudre-ex)
         if (execIdx === 0 && dmgInfo.energyToDiscard > 0) {
@@ -3474,6 +3736,7 @@ export function applyAction(
           passiveBoard.itemLockActive = true
         }
 
+        // Exécution ordonnée de tous les effets de l'attaque avant la vérification des K.O. (Étape F officielle)
         for (const eff of pAction.effects) {
           if (eff.primitive === 'DAMAGE_ACTIVE' || (eff.primitive as any) === 'DEAL_DAMAGE_ACTIVE') {
             const isSelfDmg =
@@ -3493,17 +3756,22 @@ export function applyAction(
                 rng,
                 markDeckSearched,
               )
-              if (
-                passiveBoard.activePokemon &&
-                passiveBoard.activePokemon.damage >= getPokemonMaxHp(passiveBoard.activePokemon, state)
-              ) {
-                enemyKnockedOutThisAttack = true
-                handleKnockOut(state, activeBoard, passiveBoard, 'ACTIVE')
-              }
             }
           } else if (eff.primitive === 'DAMAGE_BENCH' || (eff.primitive as any) === 'DEAL_DAMAGE_BENCH') {
-            // DAMAGE_BENCH inflige des DÉGÂTS au Banc : bloqué par les Téracristals et les talents protecteurs (ex: Manaphy / Bastiodon / Pikachu)
-            if (passiveBoard.bench.length > 0 && !isBenchProtectedByPassive(state, passiveBoard)) {
+            const tUpper = (eff.target || '').toUpperCase()
+            const isOwnBench =
+              tUpper === 'OWN_BENCH_SINGLE' || tUpper === 'OWN_BENCH_ALL' || tUpper === 'OWN_ALL_POKEMON'
+            if (isOwnBench) {
+              // Règle Téracristal officielle : immunisé aux dégâts d'attaques sur le Banc (même vos propres attaques)
+              const ownBenchDmg = Math.max(0, eff.value ?? eff.baseDamage ?? (eff.count || 1) * 10)
+              if (ownBenchDmg > 0) {
+                for (const bPoke of activeBoard.bench) {
+                  if (bPoke.card.pokemonStats?.isTera || bPoke.preventDamageOrEffectsNextTurn) continue
+                  bPoke.damage += ownBenchDmg
+                  if (tUpper === 'OWN_BENCH_SINGLE') break
+                }
+              }
+            } else if (passiveBoard.bench.length > 0 && !isBenchProtectedByPassive(state, passiveBoard)) {
               const benchDmg = dmgInfo.benchDamage > 0
                 ? dmgInfo.benchDamage
                 : Math.max(0, eff.value ?? eff.baseDamage ?? (eff.count || 1) * 10)
@@ -3520,22 +3788,13 @@ export function applyAction(
                   }
                 })
                 if (bestIdx !== -1 && benchDmg > 0) {
-                  const targetB = passiveBoard.bench[bestIdx]!
-                  targetB.damage += benchDmg
-                  if (targetB.damage >= getPokemonMaxHp(targetB, state)) {
-                    enemyKnockedOutThisAttack = true
-                    handleKnockOut(state, activeBoard, passiveBoard, bestIdx)
-                  }
+                  passiveBoard.bench[bestIdx]!.damage += benchDmg
                 }
               } else {
                 for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
                   const bPoke = passiveBoard.bench[bIdx]!
                   if (bPoke.card.pokemonStats?.isTera || bPoke.preventDamageOrEffectsNextTurn) continue
                   bPoke.damage += benchDmg
-                  if (bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
-                    enemyKnockedOutThisAttack = true
-                    handleKnockOut(state, activeBoard, passiveBoard, bIdx)
-                  }
                 }
               }
             }
@@ -3543,24 +3802,21 @@ export function applyAction(
             eff.primitive === 'PLACE_DAMAGE_COUNTERS' ||
             (eff.primitive as any) === 'DISTRIBUTE_DAMAGE_COUNTERS_BENCH'
           ) {
-            if (placeDamageCountersEffect(state, activeBoard, passiveBoard, eff, action, dmgInfo.benchDamage)) {
-              enemyKnockedOutThisAttack = true
-            }
+            placeDamageCountersEffect(
+              state,
+              activeBoard,
+              passiveBoard,
+              eff,
+              action,
+              dmgInfo.benchDamage,
+              true,
+            )
           } else if (eff.primitive === 'TAKE_EXTRA_PRIZE' || (eff.primitive as any) === 'TAKE_EXTRA_PRIZE_CARDS') {
-            if (enemyKnockedOutThisAttack && activeBoard.prizes.length > 0) {
-              const extraCount = eff.count || eff.value || 1
-              for (let i = 0; i < extraCount && activeBoard.prizes.length > 0; i++) {
-                activeBoard.hand.push(activeBoard.prizes.shift()!)
-              }
-              if (activeBoard.prizes.length === 0) {
-                state.winner = activeBoard === state.player ? 'PLAYER' : 'OPPONENT'
-                state.winReason = 'ALL_PRIZES_TAKEN'
-              }
-            }
+            pendingExtraPrizes += eff.count || eff.value || 1
           } else if (eff.primitive === 'DISCARD_CARDS' && eff.target === 'SELF' && eff.sourceZone === 'ATTACHED_CARDS' && dmgInfo.energyToDiscard > 0) {
             // Déjà défaussé avant la boucle pour PER_ENERGY_DISCARDED
           } else {
-            const hadKo = resolveAtomicEffect(
+            resolveAtomicEffect(
               state,
               activeBoard,
               passiveBoard,
@@ -3568,19 +3824,33 @@ export function applyAction(
               action,
               rng,
               markDeckSearched,
-              { enemyKnockedOutThisAttack, dmgInfo, sourcePoke: attacker },
+              {
+                enemyKnockedOutThisAttack: false,
+                dmgInfo,
+                sourcePoke: attacker,
+                deferKnockOuts: true,
+                directKoTargets,
+              },
             )
-            if (hadKo) enemyKnockedOutThisAttack = true
           }
         }
 
-        // Auto-recul (`DAMAGE_ACTIVE(SELF)` ou `TWO_TAILS_SELF_DAMAGE`)
+        // Auto-recul (`DAMAGE_ACTIVE(SELF)` ou `TWO_TAILS_SELF_DAMAGE`) avant l'étape F
         if (dmgInfo.selfRecoilDamage > 0 && activeBoard.activePokemon) {
           activeBoard.activePokemon.damage += dmgInfo.selfRecoilDamage
-          if (activeBoard.activePokemon.damage >= getPokemonMaxHp(activeBoard.activePokemon, state)) {
-            handleKnockOut(state, passiveBoard, activeBoard, 'ACTIVE')
-          }
         }
+
+        // Étape F officielle : résolution simultanée de tous les K.O. de l'attaque (adversaire + auto-recul + récompenses bonus)
+        const attackerSideKey = activeBoard === state.player ? 'player' : 'opponent'
+        const oppSideMark = passiveBoard === state.opponent ? 'OPPONENT' : 'PLAYER'
+        resolveSimultaneousKnockOuts(state, {
+          markOppKoForSide: oppSideMark,
+          extraPrizes: {
+            player: attackerSideKey === 'player' ? pendingExtraPrizes : 0,
+            opponent: attackerSideKey === 'opponent' ? pendingExtraPrizes : 0,
+          },
+          directKoTargets,
+        })
       }
 
       state.lastActionLog.push(action.label)
@@ -3616,12 +3886,8 @@ function evolveInPlayPokemon(
   targetPoke.previousStages.push(targetPoke.card)
   targetPoke.card = evoCard
   targetPoke.evolvedThisTurn = true
-  // L'évolution guérit tous les États Spéciaux et verrous d'attaque/retraite
-  targetPoke.specialConditions = []
-  targetPoke.cantAttackNextTurn = false
-  targetPoke.cantAttackTurn = undefined
-  targetPoke.cantRetreatNextTurn = false
-  targetPoke.cantRetreatTurn = undefined
+  // L'évolution guérit tous les États Spéciaux et effets d'attaques affectant le Pokémon
+  clearPokemonStatusAndAttackEffects(targetPoke)
 
   // Résolution automatique uniquement des talents réactifs à l'évolution (TRIGGERED_ABILITY / ABILITY_ON_EVOLVE)
   const passiveBoard = getPassiveBoard(state)
@@ -3696,11 +3962,7 @@ function resolveGustSwitch(
   const oldOppActive = passiveBoard.activePokemon
   passiveBoard.activePokemon = newOppActive
   if (oldOppActive) {
-    oldOppActive.specialConditions = []
-    oldOppActive.cantAttackNextTurn = false
-    oldOppActive.cantAttackTurn = undefined
-    oldOppActive.cantRetreatNextTurn = false
-    oldOppActive.cantRetreatTurn = undefined
+    clearPokemonStatusAndAttackEffects(oldOppActive)
     passiveBoard.bench[chosenIdx] = oldOppActive
   } else {
     passiveBoard.bench.splice(chosenIdx, 1)
@@ -3725,11 +3987,7 @@ function resolveSelfSwitch(activeBoard: PlayerBoardState): void {
   const oldActive = activeBoard.activePokemon
   activeBoard.activePokemon = newActive
   if (oldActive) {
-    oldActive.specialConditions = []
-    oldActive.cantAttackNextTurn = false
-    oldActive.cantAttackTurn = undefined
-    oldActive.cantRetreatNextTurn = false
-    oldActive.cantRetreatTurn = undefined
+    clearPokemonStatusAndAttackEffects(oldActive)
     activeBoard.bench[bestBenchIdx] = oldActive
   } else {
     activeBoard.bench.splice(bestBenchIdx, 1)
@@ -3777,6 +4035,7 @@ function placeDamageCountersEffect(
   eff: AtomicEffect,
   _action: GameAction,
   fallbackBenchDmg = 0,
+  deferKnockOuts = false,
 ): boolean {
   let enemyKo = false
   const totalDmg =
@@ -3788,7 +4047,10 @@ function placeDamageCountersEffect(
   if (targetUpper === 'OPPONENT_ALL_POKEMON') {
     if (defenderBoard.activePokemon) {
       defenderBoard.activePokemon.damage += totalDmg
-      if (defenderBoard.activePokemon.damage >= getPokemonMaxHp(defenderBoard.activePokemon, state)) {
+      if (
+        !deferKnockOuts &&
+        defenderBoard.activePokemon.damage >= getPokemonMaxHp(defenderBoard.activePokemon, state)
+      ) {
         enemyKo = true
         handleKnockOut(state, attackerBoard, defenderBoard, 'ACTIVE')
       }
@@ -3796,7 +4058,7 @@ function placeDamageCountersEffect(
     for (let bIdx = defenderBoard.bench.length - 1; bIdx >= 0; bIdx--) {
       const bPoke = defenderBoard.bench[bIdx]!
       bPoke.damage += totalDmg
-      if (bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
+      if (!deferKnockOuts && bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
         enemyKo = true
         handleKnockOut(state, attackerBoard, defenderBoard, bIdx)
       }
@@ -3807,6 +4069,48 @@ function placeDamageCountersEffect(
   if (targetUpper === 'OPPONENT_BENCH_ALL') {
     // Répartition intelligente des marqueurs (10 par 10) sur le Banc adverse (ex: Plongée Fantôme 60)
     let remainingDmg = totalDmg
+    if (deferKnockOuts) {
+      // Distribution sans promotion immédiate : ne sur-alloue pas au-delà du KO d'un banc donné
+      const allocated = new Map<string, number>()
+      let safety = 30
+      while (remainingDmg > 0 && defenderBoard.bench.length > 0 && safety-- > 0) {
+        const availableBench = defenderBoard.bench.filter(
+          (p) => p.damage + (allocated.get(p.instanceId) || 0) < getPokemonMaxHp(p, state),
+        )
+        if (availableBench.length === 0) {
+          defenderBoard.bench[0]!.damage += remainingDmg
+          break
+        }
+        let bestPoke = availableBench[0]!
+        let bestScore = -99999
+        for (const bp of availableBench) {
+          const curDmg = bp.damage + (allocated.get(bp.instanceId) || 0)
+          const remHp = Math.max(0, getPokemonMaxHp(bp, state) - curDmg)
+          const willKo = remHp <= remainingDmg
+          const prizeVal = bp.card.pokemonStats?.prizeCardsGiven ?? 1
+          const s =
+            (willKo ? 500 + prizeVal * 200 : 0) +
+            (bp.card.strategicEvaluator.intrinsicBaseScore ?? 70) -
+            remHp * 0.4 +
+            bp.attachedEnergies.length * 15
+          if (s > bestScore) {
+            bestScore = s
+            bestPoke = bp
+          }
+        }
+        const curRem = Math.max(
+          10,
+          getPokemonMaxHp(bestPoke, state) - (bestPoke.damage + (allocated.get(bestPoke.instanceId) || 0)),
+        )
+        const neededToKo = Math.max(10, Math.ceil(curRem / 10) * 10)
+        const chunk = Math.min(remainingDmg, neededToKo)
+        bestPoke.damage += chunk
+        allocated.set(bestPoke.instanceId, (allocated.get(bestPoke.instanceId) || 0) + chunk)
+        remainingDmg -= chunk
+      }
+      return false
+    }
+
     while (remainingDmg > 0 && defenderBoard.bench.length > 0 && state.winner === null) {
       const picked = pickBestOpponentPokeSlot(defenderBoard, remainingDmg, false, true)
       if (!picked || picked.slot === 'ACTIVE') break
@@ -3822,12 +4126,45 @@ function placeDamageCountersEffect(
     return enemyKo
   }
 
-  if (targetUpper === 'OWN_BENCH_SINGLE' || targetUpper === 'OWN_ALL_POKEMON' || targetUpper === 'SELF') {
-    const pTarget = attackerBoard.activePokemon
-    if (pTarget) {
-      pTarget.damage += totalDmg
-      if (pTarget.damage >= getPokemonMaxHp(pTarget, state)) {
-        handleKnockOut(state, defenderBoard, attackerBoard, 'ACTIVE')
+  if (
+    targetUpper === 'SELF' ||
+    targetUpper === 'OWN_ACTIVE' ||
+    targetUpper === 'OWN_BENCH_SINGLE' ||
+    targetUpper === 'OWN_BENCH_ALL' ||
+    targetUpper === 'OWN_ALL_POKEMON'
+  ) {
+    if (targetUpper === 'OWN_BENCH_SINGLE') {
+      const bTarget = attackerBoard.bench[0]
+      if (bTarget) {
+        bTarget.damage += totalDmg
+        if (!deferKnockOuts && bTarget.damage >= getPokemonMaxHp(bTarget, state)) {
+          handleKnockOut(state, defenderBoard, attackerBoard, 0, false)
+        }
+      }
+    } else if (targetUpper === 'OWN_BENCH_ALL' || targetUpper === 'OWN_ALL_POKEMON') {
+      if (targetUpper === 'OWN_ALL_POKEMON' && attackerBoard.activePokemon) {
+        attackerBoard.activePokemon.damage += totalDmg
+        if (
+          !deferKnockOuts &&
+          attackerBoard.activePokemon.damage >= getPokemonMaxHp(attackerBoard.activePokemon, state)
+        ) {
+          handleKnockOut(state, defenderBoard, attackerBoard, 'ACTIVE', false)
+        }
+      }
+      for (let bIdx = attackerBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+        const bTarget = attackerBoard.bench[bIdx]!
+        bTarget.damage += totalDmg
+        if (!deferKnockOuts && bTarget.damage >= getPokemonMaxHp(bTarget, state)) {
+          handleKnockOut(state, defenderBoard, attackerBoard, bIdx, false)
+        }
+      }
+    } else if (attackerBoard.activePokemon) {
+      attackerBoard.activePokemon.damage += totalDmg
+      if (
+        !deferKnockOuts &&
+        attackerBoard.activePokemon.damage >= getPokemonMaxHp(attackerBoard.activePokemon, state)
+      ) {
+        handleKnockOut(state, defenderBoard, attackerBoard, 'ACTIVE', false)
       }
     }
     return false
@@ -3841,7 +4178,7 @@ function placeDamageCountersEffect(
   if (!picked) return false
 
   picked.poke.damage += totalDmg
-  if (picked.poke.damage >= getPokemonMaxHp(picked.poke, state)) {
+  if (!deferKnockOuts && picked.poke.damage >= getPokemonMaxHp(picked.poke, state)) {
     enemyKo = true
     handleKnockOut(state, attackerBoard, defenderBoard, picked.slot)
   }
@@ -3947,6 +4284,8 @@ function resolveAtomicEffect(
     sourcePoke?: InPlayPokemon | null
     trainerCard?: EngineCardModel
     enemyKnockedOutThisAttack?: boolean
+    deferKnockOuts?: boolean
+    directKoTargets?: Set<InPlayPokemon>
     dmgInfo?: {
       activeDamage: number
       benchDamage: number
@@ -4044,6 +4383,8 @@ function resolveAtomicEffect(
           const foundCard = activeBoard.deck.splice(chosenIdx, 1)[0]!
           if (eff.destinationZone === 'TOP_OF_DECK') {
             activeBoard.deck.unshift(foundCard)
+          } else if (eff.destinationZone === 'LOST_ZONE') {
+            pushCardToDestinationZone(activeBoard, foundCard, 'LOST_ZONE')
           } else {
             activeBoard.hand.push(foundCard)
           }
@@ -4162,7 +4503,10 @@ function resolveAtomicEffect(
         return pile.findIndex((c) => cardMatchesEffectFilter(c, eff))
       }
 
-      if (srcZone === 'DISCARD') {
+      if (srcZone === 'BENCH' || srcZone === 'ACTIVE' || srcZone === 'ATTACHED_CARDS') {
+        // Échange d'énergie sur le plateau (ex: Échange d'Énergie / Energy Switch) : ne jamais tutorer gratuitement depuis le deck
+        break
+      } else if (srcZone === 'DISCARD') {
         for (let i = 0; i < maxCount; i++) {
           const targetPoke = selectBestPokemonForEnergyAttachment(activeBoard)
           if (!targetPoke) break
@@ -4223,7 +4567,11 @@ function resolveAtomicEffect(
       if (prim === 'DISCARD_TOOL_OR_STADIUM' || filterUpper.includes('STADIUM')) {
         if (state.activeStadium) {
           const prevOwner = state.activeStadium.ownerIndex === 0 ? state.player : state.opponent
-          prevOwner.discard.push(state.activeStadium.card)
+          if (getCardFastMeta(state.activeStadium.card).expandsBenchToEight) {
+            activeBoard.maxBenchSlotsOverride = null
+            passiveBoard.maxBenchSlotsOverride = null
+          }
+          pushCardToDestinationZone(prevOwner, state.activeStadium.card, eff.destinationZone)
           state.activeStadium = null
           enforceBenchCapacity(activeBoard, getMaxBenchSlots(activeBoard, null))
           enforceBenchCapacity(passiveBoard, getMaxBenchSlots(passiveBoard, null))
@@ -4232,13 +4580,21 @@ function resolveAtomicEffect(
           passiveBoard.activePokemon &&
           passiveBoard.activePokemon.attachedTools.length > 0
         ) {
-          passiveBoard.discard.push(passiveBoard.activePokemon.attachedTools.pop()!)
+          pushCardToDestinationZone(
+            passiveBoard,
+            passiveBoard.activePokemon.attachedTools.pop()!,
+            eff.destinationZone,
+          )
         }
         break
       }
 
       if (filterUpper.includes('TOOL') && passiveBoard.activePokemon?.attachedTools.length) {
-        passiveBoard.discard.push(passiveBoard.activePokemon.attachedTools.pop()!)
+        pushCardToDestinationZone(
+          passiveBoard,
+          passiveBoard.activePokemon.attachedTools.pop()!,
+          eff.destinationZone,
+        )
         break
       }
 
@@ -4251,7 +4607,11 @@ function resolveAtomicEffect(
         const cnt = eff.count || 1
         if (oppPoke) {
           for (let i = 0; i < cnt && oppPoke.attachedEnergies.length > 0; i++) {
-            passiveBoard.discard.push(oppPoke.attachedEnergies.pop()!)
+            pushCardToDestinationZone(
+              passiveBoard,
+              oppPoke.attachedEnergies.pop()!,
+              eff.destinationZone,
+            )
           }
         }
         break
@@ -4260,7 +4620,7 @@ function resolveAtomicEffect(
       if (prim === 'DISCARD_FROM_OPPONENT_HAND' || (targetUpper === 'OPPONENT' && srcUpper !== 'DECK')) {
         const count = eff.count || 1
         for (let i = 0; i < count && passiveBoard.hand.length > 0; i++) {
-          passiveBoard.discard.push(passiveBoard.hand.pop()!)
+          pushCardToDestinationZone(passiveBoard, passiveBoard.hand.pop()!, eff.destinationZone)
         }
         break
       }
@@ -4269,24 +4629,37 @@ function resolveAtomicEffect(
         const millBoard = targetUpper === 'OPPONENT' ? passiveBoard : activeBoard
         const count = eff.count || 1
         for (let i = 0; i < count && millBoard.deck.length > 0; i++) {
-          millBoard.discard.push(millBoard.deck.shift()!)
+          pushCardToDestinationZone(millBoard, millBoard.deck.shift()!, eff.destinationZone)
         }
         break
       }
 
       if (targetUpper === 'SELF' && srcUpper === 'ATTACHED_CARDS') {
+        // Une carte Dresseur sans Pokémon source (ex: Civière Nocturne / Fortifiant Merveilleux) ne doit jamais défausser d'énergie sur l'Actif
+        if (action.type === 'PLAY_TRAINER' && !context?.sourcePoke) {
+          break
+        }
         const atk = context?.sourcePoke || activeBoard.activePokemon
         if (atk) {
           const count = eff.count ?? 1
           for (let i = 0; i < count && atk.attachedEnergies.length > 0; i++) {
-            activeBoard.discard.push(atk.attachedEnergies.pop()!)
+            pushCardToDestinationZone(
+              activeBoard,
+              atk.attachedEnergies.pop()!,
+              eff.destinationZone,
+            )
           }
         }
         break
       }
 
       // Défausse depuis la main du joueur (toute la main si count === null && !eff.filter, sinon N cartes)
-      if (eff.count == null && !eff.filter && !eff.targetFilter) {
+      if (eff.destinationZone === 'LOST_ZONE') {
+        const count = eff.count || 1
+        for (let i = 0; i < count && activeBoard.hand.length > 0; i++) {
+          pushCardToDestinationZone(activeBoard, activeBoard.hand.pop()!, 'LOST_ZONE')
+        }
+      } else if (eff.count == null && !eff.filter && !eff.targetFilter) {
         while (activeBoard.hand.length > 0) {
           activeBoard.discard.push(activeBoard.hand.pop()!)
         }
@@ -4358,12 +4731,37 @@ function resolveAtomicEffect(
 
     case 'EVOLVE_POKEMON':
     case 'EVOLVE_SKIP_STAGE1': {
+      const fromDeck = eff.sourceZone === 'DECK' || eff.zone === 'DECK'
       const targetPoke =
         action.targetSlot === 'ACTIVE'
           ? activeBoard.activePokemon
           : typeof action.targetSlot === 'number'
             ? activeBoard.bench[action.targetSlot] ?? null
-            : null
+            : eff.target === 'SELF'
+              ? context?.sourcePoke ?? activeBoard.activePokemon
+              : null
+      if (fromDeck) {
+        markDeckSearched()
+        const maxEvos = eff.count || 1
+        const candidateTargets = targetPoke
+          ? [targetPoke]
+          : activeBoard.bench.slice(0, maxEvos)
+        for (const tp of candidateTargets) {
+          const allowSkip = prim === 'EVOLVE_SKIP_STAGE1'
+          const evoIdx = activeBoard.deck.findIndex(
+            (c) =>
+              c.category === 'POKEMON' &&
+              canPokemonEvolveInto(tp, c, state.turnNumber, allowSkip, true),
+          )
+          if (evoIdx !== -1) {
+            const evoCard = activeBoard.deck.splice(evoIdx, 1)[0]!
+            evolveInPlayPokemon(state, activeBoard, tp, evoCard, markDeckSearched)
+          }
+        }
+        fisherYatesShuffle(activeBoard.deck, rng)
+        break
+      }
+
       const wantedStage2Id = action.targetCardIds?.[0]
       const handIdx = activeBoard.hand.findIndex(
         (c) =>
@@ -4509,19 +4907,40 @@ function resolveAtomicEffect(
     }
 
     case 'PLACE_DAMAGE_COUNTERS': {
-      return placeDamageCountersEffect(state, activeBoard, passiveBoard, eff, action, 0)
+      return placeDamageCountersEffect(
+        state,
+        activeBoard,
+        passiveBoard,
+        eff,
+        action,
+        0,
+        Boolean(context?.deferKnockOuts),
+      )
     }
 
     case 'DEAL_DAMAGE_BENCH':
     case 'DAMAGE_BENCH': {
-      if (isBenchProtectedByPassive(state, passiveBoard)) break
+      const tUpper = (eff.target || '').toUpperCase()
       const dmg = Math.max(0, eff.value ?? eff.baseDamage ?? (eff.count || 1) * 10)
+      if (tUpper === 'OWN_BENCH_SINGLE' || tUpper === 'OWN_BENCH_ALL' || tUpper === 'OWN_ALL_POKEMON') {
+        for (let bIdx = activeBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+          const bPoke = activeBoard.bench[bIdx]!
+          if (bPoke.card.pokemonStats?.isTera || bPoke.preventDamageOrEffectsNextTurn) continue
+          bPoke.damage += dmg
+          if (!context?.deferKnockOuts && bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
+            handleKnockOut(state, passiveBoard, activeBoard, bIdx, false)
+          }
+          if (tUpper === 'OWN_BENCH_SINGLE') break
+        }
+        return false
+      }
+      if (isBenchProtectedByPassive(state, passiveBoard)) break
       let ko = false
       for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
         const bPoke = passiveBoard.bench[bIdx]!
         if (bPoke.card.pokemonStats?.isTera || bPoke.preventDamageOrEffectsNextTurn) continue
         bPoke.damage += dmg
-        if (bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
+        if (!context?.deferKnockOuts && bPoke.damage >= getPokemonMaxHp(bPoke, state)) {
           ko = true
           handleKnockOut(state, activeBoard, passiveBoard, bIdx)
         }
@@ -4541,7 +4960,7 @@ function resolveAtomicEffect(
         const moveAmt = Math.min(dmg, damagedSource.damage)
         damagedSource.damage -= moveAmt
         picked.poke.damage += moveAmt
-        if (picked.poke.damage >= getPokemonMaxHp(picked.poke, state)) {
+        if (!context?.deferKnockOuts && picked.poke.damage >= getPokemonMaxHp(picked.poke, state)) {
           handleKnockOut(state, activeBoard, passiveBoard, picked.slot)
           return true
         }
@@ -4671,11 +5090,16 @@ function resolveAtomicEffect(
 
     case 'KNOCK_OUT': {
       if (eff.target === 'SELF') {
+        const selfPoke = context?.sourcePoke || activeBoard.activePokemon
+        if (context?.deferKnockOuts && selfPoke) {
+          context.directKoTargets?.add(selfPoke)
+          return false
+        }
         resolveSelfKnockOut(
           state,
           activeBoard,
           passiveBoard,
-          context?.sourcePoke || activeBoard.activePokemon,
+          selfPoke,
         )
         return false
       }
@@ -4683,6 +5107,10 @@ function resolveAtomicEffect(
       const allowBench = eff.target !== 'OPPONENT_ACTIVE'
       const picked = pickBestOpponentPokeSlot(passiveBoard, 9999, allowActive, allowBench)
       if (picked) {
+        if (context?.deferKnockOuts) {
+          context.directKoTargets?.add(picked.poke)
+          return false
+        }
         handleKnockOut(state, activeBoard, passiveBoard, picked.slot)
         return true
       }
@@ -4695,7 +5123,7 @@ function resolveAtomicEffect(
         eff.target === 'PLAYER' || eff.target === 'SELF' ? activeBoard : passiveBoard
       const count = eff.count || 1
       for (let i = 0; i < count && targetBoard.deck.length > 0; i++) {
-        targetBoard.discard.push(targetBoard.deck.shift()!)
+        pushCardToDestinationZone(targetBoard, targetBoard.deck.shift()!, eff.destinationZone)
       }
       break
     }
@@ -4736,28 +5164,30 @@ function resolveAtomicEffect(
         } else if (typeof action.targetSlot === 'number') {
           activeBoard.bench.splice(action.targetSlot, 1)
         }
+        resolveBoardBenchShrinkIfNeeded(state)
       }
       break
     }
 
     case 'DEVOLVE_OPPONENT_POKEMON': {
-      const allOppPokes = [
-        ...(passiveBoard.activePokemon ? [passiveBoard.activePokemon] : []),
-        ...passiveBoard.bench,
-      ]
-      for (const oppPoke of allOppPokes) {
-        if (oppPoke.previousStages.length > 0) {
-          const topStage = oppPoke.card
-          const lowerStage = oppPoke.previousStages.pop()!
-          oppPoke.card = lowerStage
-          passiveBoard.hand.push(topStage)
-          if (oppPoke.damage >= getPokemonMaxHp(oppPoke, state)) {
-            const slot =
-              passiveBoard.activePokemon?.instanceId === oppPoke.instanceId ? 'ACTIVE' : 0
-            handleKnockOut(state, activeBoard, passiveBoard, slot)
-          }
+      const devolveOne = (oppPoke: InPlayPokemon, slot: 'ACTIVE' | number): void => {
+        if (oppPoke.previousStages.length === 0) return
+        const topStage = oppPoke.card
+        const lowerStage = oppPoke.previousStages.pop()!
+        oppPoke.card = lowerStage
+        clearPokemonStatusAndAttackEffects(oppPoke)
+        passiveBoard.hand.push(topStage)
+        if (!context?.deferKnockOuts && oppPoke.damage >= getPokemonMaxHp(oppPoke, state)) {
+          handleKnockOut(state, activeBoard, passiveBoard, slot)
         }
       }
+      if (passiveBoard.activePokemon) {
+        devolveOne(passiveBoard.activePokemon, 'ACTIVE')
+      }
+      for (let bIdx = passiveBoard.bench.length - 1; bIdx >= 0; bIdx--) {
+        devolveOne(passiveBoard.bench[bIdx]!, bIdx)
+      }
+      resolveBoardBenchShrinkIfNeeded(state)
       break
     }
 
@@ -4767,10 +5197,11 @@ function resolveAtomicEffect(
       if (rawVal <= 0) break
       if (eff.target === 'SELF' && context?.sourcePoke) {
         context.sourcePoke.damage += rawVal
-        if (context.sourcePoke.damage >= getPokemonMaxHp(context.sourcePoke, state)) {
-          const slot =
-            activeBoard.activePokemon?.instanceId === context.sourcePoke.instanceId ? 'ACTIVE' : 0
-          handleKnockOut(state, passiveBoard, activeBoard, slot)
+        if (!context?.deferKnockOuts && context.sourcePoke.damage >= getPokemonMaxHp(context.sourcePoke, state)) {
+          const slot = findSlotForPokemon(activeBoard, context.sourcePoke)
+          if (slot !== null) {
+            handleKnockOut(state, passiveBoard, activeBoard, slot, false)
+          }
         }
       } else if (action.type === 'PLAY_TRAINER') {
         const hasPairedModifyDealt = context?.trainerCard?.playableActions.some((a) =>
@@ -4817,8 +5248,7 @@ function selectBestBasicInDeckForBench(
 
   activeBoard.deck.forEach((c, idx) => {
     if (!matchesFilter(c)) return
-    const normName = normalizeCardNameForMatch(c.identity.nameFr)
-    if (normName.includes('lumineon')) return
+    if (getCardFastMeta(c).hasOnPlayFromHandTrigger) return
 
     const inPlayCount = allInPlay.filter((p) => p.card.cardId === c.cardId).length
     let score = c.strategicEvaluator.intrinsicBaseScore ?? 70
@@ -4930,11 +5360,149 @@ function discardEnergiesFromPlayForAttack(
   }
 }
 
+function promoteBestBenchPokemon(board: PlayerBoardState): void {
+  if (board.activePokemon || board.bench.length === 0) return
+  let bestBenchIdx = 0
+  let bestPromoteScore = -9999
+  board.bench.forEach((bPoke, bIdx) => {
+    const reqEn = getMainAttackEnergyRequirement(bPoke.card)
+    const readyToAttack = bPoke.attachedEnergies.length >= reqEn
+    const s =
+      (readyToAttack ? 120 : 0) +
+      (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 70) +
+      getRemainingHp(bPoke) * 0.25
+    if (s > bestPromoteScore) {
+      bestPromoteScore = s
+      bestBenchIdx = bIdx
+    }
+  })
+  board.activePokemon = board.bench.splice(bestBenchIdx, 1)[0]!
+}
+
+function applySimultaneousWinResolution(
+  state: MatchState,
+  pWonPrizes: boolean,
+  pWonNoPoke: boolean,
+  oWonPrizes: boolean,
+  oWonNoPoke: boolean,
+): void {
+  const pConds = (pWonPrizes ? 1 : 0) + (pWonNoPoke ? 1 : 0)
+  const oConds = (oWonPrizes ? 1 : 0) + (oWonNoPoke ? 1 : 0)
+  if (pConds === 0 && oConds === 0) return
+
+  if (pConds > oConds) {
+    state.winner = 'PLAYER'
+    state.winReason = pWonPrizes ? 'ALL_PRIZES_TAKEN' : 'NO_POKEMON_IN_PLAY'
+  } else if (oConds > pConds) {
+    state.winner = 'OPPONENT'
+    state.winReason = oWonPrizes ? 'ALL_PRIZES_TAKEN' : 'NO_POKEMON_IN_PLAY'
+  } else {
+    state.winner = 'DRAW'
+    state.winReason = pWonPrizes || oWonPrizes ? 'ALL_PRIZES_TAKEN' : 'NO_POKEMON_IN_PLAY'
+  }
+}
+
+/**
+ * Résout simultanément tous les K.O. en suspens sur les deux plateaux (Étape F d'attaque et fin de Contrôle Pokémon) :
+ * - Compare le nombre de conditions de victoire remplies par chaque joueur (2 conditions vs 1 condition, ou Mort Subite `DRAW`).
+ * - Réduit le Banc si le dernier Pokémon Téracristal a quitté le jeu sous Abîme Zéro.
+ */
+export function resolveSimultaneousKnockOuts(
+  state: MatchState,
+  options?: {
+    markOppKoForSide?: 'PLAYER' | 'OPPONENT' | 'BOTH' | 'NONE'
+    extraPrizes?: { player?: number; opponent?: number }
+    directKoTargets?: Set<InPlayPokemon>
+  },
+): { playerSufferedKo: boolean; opponentSufferedKo: boolean } {
+  const collectBoardKos = (board: PlayerBoardState): InPlayPokemon[] => {
+    const koed: InPlayPokemon[] = []
+    if (
+      board.activePokemon &&
+      (board.activePokemon.damage >= getPokemonMaxHp(board.activePokemon, state) ||
+        options?.directKoTargets?.has(board.activePokemon))
+    ) {
+      koed.push(board.activePokemon)
+      board.activePokemon = null
+    }
+    for (let i = board.bench.length - 1; i >= 0; i--) {
+      const bPoke = board.bench[i]!
+      if (bPoke.damage >= getPokemonMaxHp(bPoke, state) || options?.directKoTargets?.has(bPoke)) {
+        koed.push(bPoke)
+        board.bench.splice(i, 1)
+      }
+    }
+    for (const p of koed) {
+      board.discard.push(...p.previousStages, p.card, ...p.attachedEnergies, ...p.attachedTools)
+    }
+    return koed
+  }
+
+  const pKoed = collectBoardKos(state.player)
+  const oKoed = collectBoardKos(state.opponent)
+
+  if (pKoed.length === 0 && oKoed.length === 0) {
+    return { playerSufferedKo: false, opponentSufferedKo: false }
+  }
+
+  const markMode = options?.markOppKoForSide ?? 'NONE'
+  if (pKoed.length > 0 && (markMode === 'PLAYER' || markMode === 'BOTH')) {
+    state.player.koSufferedLastOpponentTurn = true
+  }
+  if (oKoed.length > 0 && (markMode === 'OPPONENT' || markMode === 'BOTH')) {
+    state.opponent.koSufferedLastOpponentTurn = true
+  }
+
+  let playerPrizeGain = oKoed.reduce(
+    (sum, p) => sum + (p.card.pokemonStats?.prizeCardsGiven ?? 1),
+    0,
+  )
+  let oppPrizeGain = pKoed.reduce(
+    (sum, p) => sum + (p.card.pokemonStats?.prizeCardsGiven ?? 1),
+    0,
+  )
+
+  if (oKoed.length > 0 && options?.extraPrizes?.player) {
+    playerPrizeGain += options.extraPrizes.player
+  }
+  if (pKoed.length > 0 && options?.extraPrizes?.opponent) {
+    oppPrizeGain += options.extraPrizes.opponent
+  }
+
+  for (let i = 0; i < playerPrizeGain && state.player.prizes.length > 0; i++) {
+    state.player.hand.push(state.player.prizes.shift()!)
+  }
+  for (let i = 0; i < oppPrizeGain && state.opponent.prizes.length > 0; i++) {
+    state.opponent.hand.push(state.opponent.prizes.shift()!)
+  }
+
+  const pWonPrizes = playerPrizeGain > 0 && state.player.prizes.length === 0
+  const oWonPrizes = oppPrizeGain > 0 && state.opponent.prizes.length === 0
+  const pWonNoPoke = oKoed.length > 0 && !state.opponent.activePokemon && state.opponent.bench.length === 0
+  const oWonNoPoke = pKoed.length > 0 && !state.player.activePokemon && state.player.bench.length === 0
+
+  applySimultaneousWinResolution(state, pWonPrizes, pWonNoPoke, oWonPrizes, oWonNoPoke)
+
+  if (pKoed.some((p) => p.card.pokemonStats?.isTera) || oKoed.some((p) => p.card.pokemonStats?.isTera)) {
+    resolveBoardBenchShrinkIfNeeded(state)
+  }
+
+  if (state.winner === null) {
+    promoteBestBenchPokemon(state.player)
+    promoteBestBenchPokemon(state.opponent)
+  }
+
+  return {
+    playerSufferedKo: pKoed.length > 0,
+    opponentSufferedKo: oKoed.length > 0,
+  }
+}
+
 /**
  * Résout la mise K.O. d'un Pokémon (`handleKnockOut`) :
  * - Déplace le Pokémon, ses pré-évolutions, ses énergies et ses outils vers `discard`
- * - Fait piocher `prizeCardsGiven` (1 ou 2) cartes Récompenses à l'attaquant
- * - Positionne `koSufferedLastOpponentTurn = true` sur le défenseur (débloque *Attrape-Riposte* / *Tampon Injuste* / *Favianos-ex*)
+ * - Fait piocher `prizeCardsGiven` (1, 2 ou 3) cartes Récompenses à l'attaquant
+ * - Positionne `koSufferedLastOpponentTurn = true` sur le défenseur si `markOppTurnKo = true`
  * - Promeut le meilleur Pokémon du Banc adverse si le Poste Actif est vide
  * - Vérifie immédiatement les conditions de victoire (`ALL_PRIZES_TAKEN` ou `NO_POKEMON_IN_PLAY`).
  */
@@ -4943,6 +5511,7 @@ export function handleKnockOut(
   attackerBoard: PlayerBoardState,
   defenderBoard: PlayerBoardState,
   targetSlot: 'ACTIVE' | number,
+  markOppTurnKo = true,
 ): void {
   const koedPoke =
     targetSlot === 'ACTIVE'
@@ -4967,7 +5536,13 @@ export function handleKnockOut(
     defenderBoard.bench.splice(targetSlot, 1)
   }
 
-  defenderBoard.koSufferedLastOpponentTurn = true
+  if (markOppTurnKo) {
+    defenderBoard.koSufferedLastOpponentTurn = true
+  }
+
+  if (koedPoke.card.pokemonStats?.isTera) {
+    resolveBoardBenchShrinkIfNeeded(state)
+  }
 
   // Prise des cartes Récompenses par l'attaquant
   for (let i = 0; i < prizesToTake && attackerBoard.prizes.length > 0; i++) {
@@ -4990,34 +5565,14 @@ export function handleKnockOut(
       state.winReason = 'NO_POKEMON_IN_PLAY'
       return
     }
-    let bestBenchIdx = 0
-    let bestPromoteScore = -9999
-    defenderBoard.bench.forEach((bPoke, bIdx) => {
-      const reqEn = getMainAttackEnergyRequirement(bPoke.card)
-      const readyToAttack = bPoke.attachedEnergies.length >= reqEn
-      const s =
-        (readyToAttack ? 120 : 0) +
-        (bPoke.card.strategicEvaluator.intrinsicBaseScore ?? 70) +
-        getRemainingHp(bPoke) * 0.25
-      if (s > bestPromoteScore) {
-        bestPromoteScore = s
-        bestBenchIdx = bIdx
-      }
-    })
-    defenderBoard.activePokemon = defenderBoard.bench.splice(bestBenchIdx, 1)[0]!
+    promoteBestBenchPokemon(defenderBoard)
   }
 }
 
 /**
- * Termine le tour courant et passe au joueur suivant ou conclut au plafond `maxTurns`.
- */
-/**
- * Exécute le Checkup entre deux tours (Between-Turns Checkup) :
- * - Poison (+10 dégâts)
- * - Brûlure (+20 dégâts + flip de guérison)
- * - Sommeil (flip de réveil)
- * - Paralysie (fin au tour du joueur affecté)
- * - Vérification des K.O.
+ * Exécute le Checkup officiel entre deux tours (Pokémon Checkup, Livret p. 15–16) :
+ * - Ordre strict : 1) Poison (+10) -> 2) Brûlure (+20 + flip) -> 3) Sommeil (flip) -> 4) Paralysie (fin après le tour du joueur affecté)
+ * - Résolution simultanée des K.O. une fois les vérifications terminées sur les deux plateaux.
  */
 export function runBetweenTurnsCheckup(state: MatchState): void {
   if (state.winner !== null) return
@@ -5027,45 +5582,56 @@ export function runBetweenTurnsCheckup(state: MatchState): void {
 
   for (let boardIdx = 0; boardIdx < 2; boardIdx++) {
     const board = boards[boardIdx]!
-    const oppBoard = boards[1 - boardIdx]!
     const active = board.activePokemon
     if (!active) continue
 
     const conds = active.specialConditions || []
+    if (conds.length === 0) continue
+
+    const hasPoison = conds.includes('POISONED')
+    const hasBurn = conds.includes('BURNED')
+    const hasAsleep = conds.includes('ASLEEP')
+    const hasParalyzed = conds.includes('PARALYZED')
+    const hasConfused = conds.includes('CONFUSED')
+
     const remainingConds: SpecialConditionType[] = []
 
-    for (const cond of conds) {
-      if (cond === 'POISONED') {
-        active.damage += 10
-        remainingConds.push('POISONED')
-      } else if (cond === 'BURNED') {
-        active.damage += 20
-        const flip = rng.nextFloat() >= 0.5
-        if (!flip) {
-          remainingConds.push('BURNED')
-        }
-      } else if (cond === 'ASLEEP') {
-        const flip = rng.nextFloat() >= 0.5
-        if (!flip) {
-          remainingConds.push('ASLEEP')
-        }
-      } else if (cond === 'PARALYZED') {
-        if (state.activePlayerIndex !== boardIdx) {
-          remainingConds.push('PARALYZED')
-        }
-      } else if (cond === 'CONFUSED') {
-        remainingConds.push('CONFUSED')
+    // 1) Poisoned
+    if (hasPoison) {
+      active.damage += 10
+      remainingConds.push('POISONED')
+    }
+    // 2) Burned (+20 dégâts puis lancer de pièce pour guérir)
+    if (hasBurn) {
+      active.damage += 20
+      const cured = rng.nextFloat() >= 0.5
+      if (!cured) {
+        remainingConds.push('BURNED')
       }
+    }
+    // 3) Asleep (lancer de pièce pour se réveiller)
+    if (hasAsleep) {
+      const wokeUp = rng.nextFloat() >= 0.5
+      if (!wokeUp) {
+        remainingConds.push('ASLEEP')
+      }
+    }
+    // 4) Paralyzed (guéri à la fin du prochain tour du propriétaire affecté)
+    if (hasParalyzed && state.activePlayerIndex !== boardIdx) {
+      remainingConds.push('PARALYZED')
+    }
+    // Confused persiste hors retraite / évolution
+    if (hasConfused) {
+      remainingConds.push('CONFUSED')
     }
 
     active.specialConditions = remainingConds
-
-    if (active.damage >= getPokemonMaxHp(active)) {
-      handleKnockOut(state, oppBoard, board, 'ACTIVE')
-    }
   }
 
   state.rngState = rng.getState()
+
+  // Après que les deux joueurs ont résolu le Checkup, tout Pokémon sans PV restants est mis K.O. simultanément
+  resolveSimultaneousKnockOuts(state, { markOppKoForSide: 'NONE' })
 }
 
 function clearExpiredTurnFlagsOnPokemon(poke: InPlayPokemon, turnNumber: number, isEndingOwnerTurn: boolean): void {

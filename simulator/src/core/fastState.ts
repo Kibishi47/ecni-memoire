@@ -141,6 +141,7 @@ export function computeNumericBoardHash(b: PlayerBoardState): { h1: number; h2: 
     ((b.itemLockActive ? 1 : 0) << 4) |
     ((b.extraTurnGranted ? 1 : 0) << 5) |
     ((b.abilityLockActive ? 1 : 0) << 6) |
+    ((b.stadiumPlayedThisTurn ? 1 : 0) << 7) |
     (((b.maxBenchSlotsOverride || 0) & 0xf) << 8)
 
   let h1 = mix32(activeHash, 0x10203040)
@@ -149,13 +150,13 @@ export function computeNumericBoardHash(b: PlayerBoardState): { h1: number; h2: 
   h1 = mix32(abilSum, h1)
   h1 = mix32(flags, h1)
   h1 = mix32((b.deck.length << 16) | (b.prizes.length << 8) | (b.discard.length & 0xff), h1)
-  h1 = mix32(b.turnDamageBoost || 0, h1)
+  h1 = mix32((b.turnDamageBoost || 0) ^ (((b.lostZone?.length || 0) & 0xff) << 16), h1)
 
   let h2 = mix32(activeHash, 0xa5a5a5a5)
   h2 = mix32(benchXor, h2)
   h2 = mix32(handXor, h2)
   h2 = mix32(abilXor, h2)
-  h2 = mix32(b.bench.length | (b.hand.length << 8), h2)
+  h2 = mix32(b.bench.length | (b.hand.length << 8) | (((b.lostZone?.length || 0) & 0xff) << 16), h2)
   h2 = mix32(flags ^ 0x5a5a, h2)
 
   return { h1: h1 >>> 0, h2: h2 >>> 0 }
@@ -230,6 +231,7 @@ function encodePlayerBoardToSlice(b: PlayerBoardState, buf: Int32Array, offset: 
     ((b.itemLockActive ? 1 : 0) << 4) |
     ((b.extraTurnGranted ? 1 : 0) << 5) |
     ((b.abilityLockActive ? 1 : 0) << 6) |
+    ((b.stadiumPlayedThisTurn ? 1 : 0) << 7) |
     (((b.maxBenchSlotsOverride || 0) & 0xf) << 8)
   buf[offset + 6] = b.turnDamageBoost || 0
 
