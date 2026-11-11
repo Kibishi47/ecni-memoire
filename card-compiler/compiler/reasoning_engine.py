@@ -196,22 +196,49 @@ def build_reasoning_prompt(
 
 
 def _split_thinking_and_explanation(raw_text: str) -> tuple[Optional[str], str]:
-    """Sépare le bloc `<think>...</think>` éventuel de l'explication finale."""
+    """Sépare les balises de réflexion (`<|channel>thought...<channel|>`, `<think>...</think>`, `<thought>...</thought>`) de l'explication finale."""
     if not raw_text:
         return None, ""
-    m = re.search(r"<think>(.*?)</think>", raw_text, flags=re.DOTALL | re.IGNORECASE)
-    if m:
-        thinking = m.group(1).strip()
-        explanation = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
-        if not explanation:
-            explanation = thinking
-        return thinking, explanation
 
-    if "</think>" in raw_text:
-        parts = raw_text.split("</think>", 1)
-        thinking = parts[0].replace("<think>", "").strip()
+    # 1. Canal Gemma 4 : <|channel>thought ... <channel|> (ou fermeture orpheline <channel|> si ouvert dans le prompt)
+    m_gemma = re.search(r"<\|channel>\s*thought\b(.*?)<channel\|>", raw_text, flags=re.DOTALL | re.IGNORECASE)
+    if m_gemma:
+        thinking = m_gemma.group(1).strip()
+        explanation = re.sub(
+            r"<\|channel>\s*thought\b.*?<channel\|>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+        return thinking or None, explanation or thinking
+
+    if "<channel|>" in raw_text:
+        parts = raw_text.split("<channel|>", 1)
+        thinking = re.sub(r"^.*?<\|channel>\s*thought\b", "", parts[0], flags=re.DOTALL | re.IGNORECASE).strip()
         explanation = parts[1].strip()
-        return thinking, explanation or thinking
+        return thinking or None, explanation or thinking
+
+    if re.search(r"<\|channel>\s*thought\b", raw_text, flags=re.IGNORECASE):
+        cleaned = re.sub(r"^.*?<\|channel>\s*thought\b", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+        return cleaned or None, cleaned
+
+    # 2. Balises standard <think>...</think> / <thought>...</thought>
+    for open_tag, close_tag in (
+        ("<think>", "</think>"),
+        ("<thought>", "</thought>"),
+        ("<|thought|>", "</|thought|>"),
+    ):
+        pattern = re.escape(open_tag) + r"(.*?)" + re.escape(close_tag)
+        m = re.search(pattern, raw_text, flags=re.DOTALL | re.IGNORECASE)
+        if m:
+            thinking = m.group(1).strip()
+            explanation = re.sub(pattern, "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+            if not explanation:
+                explanation = thinking
+            return thinking or None, explanation
+
+        if close_tag in raw_text:
+            parts = raw_text.split(close_tag, 1)
+            thinking = parts[0].replace(open_tag, "").strip()
+            explanation = parts[1].strip()
+            return thinking or None, explanation or thinking
 
     return None, raw_text.strip()
 
@@ -225,8 +252,9 @@ class ReasoningEngine:
         intensity: Optional[Union[IntensityMode, str]] = None,
         backend: Optional[str] = None,
         hf_token: Optional[str] = None,
-        max_tokens: int = 800,
+        max_tokens: int = 2048,
         temperature: float = 0.2,
+        enable_thinking: bool = True,
     ) -> None:
         load_env_file()
         self.intensity = normalize_intensity_mode(intensity)
@@ -244,6 +272,7 @@ class ReasoningEngine:
         self.hf_token = hf_token
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.enable_thinking = enable_thinking
 
         self._model: Any = None
         self._tokenizer: Any = None
@@ -265,7 +294,7 @@ class ReasoningEngine:
                     local_snap = snapshot_download(self.repo_id, local_files_only=True)
                 except Exception:
                     local_snap = snapshot_download(
-                        "mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit",
+                        "mlx-community/gemma-4-26b-a4b-4bit",
                         local_files_only=True,
                     )
                 self._model, self._tokenizer = mlx_lm.load(local_snap)
@@ -354,7 +383,17 @@ class ReasoningEngine:
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
+                    enable_thinking=self.enable_thinking,
                 )
+            except TypeError:
+                try:
+                    formatted_prompt = self._tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                except Exception:
+                    formatted_prompt = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
             except Exception:
                 formatted_prompt = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
 
@@ -379,12 +418,21 @@ class ReasoningEngine:
                         on_token(token_count, live_tps)
                         last_ui_update = now
         else:
-            stream = self._llama_instance.create_chat_completion(
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=True,
-            )
+            try:
+                stream = self._llama_instance.create_chat_completion(
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    stream=True,
+                    chat_template_kwargs={"enable_thinking": self.enable_thinking},
+                )
+            except TypeError:
+                stream = self._llama_instance.create_chat_completion(
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    stream=True,
+                )
             for chunk in stream:
                 choices = chunk.get("choices", [])
                 if not choices:

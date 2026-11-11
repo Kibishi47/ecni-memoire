@@ -726,8 +726,11 @@ def _execute_run_pipeline(
     elif effective_backend == "mlx":
         engine_preview = MLXCardCompiler(
             model=model,
+            intensity=eff_intensity,
+            phase=eff_phase if eff_pipeline == PipelineMode.two_pass else None,
+            pipeline_mode=eff_pipeline,
             hf_token=hf_token,
-            disable_thinking=disable_thinking,
+            disable_thinking=True if (eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.code) else disable_thinking,
             thinking=thinking,
         )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple MLX Native (CoT)[/bold cyan]"
@@ -736,7 +739,13 @@ def _execute_run_pipeline(
             if engine_preview.hf_token
             else "[yellow]Non renseigné (anonyme)[/yellow]"
         )
-        if engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
+        if eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.all:
+            thinking_display = "[green]Passe 1 : Activé (enable_thinking=True)[/green] | [yellow]Passe 2 : Désactivé (enable_thinking=False)[/yellow]"
+        elif eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.reason:
+            thinking_display = "[green]Activé pour Passe 1 (enable_thinking=True)[/green]"
+        elif eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.code:
+            thinking_display = "[yellow]Désactivé pour Passe 2 (enable_thinking=False)[/yellow]"
+        elif engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
             thinking_display = "[yellow]Désactivé (null / --no-think)[/yellow]"
         elif getattr(engine_preview, "thinking", None) is not None:
             thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
@@ -1572,7 +1581,7 @@ def reason_command(
         "--intensity",
         "-it",
         envvar=["INTENSITY_MODE"],
-        help="Niveau d'intensité du modèle de raisonnement : 'soft' (défaut, 14B 4-bit) ou 'intense' (14B 8-bit).",
+        help="Niveau d'intensité du modèle de raisonnement : 'soft' ou 'intense'.",
     ),
     local_backend: Optional[str] = typer.Option(
         None,
@@ -1647,7 +1656,7 @@ def code_command(
         "--intensity",
         "-it",
         envvar=["INTENSITY_MODE"],
-        help="Niveau d'intensité du modèle de coding : 'soft' (défaut, 7B 8-bit) ou 'intense' (14B 8-bit).",
+        help="Niveau d'intensité du modèle de coding : 'soft' ou 'intense'.",
     ),
     local_backend: Optional[str] = typer.Option(
         None,
