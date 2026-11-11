@@ -9,16 +9,16 @@ Ce module implémente :
 
 from __future__ import annotations
 
-import gc
 import json
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from pydantic import ValidationError
 
 from compiler.deterministic_builder import (
+    DeterministicCardSkeleton,
     build_deterministic_skeleton,
     build_fallback_llm_payload,
     merge_llm_payload_into_skeleton,
@@ -30,11 +30,18 @@ from compiler.llm_engine import (
     build_user_prompt,
     extract_json_payload,
 )
+from compiler.mlx_utils import (
+    build_mlx_sampler,
+    clear_mlx_memory_cache,
+    encode_prompt_tokens,
+    resolve_mlx_batch_size,
+    run_mlx_continuous_batch,
+)
 from compiler.models_config import (
     IntensityMode,
     PipelineMode,
     PipelinePhase,
-     resolve_model_for_configuration,
+    resolve_model_for_configuration,
 )
 from compiler.schemas import (
     CompilationMetadata,
@@ -191,16 +198,14 @@ class MLXCardCompiler:
         parts.append("<|im_start|>assistant\n")
         return "\n".join(parts)
 
-    def compile_card(
+    def _prepare_card_coding_context(
         self,
         bundle: FetchedCardBundle,
-        max_retries: int = 2,
-        on_token: Optional[Callable[[int, float], None]] = None,
         reasoning_text: Optional[str] = None,
-    ) -> EngineCardModel:
-        """Compile une carte via MLX en décodant `LLMCompiledPayload` et en fusionnant avec `DeterministicCardSkeleton`."""
+    ) -> Tuple[Optional[DeterministicCardSkeleton], Optional[List[Dict[str, str]]], Optional[EngineCardModel]]:
+        """Construit le squelette déterministe et retourne soit une carte statique, soit le prompt de codage."""
         if is_basic_energy(bundle):
-            return build_basic_energy_model(bundle)
+            return None, None, build_basic_energy_model(bundle)
 
         skeleton = build_deterministic_skeleton(bundle)
         if not skeleton.slots_for_llm:
@@ -213,12 +218,7 @@ class MLXCardCompiler:
                 completionTokens=0,
                 tokensPerSecond=0.0,
             )
-            return merge_llm_payload_into_skeleton(skeleton, fallback_payload, metadata)
-
-        self.load_model_in_memory()
-
-        import mlx_lm
-        from mlx_lm.sample_utils import make_sampler
+            return skeleton, None, merge_llm_payload_into_skeleton(skeleton, fallback_payload, metadata)
 
         if reasoning_text:
             active_sys_prompt = CODING_SYSTEM_PROMPT
@@ -231,6 +231,28 @@ class MLXCardCompiler:
             {"role": "system", "content": active_sys_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        return skeleton, messages, None
+
+    def compile_card(
+        self,
+        bundle: FetchedCardBundle,
+        max_retries: int = 2,
+        on_token: Optional[Callable[[int, float], None]] = None,
+        reasoning_text: Optional[str] = None,
+    ) -> EngineCardModel:
+        """Compile une carte via MLX en décodant `LLMCompiledPayload` et en fusionnant avec `DeterministicCardSkeleton`."""
+        skeleton, messages, static_card = self._prepare_card_coding_context(
+            bundle,
+            reasoning_text=reasoning_text,
+        )
+        if static_card is not None:
+            return static_card
+        assert skeleton is not None and messages is not None
+
+        self.load_model_in_memory()
+
+        import mlx_lm
+        from mlx_lm.sample_utils import make_sampler
 
         t_start = time.perf_counter()
         last_error: Optional[Exception] = None
@@ -336,6 +358,132 @@ class MLXCardCompiler:
         """Compile une carte en s'appuyant sur l'analyse de raisonnement préalable (Passe 2)."""
         return self.compile_card(bundle, reasoning_text=reasoning_text, **kwargs)
 
+    def compile_cards_batch(
+        self,
+        items: Sequence[Tuple[FetchedCardBundle, Optional[str]]],
+        batch_size: Optional[int] = None,
+        max_retries: int = 2,
+        on_card_done: Optional[Callable[[EngineCardModel], None]] = None,
+    ) -> Tuple[List[EngineCardModel], Dict[str, Any]]:
+        """Compile un lot de cartes en continu (batching MLX) avec réessai individuel en cas d'erreur JSON."""
+        if not items:
+            return [], {"batch_tps": 0.0, "generation_tokens": 0, "wall_seconds": 0.0, "peak_memory_gb": 0.0}
+
+        eff_batch = resolve_mlx_batch_size(batch_size)
+        ordered_models: List[Optional[EngineCardModel]] = [None] * len(items)
+        pending_llm: List[Tuple[int, FetchedCardBundle, Optional[str], DeterministicCardSkeleton, List[Dict[str, str]]]] = []
+
+        for idx, (bundle, reason_txt) in enumerate(items):
+            sk, messages, static_card = self._prepare_card_coding_context(bundle, reasoning_text=reason_txt)
+            if static_card is not None:
+                ordered_models[idx] = static_card
+                if on_card_done is not None:
+                    on_card_done(static_card)
+            elif sk is not None and messages is not None:
+                pending_llm.append((idx, bundle, reason_txt, sk, messages))
+
+        if not pending_llm:
+            return [m for m in ordered_models if m is not None], {
+                "batch_tps": 0.0,
+                "generation_tokens": 0,
+                "wall_seconds": 0.0,
+                "peak_memory_gb": 0.0,
+            }
+
+        if eff_batch <= 1 or len(pending_llm) <= 1:
+            t_seq0 = time.perf_counter()
+            total_toks = 0
+            for idx, bundle, reason_txt, _, _ in pending_llm:
+                card = self.compile_card(bundle, max_retries=max_retries, reasoning_text=reason_txt)
+                ordered_models[idx] = card
+                if card.compilationMetadata and card.compilationMetadata.completionTokens:
+                    total_toks += int(card.compilationMetadata.completionTokens)
+                if on_card_done is not None:
+                    on_card_done(card)
+            wall_s = max(0.001, time.perf_counter() - t_seq0)
+            return [m for m in ordered_models if m is not None], {
+                "batch_tps": round(total_toks / wall_s, 2) if total_toks > 0 else 0.0,
+                "generation_tokens": total_toks,
+                "wall_seconds": round(wall_s, 3),
+                "peak_memory_gb": 0.0,
+            }
+
+        self.load_model_in_memory()
+        sampler = build_mlx_sampler(temperature=self.temperature)
+        chunk_size = max(eff_batch * 8, 32)
+        total_toks = 0
+        total_wall = 0.0
+        total_gen_time = 0.0
+        peak_mem = 0.0
+
+        for start in range(0, len(pending_llm), chunk_size):
+            chunk = pending_llm[start : start + chunk_size]
+            prompts_tokens = [
+                encode_prompt_tokens(self._tokenizer, self._build_formatted_prompt(messages))
+                for _, _, _, _, messages in chunk
+            ]
+            failed_indices: List[int] = []
+
+            def handle_item(item_res: Any, local_chunk: List[Tuple[int, FetchedCardBundle, Optional[str], DeterministicCardSkeleton, List[Dict[str, str]]]] = chunk) -> None:
+                orig_idx, target_b, _, sk, _ = local_chunk[item_res.index]
+                try:
+                    json_str = extract_json_payload(item_res.text)
+                    raw_dict = json.loads(json_str)
+                    compiled_payload = LLMCompiledPayload.model_validate(raw_dict)
+                except (ValueError, json.JSONDecodeError, ValidationError):
+                    failed_indices.append(item_res.index)
+                    return
+
+                metadata = CompilationMetadata(
+                    modelRepoId=self.repo_id,
+                    modelFilename=self.filename,
+                    compilationTimeSeconds=round(item_res.duration_seconds, 3),
+                    compiledAtIso=datetime.now(timezone.utc).isoformat(),
+                    completionTokens=item_res.completion_tokens,
+                    tokensPerSecond=item_res.tokens_per_second,
+                    generationTimeSeconds=round(item_res.generation_duration_seconds, 3),
+                    timeToFirstTokenSeconds=round(item_res.time_to_first_token_seconds, 3),
+                )
+                card = merge_llm_payload_into_skeleton(sk, compiled_payload, metadata)
+                ordered_models[orig_idx] = card
+                if on_card_done is not None:
+                    on_card_done(card)
+
+            _, chunk_stats = run_mlx_continuous_batch(
+                model=self._model,
+                tokenizer=self._tokenizer,
+                prompts_tokens=prompts_tokens,
+                max_tokens=self.max_tokens,
+                sampler=sampler,
+                batch_size=eff_batch,
+                on_item_complete=handle_item,
+            )
+            total_toks += chunk_stats.generation_tokens
+            total_wall += chunk_stats.wall_seconds
+            if chunk_stats.generation_tps > 0 and chunk_stats.generation_tokens > 0:
+                total_gen_time += chunk_stats.generation_tokens / chunk_stats.generation_tps
+            else:
+                total_gen_time += chunk_stats.wall_seconds
+            peak_mem = max(peak_mem, chunk_stats.peak_memory_gb)
+
+            # Réessai individuel séquentiel pour toute carte dont le JSON du lot a échoué à la validation
+            for local_i in failed_indices:
+                orig_idx, target_b, reason_txt, _, _ = chunk[local_i]
+                card = self.compile_card(target_b, max_retries=max_retries, reasoning_text=reason_txt)
+                ordered_models[orig_idx] = card
+                if on_card_done is not None:
+                    on_card_done(card)
+
+            clear_mlx_memory_cache()
+
+        agg_tps = round(total_toks / total_gen_time, 2) if total_gen_time > 0 and total_toks > 0 else 0.0
+        return [m for m in ordered_models if m is not None], {
+            "batch_tps": agg_tps,
+            "generation_tokens": total_toks,
+            "wall_seconds": round(total_wall, 3),
+            "peak_memory_gb": peak_mem,
+        }
+
     def close(self) -> None:
         """Libère strictement le cache mémoire Metal MLX et décharge le modèle."""
         if self._model is not None:
@@ -344,13 +492,4 @@ class MLXCardCompiler:
         if self._tokenizer is not None:
             del self._tokenizer
             self._tokenizer = None
-        gc.collect()
-        try:
-            import mlx.core as mx
-
-            if hasattr(mx, "clear_cache"):
-                mx.clear_cache()
-            elif hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                mx.metal.clear_cache()
-        except Exception:
-            pass
+        clear_mlx_memory_cache()

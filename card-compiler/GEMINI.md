@@ -27,11 +27,15 @@ Le compilateur sépare strictement ce qui relève de la donnée structurée et c
 
 Configuration centralisée dans [compiler/models_config.py](compiler/models_config.py) :
 
-- **Backend Apple MLX par défaut** : **`mlx-community/gemma-4-26b-a4b-it-4bit`** (utilisé en Passe 1 et Passe 2, avec `max_tokens=2048` par défaut).
+- **Backend Apple MLX par défaut** : **`mlx-community/gemma-4-26b-a4b-it-4bit`** (utilisé en Passe 1 et Passe 2 ; Passe 1 `max_tokens=8192` par défaut, configurable via `--max-tokens` / `REASONING_MAX_TOKENS`, Passe 2 `max_tokens=2048` à `temperature=0.1`).
 - **Passe 1 — Raisonnement de Juge ([compiler/reasoning_engine.py](compiler/reasoning_engine.py))** :
-  - `enable_thinking=True` (capture le canal `<|channel>thought...<channel|>` dans `rawThinkingProcess` et extrait `reasoningText`).
+  - `enable_thinking=True` **toujours activé et non borné** (même sur les cartes simples), avec sampling officiel Google Gemma 4 (`temperature=1.0`, `top_p=0.95`, `top_k=64`).
+  - Capture le canal `<|channel>thought...<channel|>` dans `rawThinkingProcess`, extrait `reasoningText`, et détecte toute troncature (`finishReason`, `wasTruncated`).
   - Reçoit le socle statique des règles officielles ([`CORE_RULES_SYSTEM_BLOCK`](compiler/rules_knowledge.py)) dans `REASONING_SYSTEM_PROMPT`, plus les micro-règles dynamiques pertinentes pour la carte courante via [`format_relevant_rules_block`](compiler/rules_knowledge.py).
   - Sauvegarde les analyses dans `data/reasoning_texts/{card_id}.json`.
+- **Déduplication & Batching continu MLX ([compiler/mlx_utils.py](compiler/mlx_utils.py), [compiler/two_pass_pipeline.py](compiler/two_pass_pipeline.py))** :
+  - `compute_card_rule_signature` génère une empreinte canonique SHA-256 des règles/statistiques : toute réédition ou variante d'illustration identique réutilise instantanément les fiches Passe 1 & Passe 2 (`dedupSourceCardId`, clonage sans perte avec conservation du `cardId` et de l'`identity` propres à chaque carte).
+  - `run_mlx_continuous_batch` exécute `BatchGenerator` (`mlx-lm`) en continu (`MLX_BATCH_SIZE` / `--batch-size`, défaut `4`) pour la Passe 1 et la Passe 2 (avec réessai séquentiel ciblé en Passe 2 en cas d'erreur JSON).
 - **Libération stricte mémoire ([compiler/two_pass_pipeline.py](compiler/two_pass_pipeline.py))** :
   - Déchargement complet du modèle Passe 1 (`close()`, `gc.collect()`, vidage cache GPU/MLX) avant de charger le modèle Passe 2.
 - **Passe 2 — Codage JSON ([compiler/mlx_engine.py](compiler/mlx_engine.py), [compiler/llm_engine.py](compiler/llm_engine.py))** :
@@ -44,14 +48,15 @@ Configuration centralisée dans [compiler/models_config.py](compiler/models_conf
 | Fichier | Rôle principal |
 | :--- | :--- |
 | `schemas.py` | Enums fermés (`EffectPrimitive` ×29, `ActionType` ×8, `EffectTarget`, `ZoneType`, `CoinFlipMode`, `ScalingOperator`, `ScalingMetric`, `SpecialCondition`, `AIRole`) et modèles Pydantic V2 (`EngineCardModel`, `LLMCompiledPayload`). **Aucun fallback silencieux vers `DRAW_CARDS`** (toute primitive inconnue lève `ValueError`). |
-| `deterministic_builder.py` | Squelette déterministe, extracteurs FR/EN, factorisation talents/attaques, normalisation `preconditions` / `deadCardCondition`, garde-fous `strategicEvaluator`. |
+| `deterministic_builder.py` | Squelette déterministe, signature canonique de déduplication (`compute_card_rule_signature`), extracteurs FR/EN, factorisation talents/attaques, normalisation `preconditions` / `deadCardCondition`, garde-fous `strategicEvaluator`. |
 | `rules_knowledge.py` | Socle officiel distillé (*Pokémon TCG Rules Scarlet & Violet*) et sélecteur contextuel dynamique des micro-règles par carte. |
 | `post_processor.py` | Post-traitement unitaire (`sanitize_and_enrich_card`) et réparation déterministe de masse (`repair_compiled_corpus`) générant `data/cards_to_recompile_llm.txt`. |
-| `reasoning_engine.py` | Moteur Passe 1 (`ReasoningEngine`, prompt juge, séparation thinking/texte). |
+| `reasoning_engine.py` | Moteur Passe 1 (`ReasoningEngine`, prompt juge, sampling officiel Gemma 4, détection troncature, batching, séparation thinking/texte). |
+| `mlx_utils.py` | Utilitaires MLX partagés : tokenisation sécurisée sans double `<bos>`, sampler officiel, vidage mémoire Metal et boucle de batching continu `BatchGenerator`. |
 | `llm_engine.py` | Prompt Passe 2 (`CODING_SYSTEM_PROMPT`), extraction JSON, moteur `llama-cpp-python` GGUF + GBNF. |
-| `mlx_engine.py` | Moteur natif Apple MLX (`mlx-lm`) avec streaming et contrôle explicite `enable_thinking`. |
+| `mlx_engine.py` | Moteur natif Apple MLX (`mlx-lm`) avec streaming, batching continu (`compile_cards_batch`) et contrôle explicite `enable_thinking`. |
 | `lm_studio_compiler.py` | Client HTTP REST pour inférence via LM Studio. |
-| `two_pass_pipeline.py` | Orchestration Passe 1 → déchargement RAM → Passe 2. |
+| `two_pass_pipeline.py` | Orchestration Passe 1 → déchargement RAM → Passe 2 avec déduplication automatique cache & intra-lot. |
 | `tcgdex_fetcher.py` | Téléchargement, cache brut `raw_tcgdex/` et index Standard TCGdex. |
 | `static_cards.py` | Construction instantanée des Énergies de Base. |
 | `models_config.py` | Résolution des modèles par mode (`single` / `two_pass`), intensité (`soft` / `intense`) et backend (`mlx` / `llama_cpp`). |
