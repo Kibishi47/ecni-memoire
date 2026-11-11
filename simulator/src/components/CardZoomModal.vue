@@ -107,6 +107,10 @@ function getActionBadgeClass(type: string): string {
       return 'bg-rose-500/20 text-rose-300 border-rose-500/40'
     case 'USE_ABILITY':
       return 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+    case 'TRIGGERED_ABILITY':
+      return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+    case 'PASSIVE_ABILITY':
+      return 'bg-teal-500/20 text-teal-300 border-teal-500/40'
     case 'PLAY_FROM_HAND':
       return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
     case 'EVOLVE':

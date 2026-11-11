@@ -16,6 +16,7 @@ import type {
   PlayableAction,
 } from '../types/cardModel'
 import { getMainAttackEnergyRequirement } from './engine'
+import { computeCardIntrinsicValue } from './evaluator'
 
 export interface AttackerComparisonRow {
   cardId: string
@@ -56,6 +57,7 @@ export interface SmartAlternativeSuggestion {
 
 const TUTOR_PRIMITIVES = new Set<EffectPrimitive>([
   'SEARCH_DECK',
+  'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
 ])
 
 const DRAW_REFRESH_PRIMITIVES = new Set<EffectPrimitive>([
@@ -65,6 +67,7 @@ const DRAW_REFRESH_PRIMITIVES = new Set<EffectPrimitive>([
 
 const ENERGY_ACCEL_PRIMITIVES = new Set<EffectPrimitive>([
   'ATTACH_ENERGY',
+  'MOVE_ENERGY',
 ])
 
 const RECOVERY_PRIMITIVES = new Set<EffectPrimitive>([
@@ -77,6 +80,28 @@ const GUST_SWITCH_PRIMITIVES = new Set<string>([
   'GUST_OPPONENT_BENCH',
 ])
 
+const BENCH_PRESSURE_PRIMITIVES = new Set<EffectPrimitive>([
+  'DAMAGE_BENCH',
+  'PLACE_DAMAGE_COUNTERS',
+  'MOVE_DAMAGE_COUNTERS',
+])
+
+const CONTROL_LOCK_PRIMITIVES = new Set<EffectPrimitive>([
+  'LOCK_ITEMS',
+  'LOCK_ABILITIES',
+  'LOCK_RETREAT',
+  'LOCK_NEXT_TURN_ATTACK',
+  'APPLY_SPECIAL_CONDITION',
+  'MILL_DECK',
+])
+
+const DEFENSE_PRIMITIVES = new Set<EffectPrimitive>([
+  'MODIFY_DAMAGE_TAKEN',
+  'MODIFY_HP',
+  'PREVENT_DAMAGE_OR_EFFECTS',
+  'HEAL',
+])
+
 function arePrimitivesCompatible(p1: EffectPrimitive, p2: EffectPrimitive): boolean {
   if (p1 === p2) return true
   if (TUTOR_PRIMITIVES.has(p1) && TUTOR_PRIMITIVES.has(p2)) return true
@@ -84,6 +109,9 @@ function arePrimitivesCompatible(p1: EffectPrimitive, p2: EffectPrimitive): bool
   if (ENERGY_ACCEL_PRIMITIVES.has(p1) && ENERGY_ACCEL_PRIMITIVES.has(p2)) return true
   if (RECOVERY_PRIMITIVES.has(p1) && RECOVERY_PRIMITIVES.has(p2)) return true
   if (GUST_SWITCH_PRIMITIVES.has(p1) && GUST_SWITCH_PRIMITIVES.has(p2)) return true
+  if (BENCH_PRESSURE_PRIMITIVES.has(p1) && BENCH_PRESSURE_PRIMITIVES.has(p2)) return true
+  if (CONTROL_LOCK_PRIMITIVES.has(p1) && CONTROL_LOCK_PRIMITIVES.has(p2)) return true
+  if (DEFENSE_PRIMITIVES.has(p1) && DEFENSE_PRIMITIVES.has(p2)) return true
   return false
 }
 
@@ -113,34 +141,55 @@ function estimateAttackDamageBounds(
   let max = 0
 
   for (const eff of attack.effects) {
-    const b = eff.baseDamage ?? 0
+    if (eff.target === 'SELF') continue
+    if (eff.primitive !== 'DAMAGE_ACTIVE' && eff.primitive !== 'DAMAGE_BENCH' && eff.primitive !== 'PLACE_DAMAGE_COUNTERS') {
+      continue
+    }
+    const rawVal = eff.value ?? eff.baseDamage ?? (eff.primitive === 'PLACE_DAMAGE_COUNTERS' && eff.count ? eff.count * 10 : 0)
+    if (rawVal < 0) continue
+
+    const b = eff.scalingOperator === 'MULTIPLY' ? 0 : rawVal
     base += b
-    let localMax = b
+    let localMax = rawVal
 
     if (eff.damageScalingPerOpponentPrizeTaken) {
-      localMax = b + eff.damageScalingPerOpponentPrizeTaken * 5
+      localMax = rawVal + eff.damageScalingPerOpponentPrizeTaken * 5
     } else if (eff.damageScalingType) {
       const sv = eff.damageScalingValue ?? 30
       switch (eff.damageScalingType) {
         case 'PER_ENERGY_DISCARDED':
         case 'PER_ENERGY_ATTACHED_ALL':
         case 'PER_ENERGY_ATTACHED_SELF':
-          localMax = Math.max(b, b + sv * 5)
+          localMax = Math.max(rawVal, rawVal + sv * 5)
           break
         case 'PER_BENCHED_POKEMON':
-          localMax = b + sv * 5
-          break
         case 'PER_OPPONENT_PRIZE_TAKEN':
-          localMax = b + sv * 5
+          localMax = rawVal + sv * 5
           break
         case 'IF_TARGET_IS_EX_OR_EVOLUTION':
-          localMax = b + sv
+          localMax = rawVal + sv
           break
         default:
-          localMax = b + sv * 3
+          localMax = rawVal + sv * 3
           break
       }
-    } else if (attack.actionId === 'attack_bellowing_thunder' || (b === 70 && normName.includes('ire foudre'))) {
+    } else if (eff.coinFlipMode || eff.scalingMetric) {
+      const bv = eff.bonusValue ?? rawVal
+      if (eff.coinFlipMode === 'MULTI_COIN_PER_HEADS') {
+        const coins = eff.coinCount ?? 2
+        localMax = eff.scalingOperator === 'MULTIPLY' ? coins * bv : rawVal + coins * bv
+      } else if (eff.coinFlipMode === 'UNTIL_TAILS_PER_HEADS') {
+        localMax = eff.scalingOperator === 'MULTIPLY' ? 3 * bv : rawVal + 3 * bv
+      } else if (eff.coinFlipMode === 'SINGLE_HEADS_BONUS') {
+        localMax = rawVal + bv
+      } else if (eff.scalingMetric === 'CONDITIONAL_FLAT_BONUS') {
+        localMax = rawVal + bv
+      } else if (eff.scalingOperator === 'MULTIPLY') {
+        localMax = bv * 5
+      } else if (eff.scalingMetric) {
+        localMax = rawVal + bv * 4
+      }
+    } else if (attack.actionId === 'attack_bellowing_thunder' || (rawVal === 70 && normName.includes('ire foudre'))) {
       localMax = 350
     }
 
@@ -303,7 +352,11 @@ export function findAlternativesForCard(
         candidate.subCategory === 'TOOL' ||
         (candidate.category === 'POKEMON' &&
           candidate.playableActions.some(
-            (a) => a.actionType === 'USE_ABILITY' || (a.sourceType && a.sourceType.startsWith('ABILITY')),
+            (a) =>
+              a.actionType === 'USE_ABILITY' ||
+              a.actionType === 'TRIGGERED_ABILITY' ||
+              a.actionType === 'PASSIVE_ABILITY' ||
+              (a.sourceType && a.sourceType.startsWith('ABILITY')),
           ))
 
       if (!isEconomyCandidate && candidate.subCategory !== 'SUPPORTER') continue
@@ -313,6 +366,8 @@ export function findAlternativesForCard(
         if (
           candidate.category === 'POKEMON' &&
           cAct.actionType !== 'USE_ABILITY' &&
+          cAct.actionType !== 'TRIGGERED_ABILITY' &&
+          cAct.actionType !== 'PASSIVE_ABILITY' &&
           (!cAct.sourceType || !cAct.sourceType.startsWith('ABILITY'))
         ) {
           continue
@@ -361,7 +416,7 @@ export function findAlternativesForCard(
           relevanceScore:
             (isActionEconomyUpgrade ? 120 : 65) +
             sharedPrimitives.length * 15 +
-            (candidate.strategicEvaluator.intrinsicBaseScore ?? 80) * 0.2,
+            computeCardIntrinsicValue(candidate) * 0.2,
           attackerComparison: extractAttackerComparisonRow(candidate) ?? undefined,
         })
       }
@@ -375,6 +430,8 @@ export function findAlternativesForCard(
         if (
           candidate.category === 'POKEMON' &&
           cAct.actionType !== 'USE_ABILITY' &&
+          cAct.actionType !== 'TRIGGERED_ABILITY' &&
+          cAct.actionType !== 'PASSIVE_ABILITY' &&
           (!cAct.sourceType || !cAct.sourceType.startsWith('ABILITY'))
         ) {
           continue
@@ -410,7 +467,7 @@ export function findAlternativesForCard(
           relevanceScore:
             85 +
             sharedPrimitives.length * 15 +
-            (candidate.strategicEvaluator.intrinsicBaseScore ?? 80) * 0.2,
+            computeCardIntrinsicValue(candidate) * 0.2,
           attackerComparison: extractAttackerComparisonRow(candidate) ?? undefined,
         })
       }
@@ -433,7 +490,6 @@ export function findAlternativesForCard(
         candidate.playableActions.some(
           (a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK',
         )
-        candidate.playableActions.some((a) => a.sourceType === 'ATTACK')
       const bothDoubleAttackers = targetRow.canAttackTwice && candRow.canAttackTwice
 
       const sharedPrimitives: EffectPrimitive[] = []
@@ -450,7 +506,7 @@ export function findAlternativesForCard(
       }
 
       if (sameRole || bothAttackers || bothDoubleAttackers || sharedPrimitives.length > 0) {
-        let score = 70 + (candidate.strategicEvaluator.intrinsicBaseScore ?? 70) * 0.25
+        let score = 70 + computeCardIntrinsicValue(candidate) * 0.25
         if (sameRole) score += 35
         if (bothDoubleAttackers) score += 45
         if (targetRow.subCategory === candRow.subCategory) score += 15

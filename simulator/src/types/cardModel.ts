@@ -23,6 +23,8 @@ export type ActionType =
   | 'PLAY_FROM_HAND'
   | 'EVOLVE'
   | 'USE_ABILITY'
+  | 'TRIGGERED_ABILITY'
+  | 'PASSIVE_ABILITY'
   | 'ATTACH_ENERGY'
   | 'RETREAT'
   | 'ATTACK'
@@ -46,6 +48,88 @@ export type EffectPrimitive =
   | 'EVOLVE_POKEMON'
   | 'SHUFFLE_HAND_DRAW'
   | 'RECOVER_FROM_DISCARD'
+  | 'PLACE_DAMAGE_COUNTERS'
+  | 'MOVE_DAMAGE_COUNTERS'
+  | 'MOVE_ENERGY'
+  | 'MODIFY_DAMAGE_TAKEN'
+  | 'MODIFY_DAMAGE_DEALT'
+  | 'MODIFY_HP'
+  | 'MODIFY_RETREAT_COST'
+  | 'PREVENT_DAMAGE_OR_EFFECTS'
+  | 'LOCK_NEXT_TURN_ATTACK'
+  | 'LOCK_RETREAT'
+  | 'LOCK_ABILITIES'
+  | 'LOCK_ITEMS'
+  | 'EXPAND_BENCH'
+  | 'KNOCK_OUT'
+  | 'MILL_DECK'
+  | 'TAKE_EXTRA_PRIZE'
+  | 'PUT_ON_TOP_OR_BOTTOM_OF_DECK'
+
+export type SpecialConditionType =
+  | 'POISONED'
+  | 'BURNED'
+  | 'ASLEEP'
+  | 'PARALYZED'
+  | 'CONFUSED'
+
+export type SpecialCondition = SpecialConditionType
+
+export type CoinFlipMode =
+  | 'SINGLE_HEADS_REQUIRED'
+  | 'SINGLE_HEADS_BONUS'
+  | 'MULTI_COIN_PER_HEADS'
+  | 'UNTIL_TAILS_PER_HEADS'
+  | 'TWO_TAILS_SELF_DAMAGE'
+
+export type ScalingOperator = 'ADD' | 'MULTIPLY'
+
+export type ScalingMetric =
+  | 'PER_ENERGY_ON_SELF'
+  | 'PER_ENERGY_ON_OPPONENT_ACTIVE'
+  | 'PER_ENERGY_ON_BOTH_ACTIVES'
+  | 'PER_ENERGY_IN_PLAY'
+  | 'PER_ENERGY_DISCARDED'
+  | 'PER_DAMAGE_COUNTER_ON_SELF'
+  | 'PER_DAMAGE_COUNTER_ON_OPPONENT_ACTIVE'
+  | 'PER_BENCHED_POKEMON_WITH_DAMAGE'
+  | 'PER_OWN_BENCH_POKEMON'
+  | 'PER_OPPONENT_BENCH_POKEMON'
+  | 'PER_BOTH_BENCH_POKEMON'
+  | 'PER_PRIZE_TAKEN_BY_OPPONENT'
+  | 'PER_PRIZE_TAKEN_BY_PLAYER'
+  | 'PER_PRIZE_REMAINING_PLAYER'
+  | 'PER_CARD_IN_OWN_HAND'
+  | 'PER_CARD_IN_OPPONENT_HAND'
+  | 'CONDITIONAL_FLAT_BONUS'
+
+export type EffectTarget =
+  | 'SELF'
+  | 'OPPONENT_ACTIVE'
+  | 'OPPONENT_BENCH_SINGLE'
+  | 'OPPONENT_BENCH_ALL'
+  | 'OPPONENT_POKEMON_ANY'
+  | 'OPPONENT_ALL_POKEMON'
+  | 'OWN_ACTIVE'
+  | 'OWN_BENCH_SINGLE'
+  | 'OWN_BENCH_ALL'
+  | 'OWN_POKEMON_ANY'
+  | 'OWN_ALL_POKEMON'
+  | 'ALL_POKEMON_IN_PLAY'
+  | 'PLAYER'
+  | 'OPPONENT'
+
+export type EffectZoneType =
+  | 'DECK'
+  | 'TOP_OF_DECK'
+  | 'BOTTOM_OF_DECK'
+  | 'HAND'
+  | 'DISCARD'
+  | 'BENCH'
+  | 'ACTIVE'
+  | 'PRIZES'
+  | 'LOST_ZONE'
+  | 'ATTACHED_CARDS'
 
 export type AIRole =
   | 'MAIN_ATTACKER'
@@ -123,23 +207,29 @@ export interface PokemonStats {
 
 export interface AtomicEffect {
   primitive: EffectPrimitive
-  target?: string | null
+  target?: EffectTarget | string | null
   value?: number | null
   count?: number | null
-  zone?: string | null
+  sourceZone?: EffectZoneType | string | null
+  destinationZone?: EffectZoneType | string | null
+  zone?: EffectZoneType | string | null
   filter?: string | null
+  specialCondition?: SpecialConditionType | null
+  coinFlipMode?: CoinFlipMode | null
+  coinCount?: number | null
+  scalingOperator?: ScalingOperator | null
+  scalingMetric?: ScalingMetric | null
+  bonusValue?: number | null
   upTo?: boolean
   optional?: boolean
 
   // Rétrocompatibilité
   baseDamage?: number | null
-  sourceZone?: string | null
   targetZone?: string | null
   targetFilter?: any
   damageScalingPerOpponentPrizeTaken?: number | null
   damageScalingType?: string | null
   damageScalingValue?: number | null
-  specialCondition?: string | null
 }
 
 export interface PlayableAction {
@@ -181,13 +271,6 @@ export interface StrategicEvaluator {
   discardPriorityWhenDead?: number
   holdForNextTurnBonus?: number
 }
-
-export type SpecialConditionType =
-  | 'POISONED'
-  | 'BURNED'
-  | 'CONFUSED'
-  | 'PARALYZED'
-  | 'ASLEEP'
 
 export interface ActionCost {
   type: string
@@ -305,5 +388,5 @@ export function isCardStandardLegal(card: {
   if (card.identity.legalStandard === true) return true
   if (card.identity.subCategory === 'BASIC_ENERGY') return true
   const mark = (card.identity.regulationMark || '').toUpperCase()
-  return mark === 'G' || mark === 'H' || mark === 'I'
+  return mark === 'G' || mark === 'H' || mark === 'I' || mark === 'J'
 }
