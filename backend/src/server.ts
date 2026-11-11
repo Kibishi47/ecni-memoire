@@ -8,10 +8,15 @@ import { closePool, getPool } from './db/pool.js'
 import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
 import { registerHealthRoutes } from './routes/health.js'
+import { registerReportRoutes } from './routes/reports.js'
+import type { GitHubIssueCreator } from './services/githubService.js'
+import type { InMemoryRateLimiter } from './services/rateLimiter.js'
 
 export interface BuildServerOptions {
   pool?: Pool
   logger?: boolean
+  githubService?: GitHubIssueCreator
+  reportRateLimiter?: InMemoryRateLimiter
 }
 
 /**
@@ -32,6 +37,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await registerHealthRoutes(app, { pool })
   await registerDeckRoutes(app, { pool })
   await registerCardRoutes(app, { pool })
+  await registerReportRoutes(app, {
+    pool,
+    githubService: options.githubService,
+    rateLimiter: options.reportRateLimiter,
+  })
 
   app.addHook('onClose', async () => {
     if (!options.pool) {
