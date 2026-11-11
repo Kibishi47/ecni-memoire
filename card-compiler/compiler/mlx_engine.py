@@ -45,7 +45,7 @@ from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
 
-DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
+DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/gemma-4-26b-a4b-4bit"
 
 MLX_MODEL_ALIASES: Dict[str, str] = {
     "uqer1244/Qwen3.8-27B-GSQ-RC0-MLX": "uqer1244/Qwen3.8-27B-GSQ-RCO-MLX",
@@ -72,7 +72,7 @@ class MLXCardCompiler:
         phase: Optional[Union[PipelinePhase, str]] = None,
         pipeline_mode: Optional[Union[PipelineMode, str]] = None,
         temperature: float = 0.1,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         hf_token: Optional[str] = None,
         disable_thinking: bool = False,
         thinking: Optional[str] = None,
@@ -157,7 +157,7 @@ class MLXCardCompiler:
                     local_snap = snapshot_download(self.repo_id, local_files_only=True)
                 except Exception:
                     local_snap = snapshot_download(
-                        "mlx-community/Qwen2.5-Coder-14B-Instruct-8bit",
+                        DEFAULT_MLX_MODEL_REPO_ID,
                         local_files_only=True,
                     )
                 self._model, self._tokenizer = mlx_lm.load(local_snap)
@@ -165,21 +165,21 @@ class MLXCardCompiler:
                 raise err
 
     def _build_formatted_prompt(self, messages: List[Dict[str, str]]) -> str:
-        """Applique le chat template du tokenizer avec contrôle éventuel du thinking."""
+        """Applique le chat template du tokenizer avec contrôle explicite de `enable_thinking` (Gemma 4 / Qwen / DeepSeek)."""
         if self._tokenizer is not None and hasattr(self._tokenizer, "apply_chat_template"):
             template_kwargs: Dict[str, Any] = {
                 "tokenize": False,
                 "add_generation_prompt": True,
             }
-            if self.disable_thinking or self.thinking == "null":
-                try:
-                    return self._tokenizer.apply_chat_template(
-                        messages,
-                        enable_thinking=False,
-                        **template_kwargs,
-                    )
-                except TypeError:
-                    pass
+            enable_thinking_flag = not (self.disable_thinking or self.thinking == "null")
+            try:
+                return self._tokenizer.apply_chat_template(
+                    messages,
+                    enable_thinking=enable_thinking_flag,
+                    **template_kwargs,
+                )
+            except TypeError:
+                pass
             try:
                 return self._tokenizer.apply_chat_template(messages, **template_kwargs)
             except Exception:

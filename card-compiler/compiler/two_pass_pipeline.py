@@ -110,6 +110,7 @@ def run_reasoning_phase(
             f"• [bold]À analyser[/bold] : {len(bundles_to_process)} carte(s)\n"
             f"• [bold]Niveau de puissance[/bold] : [bold cyan]{eff_intensity.value.upper()}[/bold cyan]\n"
             f"• [bold]Backend[/bold] : [bold green]{eff_backend}[/bold green]\n"
+            f"• [bold]Raisonnement (Thinking)[/bold] : [bold green]Activé (enable_thinking=True)[/bold green]\n"
             f"• [bold]Dossier de sortie[/bold] : [cyan]{reason_dir}[/cyan]",
             border_style="magenta",
         )
@@ -136,6 +137,7 @@ def run_reasoning_phase(
         intensity=eff_intensity,
         backend=eff_backend,
         hf_token=hf_token,
+        enable_thinking=True,
     )
 
     failed_cards: List[Tuple[str, str, str]] = []
@@ -308,6 +310,7 @@ def run_coding_phase(
             f"• [bold]Analyses manquantes[/bold] : {len(missing_reasoning)} carte(s)\n"
             f"• [bold]Niveau de puissance[/bold] : [bold cyan]{eff_intensity.value.upper()}[/bold cyan]\n"
             f"• [bold]Backend[/bold] : [bold green]{eff_backend}[/bold green]\n"
+            f"• [bold]Raisonnement (Thinking)[/bold] : [yellow]Désactivé (enable_thinking=False)[/yellow]\n"
             f"• [bold]Dossier de sortie[/bold] : [cyan]{compiled_dir}[/cyan]",
             border_style="cyan",
         )

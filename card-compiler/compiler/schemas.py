@@ -2,7 +2,8 @@
 
 Ce module définit :
 1. Les énumérations normalisées (`CardCategory`, `CardSubCategory`, `ActionType`,
-   `TimingPhase`, `EffectPrimitive`, `AIRole`).
+   `TimingPhase`, `EffectPrimitive`, `SpecialCondition`, `CoinFlipMode`,
+   `ScalingOperator`, `ScalingMetric`, `EffectTarget`, `ZoneType`, `AIRole`).
 2. La structure complète et déterministe du modèle final `EngineCardModel`
    (`CardIdentity`, `PokemonStats`, `TypeModifier`, `PlayableAction`,
    `AtomicEffect`, `StrategicEvaluator`, `TurnPhaseWeights`, `CompilationMetadata`).
@@ -46,6 +47,8 @@ class ActionType(str, Enum):
     PLAY_FROM_HAND = "PLAY_FROM_HAND"
     EVOLVE = "EVOLVE"
     USE_ABILITY = "USE_ABILITY"
+    TRIGGERED_ABILITY = "TRIGGERED_ABILITY"
+    PASSIVE_ABILITY = "PASSIVE_ABILITY"
     ATTACH_ENERGY = "ATTACH_ENERGY"
     RETREAT = "RETREAT"
     ATTACK = "ATTACK"
@@ -71,6 +74,95 @@ class EffectPrimitive(str, Enum):
     EVOLVE_POKEMON = "EVOLVE_POKEMON"
     SHUFFLE_HAND_DRAW = "SHUFFLE_HAND_DRAW"
     RECOVER_FROM_DISCARD = "RECOVER_FROM_DISCARD"
+    # Nouvelles primitives Standard
+    PLACE_DAMAGE_COUNTERS = "PLACE_DAMAGE_COUNTERS"
+    MOVE_DAMAGE_COUNTERS = "MOVE_DAMAGE_COUNTERS"
+    MOVE_ENERGY = "MOVE_ENERGY"
+    MODIFY_DAMAGE_TAKEN = "MODIFY_DAMAGE_TAKEN"
+    MODIFY_DAMAGE_DEALT = "MODIFY_DAMAGE_DEALT"
+    MODIFY_HP = "MODIFY_HP"
+    MODIFY_RETREAT_COST = "MODIFY_RETREAT_COST"
+    PREVENT_DAMAGE_OR_EFFECTS = "PREVENT_DAMAGE_OR_EFFECTS"
+    LOCK_NEXT_TURN_ATTACK = "LOCK_NEXT_TURN_ATTACK"
+    LOCK_RETREAT = "LOCK_RETREAT"
+    LOCK_ABILITIES = "LOCK_ABILITIES"
+    LOCK_ITEMS = "LOCK_ITEMS"
+    EXPAND_BENCH = "EXPAND_BENCH"
+    KNOCK_OUT = "KNOCK_OUT"
+    MILL_DECK = "MILL_DECK"
+    TAKE_EXTRA_PRIZE = "TAKE_EXTRA_PRIZE"
+    PUT_ON_TOP_OR_BOTTOM_OF_DECK = "PUT_ON_TOP_OR_BOTTOM_OF_DECK"
+
+
+class SpecialCondition(str, Enum):
+    POISONED = "POISONED"
+    BURNED = "BURNED"
+    ASLEEP = "ASLEEP"
+    PARALYZED = "PARALYZED"
+    CONFUSED = "CONFUSED"
+
+
+class CoinFlipMode(str, Enum):
+    SINGLE_HEADS_REQUIRED = "SINGLE_HEADS_REQUIRED"
+    SINGLE_HEADS_BONUS = "SINGLE_HEADS_BONUS"
+    MULTI_COIN_PER_HEADS = "MULTI_COIN_PER_HEADS"
+    UNTIL_TAILS_PER_HEADS = "UNTIL_TAILS_PER_HEADS"
+    TWO_TAILS_SELF_DAMAGE = "TWO_TAILS_SELF_DAMAGE"
+
+
+class ScalingOperator(str, Enum):
+    ADD = "ADD"
+    MULTIPLY = "MULTIPLY"
+
+
+class ScalingMetric(str, Enum):
+    PER_ENERGY_ON_SELF = "PER_ENERGY_ON_SELF"
+    PER_ENERGY_ON_OPPONENT_ACTIVE = "PER_ENERGY_ON_OPPONENT_ACTIVE"
+    PER_ENERGY_ON_BOTH_ACTIVES = "PER_ENERGY_ON_BOTH_ACTIVES"
+    PER_ENERGY_IN_PLAY = "PER_ENERGY_IN_PLAY"
+    PER_ENERGY_DISCARDED = "PER_ENERGY_DISCARDED"
+    PER_DAMAGE_COUNTER_ON_SELF = "PER_DAMAGE_COUNTER_ON_SELF"
+    PER_DAMAGE_COUNTER_ON_OPPONENT_ACTIVE = "PER_DAMAGE_COUNTER_ON_OPPONENT_ACTIVE"
+    PER_BENCHED_POKEMON_WITH_DAMAGE = "PER_BENCHED_POKEMON_WITH_DAMAGE"
+    PER_OWN_BENCH_POKEMON = "PER_OWN_BENCH_POKEMON"
+    PER_OPPONENT_BENCH_POKEMON = "PER_OPPONENT_BENCH_POKEMON"
+    PER_BOTH_BENCH_POKEMON = "PER_BOTH_BENCH_POKEMON"
+    PER_PRIZE_TAKEN_BY_OPPONENT = "PER_PRIZE_TAKEN_BY_OPPONENT"
+    PER_PRIZE_TAKEN_BY_PLAYER = "PER_PRIZE_TAKEN_BY_PLAYER"
+    PER_PRIZE_REMAINING_PLAYER = "PER_PRIZE_REMAINING_PLAYER"
+    PER_CARD_IN_OWN_HAND = "PER_CARD_IN_OWN_HAND"
+    PER_CARD_IN_OPPONENT_HAND = "PER_CARD_IN_OPPONENT_HAND"
+    CONDITIONAL_FLAT_BONUS = "CONDITIONAL_FLAT_BONUS"
+
+
+class EffectTarget(str, Enum):
+    SELF = "SELF"
+    OPPONENT_ACTIVE = "OPPONENT_ACTIVE"
+    OPPONENT_BENCH_SINGLE = "OPPONENT_BENCH_SINGLE"
+    OPPONENT_BENCH_ALL = "OPPONENT_BENCH_ALL"
+    OPPONENT_POKEMON_ANY = "OPPONENT_POKEMON_ANY"
+    OPPONENT_ALL_POKEMON = "OPPONENT_ALL_POKEMON"
+    OWN_ACTIVE = "OWN_ACTIVE"
+    OWN_BENCH_SINGLE = "OWN_BENCH_SINGLE"
+    OWN_BENCH_ALL = "OWN_BENCH_ALL"
+    OWN_POKEMON_ANY = "OWN_POKEMON_ANY"
+    OWN_ALL_POKEMON = "OWN_ALL_POKEMON"
+    ALL_POKEMON_IN_PLAY = "ALL_POKEMON_IN_PLAY"
+    PLAYER = "PLAYER"
+    OPPONENT = "OPPONENT"
+
+
+class ZoneType(str, Enum):
+    DECK = "DECK"
+    TOP_OF_DECK = "TOP_OF_DECK"
+    BOTTOM_OF_DECK = "BOTTOM_OF_DECK"
+    HAND = "HAND"
+    DISCARD = "DISCARD"
+    BENCH = "BENCH"
+    ACTIVE = "ACTIVE"
+    PRIZES = "PRIZES"
+    LOST_ZONE = "LOST_ZONE"
+    ATTACHED_CARDS = "ATTACHED_CARDS"
 
 
 class AIRole(str, Enum):
@@ -197,10 +289,15 @@ def _coerce_action_type(val: Any) -> ActionType:
         "USE_ABILITY": ActionType.USE_ABILITY,
         "ABILITY": ActionType.USE_ABILITY,
         "ABILITY_ACTIVATED": ActionType.USE_ABILITY,
-        "ABILITY_ON_EVOLVE": ActionType.USE_ABILITY,
-        "ABILITY_ON_PLAY_FROM_HAND": ActionType.USE_ABILITY,
-        "ABILITY_PASSIVE": ActionType.USE_ABILITY,
-        "ABILITY_REACTIVE": ActionType.USE_ABILITY,
+        "TRIGGERED_ABILITY": ActionType.TRIGGERED_ABILITY,
+        "ABILITY_ON_EVOLVE": ActionType.TRIGGERED_ABILITY,
+        "ABILITY_ON_PLAY_FROM_HAND": ActionType.TRIGGERED_ABILITY,
+        "ON_PLAY_ABILITY": ActionType.TRIGGERED_ABILITY,
+        "ON_EVOLVE_ABILITY": ActionType.TRIGGERED_ABILITY,
+        "ABILITY_REACTIVE": ActionType.TRIGGERED_ABILITY,
+        "PASSIVE_ABILITY": ActionType.PASSIVE_ABILITY,
+        "ABILITY_PASSIVE": ActionType.PASSIVE_ABILITY,
+        "CONTINUOUS_ABILITY": ActionType.PASSIVE_ABILITY,
         "ATTACH_ENERGY": ActionType.ATTACH_ENERGY,
         "SPECIAL_ENERGY_EFFECT": ActionType.ATTACH_ENERGY,
         "ENERGY_ATTACHMENT": ActionType.ATTACH_ENERGY,
@@ -210,6 +307,10 @@ def _coerce_action_type(val: Any) -> ActionType:
     }
     if key in mapping:
         return mapping[key]
+    if "PASSIVE" in key or "CONTINUOUS" in key:
+        return ActionType.PASSIVE_ABILITY
+    if "TRIGGER" in key or "REACTIVE" in key or "ON_PLAY" in key or "ON_EVOLVE" in key:
+        return ActionType.TRIGGERED_ABILITY
     if "ABILITY" in key or "TALENT" in key:
         return ActionType.USE_ABILITY
     if "ATTACK" in key or "ATTAQUE" in key:
@@ -257,7 +358,11 @@ def _coerce_timing_phase(val: Any) -> TimingPhase:
 
 
 def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
+    if val is None:
+        raise ValueError("La primitive d'effet ne peut pas être nulle.")
     key = _clean_enum_key(val)
+    if not key or key in {"NONE", "NULL", "N/A", "NA"}:
+        raise ValueError(f"Primitive d'effet vide ou nulle : {val!r}")
     try:
         return EffectPrimitive(key)
     except ValueError:
@@ -271,7 +376,13 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         "SEARCH_CARD": EffectPrimitive.SEARCH_DECK,
         "SEARCH": EffectPrimitive.SEARCH_DECK,
         "TUTOR": EffectPrimitive.SEARCH_DECK,
-        "LOOK_TOP_DECK": EffectPrimitive.SEARCH_DECK,
+        # PUT_ON_TOP_OR_BOTTOM_OF_DECK
+        "LOOK_TOP_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
+        "REORDER_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
+        "PUT_ON_TOP_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
+        "PUT_ON_BOTTOM_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
+        "PLACE_ON_TOP_OF_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
+        "PLACE_ON_BOTTOM_OF_DECK": EffectPrimitive.PUT_ON_TOP_OR_BOTTOM_OF_DECK,
         # DRAW_CARDS
         "DRAW": EffectPrimitive.DRAW_CARDS,
         "DRAW_CARD": EffectPrimitive.DRAW_CARDS,
@@ -283,26 +394,79 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         "DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
         "ATTACK_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
         "COIN_FLIP_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
-        "COIN_FLIP": EffectPrimitive.DAMAGE_ACTIVE,
-        "FLIP_COIN": EffectPrimitive.DAMAGE_ACTIVE,
-        "BONUS_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
-        "EXTRA_DAMAGE": EffectPrimitive.DAMAGE_ACTIVE,
-        "PASSIVE_DAMAGE_BOOST": EffectPrimitive.DAMAGE_ACTIVE,
         # DAMAGE_BENCH
         "DEAL_DAMAGE_BENCH": EffectPrimitive.DAMAGE_BENCH,
-        "PLACE_DAMAGE_COUNTERS": EffectPrimitive.DAMAGE_BENCH,
-        "PUT_DAMAGE_COUNTERS": EffectPrimitive.DAMAGE_BENCH,
         "SNIPE_BENCH": EffectPrimitive.DAMAGE_BENCH,
         "SPREAD_DAMAGE": EffectPrimitive.DAMAGE_BENCH,
-        # ATTACH_ENERGY
+        # PLACE_DAMAGE_COUNTERS
+        "PLACE_DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+        "PUT_DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+        "PLACE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+        "DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+        "ADD_DAMAGE_COUNTERS": EffectPrimitive.PLACE_DAMAGE_COUNTERS,
+        # MOVE_DAMAGE_COUNTERS
+        "MOVE_DAMAGE_COUNTERS": EffectPrimitive.MOVE_DAMAGE_COUNTERS,
+        "TRANSFER_DAMAGE_COUNTERS": EffectPrimitive.MOVE_DAMAGE_COUNTERS,
+        # PREVENT_DAMAGE_OR_EFFECTS
+        "COIN_FLIP": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        "FLIP_COIN": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        "PREVENT_DAMAGE": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        "PREVENT_EFFECTS": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        "IMMUNITY": EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS,
+        # MODIFY_DAMAGE_TAKEN
+        "PASSIVE_DAMAGE_REDUCTION": EffectPrimitive.MODIFY_DAMAGE_TAKEN,
+        "REDUCE_DAMAGE": EffectPrimitive.MODIFY_DAMAGE_TAKEN,
+        "REDUCE_DAMAGE_TAKEN": EffectPrimitive.MODIFY_DAMAGE_TAKEN,
+        "DAMAGE_REDUCTION": EffectPrimitive.MODIFY_DAMAGE_TAKEN,
+        # MODIFY_DAMAGE_DEALT
+        "PASSIVE_DAMAGE_BOOST": EffectPrimitive.MODIFY_DAMAGE_DEALT,
+        "BOOST_DAMAGE": EffectPrimitive.MODIFY_DAMAGE_DEALT,
+        "BONUS_DAMAGE": EffectPrimitive.MODIFY_DAMAGE_DEALT,
+        "EXTRA_DAMAGE": EffectPrimitive.MODIFY_DAMAGE_DEALT,
+        "DAMAGE_BOOST": EffectPrimitive.MODIFY_DAMAGE_DEALT,
+        # MODIFY_HP
+        "BOOST_HP": EffectPrimitive.MODIFY_HP,
+        "INCREASE_HP": EffectPrimitive.MODIFY_HP,
+        "MAX_HP_MOD": EffectPrimitive.MODIFY_HP,
+        # MODIFY_RETREAT_COST
+        "PASSIVE_RETREAT_COST_MOD": EffectPrimitive.MODIFY_RETREAT_COST,
+        "REDUCE_RETREAT_COST": EffectPrimitive.MODIFY_RETREAT_COST,
+        "FREE_RETREAT": EffectPrimitive.MODIFY_RETREAT_COST,
+        # LOCK_*
+        "LOCK_ATTACK": EffectPrimitive.LOCK_NEXT_TURN_ATTACK,
+        "CANNOT_ATTACK": EffectPrimitive.LOCK_NEXT_TURN_ATTACK,
+        "CANT_ATTACK": EffectPrimitive.LOCK_NEXT_TURN_ATTACK,
+        "CANT_RETREAT": EffectPrimitive.LOCK_RETREAT,
+        "CANNOT_RETREAT": EffectPrimitive.LOCK_RETREAT,
+        "PREVENT_RETREAT": EffectPrimitive.LOCK_RETREAT,
+        "PASSIVE_ABILITY_OR_ITEM_LOCK": EffectPrimitive.LOCK_ABILITIES,
+        "DISABLE_ABILITIES": EffectPrimitive.LOCK_ABILITIES,
+        "ABILITY_LOCK": EffectPrimitive.LOCK_ABILITIES,
+        "NEGATE_ABILITIES": EffectPrimitive.LOCK_ABILITIES,
+        "ITEM_LOCK": EffectPrimitive.LOCK_ITEMS,
+        "CANT_PLAY_ITEMS": EffectPrimitive.LOCK_ITEMS,
+        # EXPAND_BENCH
+        "BENCH_SIZE_MOD": EffectPrimitive.EXPAND_BENCH,
+        # KNOCK_OUT
+        "KO": EffectPrimitive.KNOCK_OUT,
+        "INSTANT_KO": EffectPrimitive.KNOCK_OUT,
+        "AUTO_KO": EffectPrimitive.KNOCK_OUT,
+        # MILL_DECK
+        "MILL": EffectPrimitive.MILL_DECK,
+        "DISCARD_TOP_DECK": EffectPrimitive.MILL_DECK,
+        # TAKE_EXTRA_PRIZE
+        "EXTRA_PRIZE": EffectPrimitive.TAKE_EXTRA_PRIZE,
+        "TAKE_PRIZE": EffectPrimitive.TAKE_EXTRA_PRIZE,
+        # ATTACH_ENERGY / MOVE_ENERGY
         "ATTACH_ENERGY_FROM_HAND": EffectPrimitive.ATTACH_ENERGY,
         "ATTACH_ENERGY_FROM_DISCARD": EffectPrimitive.ATTACH_ENERGY,
         "ATTACH_ENERGY_FROM_DECK": EffectPrimitive.ATTACH_ENERGY,
         "SEARCH_AND_ATTACH_ENERGY": EffectPrimitive.ATTACH_ENERGY,
         "ACCELERATE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
-        "MOVE_ENERGY_BETWEEN_POKEMON": EffectPrimitive.ATTACH_ENERGY,
-        "MOVE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
         "PROVIDE_ENERGY": EffectPrimitive.ATTACH_ENERGY,
+        "MOVE_ENERGY_BETWEEN_POKEMON": EffectPrimitive.MOVE_ENERGY,
+        "TRANSFER_ENERGY": EffectPrimitive.MOVE_ENERGY,
         # DISCARD_CARDS
         "DISCARD": EffectPrimitive.DISCARD_CARDS,
         "DISCARD_FROM_HAND": EffectPrimitive.DISCARD_CARDS,
@@ -314,8 +478,6 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         "HEAL_DAMAGE": EffectPrimitive.HEAL,
         "HEAL_POKEMON": EffectPrimitive.HEAL,
         "REMOVE_DAMAGE_COUNTERS": EffectPrimitive.HEAL,
-        "PASSIVE_DAMAGE_REDUCTION": EffectPrimitive.HEAL,
-        "PASSIVE_PREVENT_DAMAGE_OR_EFFECTS": EffectPrimitive.HEAL,
         # SWITCH_ACTIVE
         "SWITCH_ACTIVE_POKEMON": EffectPrimitive.SWITCH_ACTIVE,
         "GUST_OPPONENT_BENCH_TO_ACTIVE": EffectPrimitive.SWITCH_ACTIVE,
@@ -323,7 +485,6 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         "SWITCH": EffectPrimitive.SWITCH_ACTIVE,
         "GUST": EffectPrimitive.SWITCH_ACTIVE,
         "RETREAT": EffectPrimitive.SWITCH_ACTIVE,
-        "PASSIVE_RETREAT_COST_MOD": EffectPrimitive.SWITCH_ACTIVE,
         # APPLY_SPECIAL_CONDITION
         "SPECIAL_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
         "STATUS_CONDITION": EffectPrimitive.APPLY_SPECIAL_CONDITION,
@@ -332,7 +493,6 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         "SLEEP": EffectPrimitive.APPLY_SPECIAL_CONDITION,
         "PARALYZE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
         "CONFUSE": EffectPrimitive.APPLY_SPECIAL_CONDITION,
-        "PASSIVE_ABILITY_OR_ITEM_LOCK": EffectPrimitive.APPLY_SPECIAL_CONDITION,
         # EVOLVE_POKEMON
         "EVOLVE_SKIP_STAGE_1": EffectPrimitive.EVOLVE_POKEMON,
         "EVOLVE_FROM_HAND": EffectPrimitive.EVOLVE_POKEMON,
@@ -354,6 +514,38 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
     if key in synonyms:
         return synonyms[key]
 
+    if "MILL" in key:
+        return EffectPrimitive.MILL_DECK
+    if "KNOCK_OUT" in key or key.endswith("_KO"):
+        return EffectPrimitive.KNOCK_OUT
+    if "EXTRA_PRIZE" in key:
+        return EffectPrimitive.TAKE_EXTRA_PRIZE
+    if "MOVE" in key and "COUNTER" in key:
+        return EffectPrimitive.MOVE_DAMAGE_COUNTERS
+    if "COUNTER" in key and ("PLACE" in key or "PUT" in key):
+        return EffectPrimitive.PLACE_DAMAGE_COUNTERS
+    if "MOVE" in key and "ENERG" in key:
+        return EffectPrimitive.MOVE_ENERGY
+    if "PREVENT" in key:
+        return EffectPrimitive.PREVENT_DAMAGE_OR_EFFECTS
+    if "REDUCE" in key and "DAMAGE" in key:
+        return EffectPrimitive.MODIFY_DAMAGE_TAKEN
+    if ("BOOST" in key or "BONUS" in key or "DEALT" in key) and "DAMAGE" in key:
+        return EffectPrimitive.MODIFY_DAMAGE_DEALT
+    if "RETREAT" in key and ("MOD" in key or "COST" in key or "REDUCE" in key):
+        return EffectPrimitive.MODIFY_RETREAT_COST
+    if "RETREAT" in key and ("LOCK" in key or "CANT" in key or "CANNOT" in key):
+        return EffectPrimitive.LOCK_RETREAT
+    if "ABILITY" in key and ("LOCK" in key or "DISABLE" in key):
+        return EffectPrimitive.LOCK_ABILITIES
+    if "ITEM" in key and ("LOCK" in key or "CANT" in key or "CANNOT" in key):
+        return EffectPrimitive.LOCK_ITEMS
+    if "ATTACK" in key and ("LOCK" in key or "CANT" in key or "CANNOT" in key):
+        return EffectPrimitive.LOCK_NEXT_TURN_ATTACK
+    if "EXPAND" in key and "BENCH" in key:
+        return EffectPrimitive.EXPAND_BENCH
+    if "HP" in key and ("MOD" in key or "BOOST" in key or "INCREASE" in key):
+        return EffectPrimitive.MODIFY_HP
     if "SEARCH" in key and "ENERG" in key and "ATTACH" in key:
         return EffectPrimitive.ATTACH_ENERGY
     if "SEARCH" in key or "FIND" in key or "TUTOR" in key:
@@ -362,9 +554,9 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         return EffectPrimitive.SHUFFLE_HAND_DRAW
     if "DRAW" in key or "PIOCH" in key:
         return EffectPrimitive.DRAW_CARDS
-    if "BENCH" in key and ("DAMAGE" in key or "COUNTER" in key):
+    if "BENCH" in key and "DAMAGE" in key:
         return EffectPrimitive.DAMAGE_BENCH
-    if "DAMAGE" in key or "DEGAT" in key or "ATTACK" in key:
+    if "DAMAGE" in key or "DEGAT" in key:
         return EffectPrimitive.DAMAGE_ACTIVE
     if "ENERG" in key or "ATTACH" in key:
         return EffectPrimitive.ATTACH_ENERGY
@@ -378,10 +570,314 @@ def _coerce_effect_primitive(val: Any) -> EffectPrimitive:
         return EffectPrimitive.EVOLVE_POKEMON
     if "RECOVER" in key or "RETRIEVE" in key:
         return EffectPrimitive.RECOVER_FROM_DISCARD
-    if "CONDITION" in key or "STATUS" in key or "LOCK" in key:
+    if "CONDITION" in key or "STATUS" in key:
         return EffectPrimitive.APPLY_SPECIAL_CONDITION
 
-    return EffectPrimitive.DRAW_CARDS
+    raise ValueError(f"Primitive d'effet inconnue ou invalide : {val!r}")
+
+
+def _coerce_special_condition(val: Any) -> Optional[SpecialCondition]:
+    if val is None:
+        return None
+    if isinstance(val, SpecialCondition):
+        return val
+    key = _clean_enum_key(val)
+    if not key or key in {"NONE", "NULL", "N/A"}:
+        return None
+    try:
+        return SpecialCondition(key)
+    except ValueError:
+        pass
+    mapping = {
+        "POISON": SpecialCondition.POISONED,
+        "EMPOISONNE": SpecialCondition.POISONED,
+        "EMPOISONNÉ": SpecialCondition.POISONED,
+        "BURN": SpecialCondition.BURNED,
+        "BRULE": SpecialCondition.BURNED,
+        "BRÛLÉ": SpecialCondition.BURNED,
+        "SLEEP": SpecialCondition.ASLEEP,
+        "ENDORMI": SpecialCondition.ASLEEP,
+        "PARALYZE": SpecialCondition.PARALYZED,
+        "PARALYZ": SpecialCondition.PARALYZED,
+        "PARALYSE": SpecialCondition.PARALYZED,
+        "PARALYSÉ": SpecialCondition.PARALYZED,
+        "CONFUSE": SpecialCondition.CONFUSED,
+        "CONFUS": SpecialCondition.CONFUSED,
+    }
+    for k, cond in mapping.items():
+        if k in key:
+            return cond
+    raise ValueError(f"État spécial inconnu : {val!r}")
+
+
+def _coerce_coin_flip_mode(val: Any) -> Optional[CoinFlipMode]:
+    if val is None:
+        return None
+    if isinstance(val, CoinFlipMode):
+        return val
+    key = _clean_enum_key(val)
+    if not key or key in {"NONE", "NULL", "N/A"}:
+        return None
+    try:
+        return CoinFlipMode(key)
+    except ValueError:
+        pass
+    if "UNTIL" in key or "TAILS_STOP" in key:
+        return CoinFlipMode.UNTIL_TAILS_PER_HEADS
+    if "TWO" in key and "TAIL" in key:
+        return CoinFlipMode.TWO_TAILS_SELF_DAMAGE
+    if "MULTI" in key or "PER_HEADS" in key:
+        return CoinFlipMode.MULTI_COIN_PER_HEADS
+    if "BONUS" in key or "EXTRA" in key:
+        return CoinFlipMode.SINGLE_HEADS_BONUS
+    if "HEADS" in key or "REQUIRED" in key or "COIN" in key:
+        return CoinFlipMode.SINGLE_HEADS_REQUIRED
+    raise ValueError(f"Mode de lancer de pièce inconnu : {val!r}")
+
+
+def _coerce_scaling_operator(val: Any) -> Optional[ScalingOperator]:
+    if val is None:
+        return None
+    if isinstance(val, ScalingOperator):
+        return val
+    raw_s = str(val).strip()
+    if raw_s == "+":
+        return ScalingOperator.ADD
+    if raw_s in {"×", "x", "X", "*"}:
+        return ScalingOperator.MULTIPLY
+    key = _clean_enum_key(val)
+    if not key or key in {"NONE", "NULL", "N/A"}:
+        return None
+    if key in {"ADD", "PLUS", "BONUS"}:
+        return ScalingOperator.ADD
+    if key in {"MULTIPLY", "MULT", "TIMES", "X"}:
+        return ScalingOperator.MULTIPLY
+    raise ValueError(f"Opérateur de scaling inconnu : {val!r}")
+
+
+def _coerce_scaling_metric(val: Any) -> Optional[ScalingMetric]:
+    if val is None:
+        return None
+    if isinstance(val, ScalingMetric):
+        return val
+    key = _clean_enum_key(val)
+    if not key or key in {"NONE", "NULL", "N/A"}:
+        return None
+    try:
+        return ScalingMetric(key)
+    except ValueError:
+        pass
+    raise ValueError(f"Métrique de scaling inconnue : {val!r}")
+
+
+def _coerce_effect_target(val: Any) -> Optional[EffectTarget]:
+    if val is None:
+        return None
+    if isinstance(val, EffectTarget):
+        return val
+    if isinstance(val, list):
+        joined = "_".join(str(x).upper() for x in val)
+        if "OWN" in joined and "OPPONENT" in joined:
+            return EffectTarget.ALL_POKEMON_IN_PLAY
+        if "OPPONENT" in joined or "DEFENDING" in joined:
+            return EffectTarget.OPPONENT_ACTIVE
+        if "OWN" in joined or "SELF" in joined:
+            return EffectTarget.OWN_POKEMON_ANY
+        val = val[0] if val else None
+        if val is None:
+            return None
+    if isinstance(val, dict):
+        val = val.get("TO") or val.get("to") or val.get("target") or "OWN_POKEMON_ANY"
+
+    key = _clean_enum_key(val)
+    key = re.sub(r"[\s,;|]+", "_", key).strip("_")
+    if not key or key in {"NONE", "NULL", "N/A", "NA"}:
+        return None
+    try:
+        return EffectTarget(key)
+    except ValueError:
+        pass
+
+    mapping: Dict[str, EffectTarget] = {
+        "SELF": EffectTarget.SELF,
+        "ATTACHED_POKEMON": EffectTarget.SELF,
+        "SELF_ENERGY": EffectTarget.SELF,
+        "OWN_ATTACKS": EffectTarget.SELF,
+        "ATTACHED_POKEMON_ATTACK": EffectTarget.SELF,
+        "OPPONENT_ACTIVE": EffectTarget.OPPONENT_ACTIVE,
+        "OPPONENT_ACTIVE_POKEMON": EffectTarget.OPPONENT_ACTIVE,
+        "DEFENDING_POKEMON": EffectTarget.OPPONENT_ACTIVE,
+        "OPPO_ACTIVE": EffectTarget.OPPONENT_ACTIVE,
+        "OP": EffectTarget.OPPONENT_ACTIVE,
+        "OPPONENT_BENCH": EffectTarget.OPPONENT_BENCH_SINGLE,
+        "OPPO_BENCH": EffectTarget.OPPONENT_BENCH_SINGLE,
+        "OPPONENT_BENCH_SINGLE": EffectTarget.OPPONENT_BENCH_SINGLE,
+        "OPPONENT_BENCH_ALL": EffectTarget.OPPONENT_BENCH_ALL,
+        "OPPONENT_POKEMON_ANY": EffectTarget.OPPONENT_POKEMON_ANY,
+        "OPPONENT_POKEMON": EffectTarget.OPPONENT_POKEMON_ANY,
+        "OPPONENT_BENCH_OPPONENT_ACTIVE": EffectTarget.OPPONENT_ALL_POKEMON,
+        "OPPONENT_BENCH_OR_ACTIVE": EffectTarget.OPPONENT_POKEMON_ANY,
+        "CHOSEN_POKEMON": EffectTarget.OPPONENT_POKEMON_ANY,
+        "SELECTED_POKEMON": EffectTarget.OPPONENT_POKEMON_ANY,
+        "OPPONENT_ALL_POKEMON": EffectTarget.OPPONENT_ALL_POKEMON,
+        "OWN_ACTIVE": EffectTarget.OWN_ACTIVE,
+        "SELF_ACTIVE": EffectTarget.OWN_ACTIVE,
+        "PLAYER_ACTIVE": EffectTarget.OWN_ACTIVE,
+        "ACTIVE": EffectTarget.OWN_ACTIVE,
+        "ACTIVE_POKEMON": EffectTarget.OWN_ACTIVE,
+        "NEW_ACTIVE": EffectTarget.OWN_ACTIVE,
+        "OWN_BENCH": EffectTarget.OWN_BENCH_SINGLE,
+        "SELF_BENCH": EffectTarget.OWN_BENCH_SINGLE,
+        "PLAYER_BENCH": EffectTarget.OWN_BENCH_SINGLE,
+        "YOUR_BENCH": EffectTarget.OWN_BENCH_SINGLE,
+        "OWN_BENCH_N": EffectTarget.OWN_BENCH_SINGLE,
+        "BENCH": EffectTarget.OWN_BENCH_SINGLE,
+        "OWN_BENCH_ANY": EffectTarget.OWN_BENCH_ALL,
+        "OWN_BENCH_ALL": EffectTarget.OWN_BENCH_ALL,
+        "OWN_POKEMON_ANY": EffectTarget.OWN_POKEMON_ANY,
+        "OWN_POKEMON": EffectTarget.OWN_POKEMON_ANY,
+        "SELF_POKEMON_ANY": EffectTarget.OWN_POKEMON_ANY,
+        "PLAYER_POKEMON_ANY": EffectTarget.OWN_POKEMON_ANY,
+        "OWN_OTHER_POKEMON": EffectTarget.OWN_POKEMON_ANY,
+        "OWN_BENCH_OR_ACTIVE": EffectTarget.OWN_POKEMON_ANY,
+        "OWN_BENCH_OWN_ACTIVE": EffectTarget.OWN_POKEMON_ANY,
+        "OWN": EffectTarget.OWN_POKEMON_ANY,
+        "TARGET_FUTURE_POKEMON": EffectTarget.OWN_POKEMON_ANY,
+        "OWN_ALL_POKEMON": EffectTarget.OWN_ALL_POKEMON,
+        "ALL_OWN_POKEMON": EffectTarget.OWN_ALL_POKEMON,
+        "ALL_YOUR_POKEMON": EffectTarget.OWN_ALL_POKEMON,
+        "ALL_POKEMON_IN_PLAY": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "ALL_POKEMON": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "ALL_ACTIVE": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "BOTH_ACTIVE": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "BOTH_BENCH": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "OWN_BENCH_AND_OPPO_BENCH": EffectTarget.ALL_POKEMON_IN_PLAY,
+        "PLAYER": EffectTarget.PLAYER,
+        "OWNER": EffectTarget.PLAYER,
+        "DECK": EffectTarget.PLAYER,
+        "HAND": EffectTarget.PLAYER,
+        "OWN_DECK": EffectTarget.PLAYER,
+        "PLAYER_DECK": EffectTarget.PLAYER,
+        "PLAYER_HAND": EffectTarget.PLAYER,
+        "OWN_HAND": EffectTarget.PLAYER,
+        "OWN_DISCARD": EffectTarget.PLAYER,
+        "DISCARD": EffectTarget.PLAYER,
+        "SEARCHED_CARD": EffectTarget.PLAYER,
+        "SEARCHED_CARDS": EffectTarget.PLAYER,
+        "SEARCHED_POKEMON": EffectTarget.PLAYER,
+        "REVEALED_CARD": EffectTarget.PLAYER,
+        "STADIUM": EffectTarget.PLAYER,
+        "OPPONENT": EffectTarget.OPPONENT,
+        "ENEMY": EffectTarget.OPPONENT,
+        "OPPONENT_DECK": EffectTarget.OPPONENT,
+        "OPPONENT_HAND": EffectTarget.OPPONENT,
+        "OPPONENT_STADIUM": EffectTarget.OPPONENT,
+    }
+    if key in mapping:
+        return mapping[key]
+    if key.startswith("ALL_") and ("POKEMON" in key or "IN_PLAY" in key or "PSYDUCK" in key or "PSYKOKWAK" in key or "MEGA_" in key):
+        return EffectTarget.ALL_POKEMON_IN_PLAY
+    if "OPPONENT" in key or "OPPO" in key or "ENEMY" in key:
+        if "BENCH" in key:
+            return EffectTarget.OPPONENT_BENCH_SINGLE
+        if "ACTIVE" in key:
+            return EffectTarget.OPPONENT_ACTIVE
+        return EffectTarget.OPPONENT
+    if "BENCH" in key:
+        return EffectTarget.OWN_BENCH_SINGLE
+    if "SELF" in key:
+        return EffectTarget.SELF
+    if "PLAYER" in key or "OWN" in key:
+        return EffectTarget.PLAYER
+    raise ValueError(f"Cible d'effet (EffectTarget) inconnue : {val!r}")
+
+
+def _coerce_zone_type(val: Any) -> Optional[ZoneType]:
+    if val is None:
+        return None
+    if isinstance(val, ZoneType):
+        return val
+    if isinstance(val, list):
+        val = val[0] if val else None
+        if val is None:
+            return None
+    key = _clean_enum_key(val)
+    key = re.sub(r"[\s,;|]+", "_", key).strip("_")
+    if not key or key in {"NONE", "NULL", "N/A", "NA", "RETREAT_COST", "ATTACK"}:
+        return None
+    if key.startswith("ZONE:"):
+        key = key.split(":", 1)[1].strip("_")
+    try:
+        return ZoneType(key)
+    except ValueError:
+        pass
+
+    mapping: Dict[str, ZoneType] = {
+        "DECK": ZoneType.DECK,
+        "SEARCHED": ZoneType.DECK,
+        "SEARCHED_CARDS": ZoneType.DECK,
+        "FOUND_CARDS": ZoneType.DECK,
+        "BENCH_TO_DECK": ZoneType.DECK,
+        "TOP_OF_DECK": ZoneType.TOP_OF_DECK,
+        "TOP_DECK": ZoneType.TOP_OF_DECK,
+        "DECK_TOP": ZoneType.TOP_OF_DECK,
+        "BOTTOM_OF_DECK": ZoneType.BOTTOM_OF_DECK,
+        "BOTTOM_DECK": ZoneType.BOTTOM_OF_DECK,
+        "DECK_BOTTOM": ZoneType.BOTTOM_OF_DECK,
+        "HAND": ZoneType.HAND,
+        "HAND_DECK": ZoneType.HAND,
+        "HAND_OR_BENCH": ZoneType.HAND,
+        "DISCARD": ZoneType.DISCARD,
+        "DISCARD_PILE": ZoneType.DISCARD,
+        "BENCH": ZoneType.BENCH,
+        "OWN_BENCH": ZoneType.BENCH,
+        "OPPONENT_BENCH": ZoneType.BENCH,
+        "BENCH_ACTIVE": ZoneType.BENCH,
+        "BENCH_OR_ACTIVE": ZoneType.BENCH,
+        "PLAY": ZoneType.BENCH,
+        "BATTLEFIELD": ZoneType.BENCH,
+        "ALL_POKEMON_IN_PLAY": ZoneType.BENCH,
+        "GLOBAL": ZoneType.BENCH,
+        "ALL": ZoneType.BENCH,
+        "POKEMON": ZoneType.BENCH,
+        "EVOLUTION_POKEMON": ZoneType.BENCH,
+        "OWN_POKEMON_ANY": ZoneType.BENCH,
+        "ACTIVE": ZoneType.ACTIVE,
+        "ACTIVATE": ZoneType.ACTIVE,
+        "BENCH_TO_ACTIVE": ZoneType.ACTIVE,
+        "OPPONENT_ACTIVE": ZoneType.ACTIVE,
+        "ATTACKING_POKEMON": ZoneType.ACTIVE,
+        "OPPONENT_BENCH_OR_ACTIVE": ZoneType.ACTIVE,
+        "SELF": ZoneType.ACTIVE,
+        "STADIUM": ZoneType.ACTIVE,
+        "PRIZES": ZoneType.PRIZES,
+        "PRIZE": ZoneType.PRIZES,
+        "PRIZE_CARDS": ZoneType.PRIZES,
+        "LOST_ZONE": ZoneType.LOST_ZONE,
+        "ATTACHED_CARDS": ZoneType.ATTACHED_CARDS,
+        "ATTACHED_ENERGY": ZoneType.ATTACHED_CARDS,
+        "ATTACHED": ZoneType.ATTACHED_CARDS,
+        "ENERGY": ZoneType.ATTACHED_CARDS,
+    }
+    if key in mapping:
+        return mapping[key]
+    if "DISCARD" in key:
+        return ZoneType.DISCARD
+    if "LOST" in key:
+        return ZoneType.LOST_ZONE
+    if "PRIZE" in key:
+        return ZoneType.PRIZES
+    if "DECK" in key:
+        return ZoneType.DECK
+    if "HAND" in key:
+        return ZoneType.HAND
+    if "BENCH" in key:
+        return ZoneType.BENCH
+    if "ACTIVE" in key:
+        return ZoneType.ACTIVE
+    if "ATTACH" in key or "ENERG" in key:
+        return ZoneType.ATTACHED_CARDS
+    raise ValueError(f"Zone (ZoneType) inconnue : {val!r}")
 
 
 def _coerce_ai_role(val: Any) -> AIRole:
@@ -597,15 +1093,66 @@ class PokemonStats(BaseModel):
         return out
 
 
+def _sync_effect_zones(
+    primitive: EffectPrimitive,
+    target: Optional[EffectTarget],
+    source_zone: Optional[ZoneType],
+    dest_zone: Optional[ZoneType],
+    zone: Optional[ZoneType],
+) -> tuple[Optional[ZoneType], Optional[ZoneType], Optional[ZoneType]]:
+    """Synchronise `sourceZone`, `destinationZone` et `zone` de façon cohérente."""
+    if source_zone is None and dest_zone is None and zone is not None:
+        if primitive in {
+            EffectPrimitive.SEARCH_DECK,
+            EffectPrimitive.DRAW_CARDS,
+            EffectPrimitive.SHUFFLE_HAND_DRAW,
+            EffectPrimitive.MILL_DECK,
+        }:
+            if zone == ZoneType.DECK:
+                source_zone = ZoneType.DECK
+                if target in {EffectTarget.OWN_BENCH_SINGLE, EffectTarget.OWN_BENCH_ALL}:
+                    dest_zone = ZoneType.BENCH
+                else:
+                    dest_zone = ZoneType.HAND
+            elif zone in {ZoneType.HAND, ZoneType.BENCH}:
+                source_zone = ZoneType.DECK
+                dest_zone = zone
+            else:
+                source_zone = zone
+        elif primitive == EffectPrimitive.RECOVER_FROM_DISCARD:
+            source_zone = ZoneType.DISCARD
+            if zone in {ZoneType.HAND, ZoneType.DECK, ZoneType.BENCH, ZoneType.TOP_OF_DECK}:
+                dest_zone = zone
+        elif primitive == EffectPrimitive.DISCARD_CARDS:
+            source_zone = zone
+            dest_zone = ZoneType.DISCARD
+        elif primitive == EffectPrimitive.ATTACH_ENERGY:
+            source_zone = zone
+            dest_zone = ZoneType.ATTACHED_CARDS
+        elif primitive == EffectPrimitive.EVOLVE_POKEMON:
+            source_zone = zone
+            dest_zone = ZoneType.BENCH if target in {EffectTarget.OWN_BENCH_SINGLE, EffectTarget.OWN_BENCH_ALL} else ZoneType.ACTIVE
+        elif primitive == EffectPrimitive.SWITCH_ACTIVE:
+            source_zone = ZoneType.BENCH
+            dest_zone = ZoneType.ACTIVE
+        else:
+            source_zone = zone
+
+    if zone is None:
+        zone = source_zone or dest_zone
+
+    return source_zone, dest_zone, zone
+
+
 class AtomicEffect(BaseModel):
     """Effet atomique normalisé exécuté par une action."""
 
     model_config = ConfigDict(extra="ignore")
 
     primitive: EffectPrimitive = Field(description="Primitive d'effet normalisée")
-    target: Optional[str] = Field(
+    target: Optional[EffectTarget] = Field(
         default=None,
-        description="Cible de l'effet (ex: 'SELF', 'OPPONENT_ACTIVE', 'OPPONENT_BENCH', 'OWN_BENCH', 'OWN_POKEMON_ANY', 'PLAYER')",
+        description="Cible stricte de l'effet (`EffectTarget`)",
     )
     value: Optional[int] = Field(
         default=None,
@@ -615,13 +1162,45 @@ class AtomicEffect(BaseModel):
         default=None,
         description="Nombre d'éléments affectés (ex: 2 cartes à piocher ou chercher)",
     )
-    zone: Optional[str] = Field(
+    sourceZone: Optional[ZoneType] = Field(
         default=None,
-        description="Zone impliquée (ex: 'DECK', 'HAND', 'DISCARD', 'BENCH', 'ACTIVE')",
+        description="Zone d'origine de la carte ou ressource (ex: 'DECK', 'DISCARD', 'HAND')",
+    )
+    destinationZone: Optional[ZoneType] = Field(
+        default=None,
+        description="Zone de destination de la carte ou ressource (ex: 'HAND', 'BENCH', 'ACTIVE', 'DISCARD')",
+    )
+    zone: Optional[ZoneType] = Field(
+        default=None,
+        description="Zone principale impliquée (`ZoneType`, synchronisée avec sourceZone/destinationZone)",
     )
     filter: Optional[str] = Field(
         default=None,
         description="Filtre normalisé (ex: 'CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70', 'CATEGORY:ENERGY|TYPE:Feu')",
+    )
+    specialCondition: Optional[SpecialCondition] = Field(
+        default=None,
+        description="État spécial appliqué (obligatoire si primitive == APPLY_SPECIAL_CONDITION)",
+    )
+    coinFlipMode: Optional[CoinFlipMode] = Field(
+        default=None,
+        description="Mode de lancer de pièce associé à cet effet",
+    )
+    coinCount: Optional[int] = Field(
+        default=None,
+        description="Nombre de pièces lancées si applicable",
+    )
+    scalingOperator: Optional[ScalingOperator] = Field(
+        default=None,
+        description="Opérateur de scaling des dégâts/effets (`ADD` ou `MULTIPLY`)",
+    )
+    scalingMetric: Optional[ScalingMetric] = Field(
+        default=None,
+        description="Métrique de scaling (`ScalingMetric`)",
+    )
+    bonusValue: Optional[int] = Field(
+        default=None,
+        description="Montant du bonus ou multiplicateur par unité",
     )
     upTo: bool = Field(default=False, description="Indique si le nombre est un maximum ('jusqu'à X')")
     optional: bool = Field(default=False, description="Indique si l'effet est facultatif ('vous pouvez')")
@@ -640,9 +1219,13 @@ class AtomicEffect(BaseModel):
             return data
 
         out = dict(data)
-        out["primitive"] = _coerce_effect_primitive(
-            out.get("primitive") or out.get("type") or out.get("effect") or "DRAW_CARDS"
-        )
+        raw_prim = out.get("primitive")
+        if raw_prim is None:
+            raw_prim = out.get("type")
+        if raw_prim is None:
+            raw_prim = out.get("effect")
+        prim = _coerce_effect_primitive(raw_prim)
+        out["primitive"] = prim
 
         # Compatibilité value <-> baseDamage / amount / damage / heal
         if out.get("value") is None:
@@ -652,22 +1235,34 @@ class AtomicEffect(BaseModel):
                     break
         out["value"] = _coerce_optional_int(out.get("value"))
 
-        # Compatibilité count
+        # Compatibilité count & coinCount & bonusValue
         out["count"] = _coerce_optional_int(out.get("count"))
+        out["coinCount"] = _coerce_optional_int(out.get("coinCount"))
+        out["bonusValue"] = _coerce_optional_int(out.get("bonusValue"))
 
-        # Compatibilité target
-        if out.get("target") is not None and not isinstance(out.get("target"), str):
-            out["target"] = str(out["target"]).strip().upper()
-        elif isinstance(out.get("target"), str):
-            out["target"] = out["target"].strip() or None
+        # Sauvegarde si target contenait une zone explicite (ex: 'DECK', 'OPPONENT_HAND')
+        raw_tgt = out.get("target")
+        if isinstance(raw_tgt, str):
+            tgt_upper = raw_tgt.strip().upper()
+            if out.get("zone") is None and out.get("sourceZone") is None:
+                if tgt_upper in {"DECK", "OWN_DECK", "PLAYER_DECK", "OPPONENT_DECK"}:
+                    out["sourceZone"] = ZoneType.DECK
+                elif tgt_upper in {"HAND", "OWN_HAND", "PLAYER_HAND", "OPPONENT_HAND"}:
+                    out["sourceZone"] = ZoneType.HAND
+                elif tgt_upper in {"DISCARD", "OWN_DISCARD"}:
+                    out["sourceZone"] = ZoneType.DISCARD
 
-        # Compatibilité zone <-> sourceZone / targetZone
-        if out.get("zone") is None:
-            src_z = out.get("sourceZone") or out.get("targetZone")
-            if src_z is not None:
-                out["zone"] = str(getattr(src_z, "value", src_z)).strip().upper()
-        elif not isinstance(out.get("zone"), str):
-            out["zone"] = str(out["zone"]).strip().upper()
+        target = _coerce_effect_target(raw_tgt)
+        out["target"] = target
+
+        # Compatibilité zones (`sourceZone`, `destinationZone`, `zone`)
+        src_z = _coerce_zone_type(out.get("sourceZone"))
+        dst_z = _coerce_zone_type(out.get("destinationZone") or out.get("targetZone"))
+        raw_z = _coerce_zone_type(out.get("zone"))
+        src_z, dst_z, main_z = _sync_effect_zones(prim, target, src_z, dst_z, raw_z)
+        out["sourceZone"] = src_z
+        out["destinationZone"] = dst_z
+        out["zone"] = main_z
 
         # Compatibilité filter <-> targetFilter
         raw_filter = out.get("filter") if out.get("filter") is not None else out.get("targetFilter")
@@ -688,9 +1283,42 @@ class AtomicEffect(BaseModel):
         else:
             out["filter"] = None
 
+        # Compatibilité specialCondition
+        raw_sc = (
+            out.get("specialCondition")
+            if out.get("specialCondition") is not None
+            else (out.get("statusCondition") or out.get("status") or out.get("condition"))
+        )
+        sc = _coerce_special_condition(raw_sc)
+        if sc is None and prim == EffectPrimitive.APPLY_SPECIAL_CONDITION:
+            # Récupération depuis raw_prim (ex: 'POISON', 'BURN') ou filter
+            for hint in (raw_prim, out.get("filter")):
+                if hint is not None:
+                    try:
+                        sc = _coerce_special_condition(hint)
+                        if sc is not None:
+                            break
+                    except ValueError:
+                        pass
+        out["specialCondition"] = sc
+
+        # Champs coinFlip et scaling
+        out["coinFlipMode"] = _coerce_coin_flip_mode(out.get("coinFlipMode"))
+        out["scalingOperator"] = _coerce_scaling_operator(out.get("scalingOperator"))
+        out["scalingMetric"] = _coerce_scaling_metric(out.get("scalingMetric"))
+
         out["upTo"] = _coerce_bool(out.get("upTo"), default=False)
         out["optional"] = _coerce_bool(out.get("optional"), default=False)
         return out
+
+    @model_validator(mode="after")
+    def _validate_effect_invariants(self) -> "AtomicEffect":
+        if self.primitive == EffectPrimitive.APPLY_SPECIAL_CONDITION and self.specialCondition is None:
+            raise ValueError(
+                "Le champ `specialCondition` (POISONED, BURNED, ASLEEP, PARALYZED, CONFUSED) "
+                "est obligatoire lorsque `primitive == APPLY_SPECIAL_CONDITION`."
+            )
+        return self
 
 
 class PlayableAction(BaseModel):

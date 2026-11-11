@@ -262,6 +262,33 @@ class TestMLXCompiler(unittest.TestCase):
         self.assertIn("mlx-community/Qwen3.8-27B-4bit", str(ctx.exception))
         self.assertIn("GSQ-RCO", str(ctx.exception))
 
+    def test_gemma4_default_model_and_thinking_toggle_for_pass2(self) -> None:
+        """Vérifie le modèle par défaut gemma-4-26b-a4b-4bit, le flag enable_thinking et le nettoyage JSON."""
+        from compiler.llm_engine import extract_json_payload
+
+        self.assertEqual(DEFAULT_MLX_MODEL_REPO_ID, "mlx-community/gemma-4-26b-a4b-4bit")
+
+        tok = MagicMock()
+        tok.apply_chat_template.return_value = "FORMATTED"
+
+        # Passe 2 : disable_thinking=True -> enable_thinking=False obligatoire
+        c_pass2 = MLXCardCompiler(disable_thinking=True)
+        c_pass2._tokenizer = tok
+        c_pass2._build_formatted_prompt([{"role": "user", "content": "hi"}])
+        _, kwargs_off = tok.apply_chat_template.call_args
+        self.assertIs(kwargs_off.get("enable_thinking"), False)
+
+        # Mode actif : disable_thinking=False -> enable_thinking=True
+        c_on = MLXCardCompiler(disable_thinking=False)
+        c_on._tokenizer = tok
+        c_on._build_formatted_prompt([{"role": "user", "content": "hi"}])
+        _, kwargs_on = tok.apply_chat_template.call_args
+        self.assertIs(kwargs_on.get("enable_thinking"), True)
+
+        # Extraction JSON même en cas de canal thought Gemma 4 résiduel
+        raw = '<|channel>thought\nblabla<channel|>\n```json\n{"aiRole": "DRAW_ENGINE"}\n```'
+        self.assertEqual(extract_json_payload(raw), '{"aiRole": "DRAW_ENGINE"}')
+
 
 if __name__ == "__main__":
     unittest.main()

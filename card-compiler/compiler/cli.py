@@ -65,7 +65,7 @@ from compiler.models_config import (
     normalize_pipeline_phase,
     resolve_model_for_configuration,
 )
-from compiler.post_processor import sanitize_and_enrich_card
+from compiler.post_processor import repair_compiled_corpus, sanitize_and_enrich_card
 from compiler.reasoning_engine import (
     ReasoningRecord,
     get_reasoning_texts_dir,
@@ -726,8 +726,11 @@ def _execute_run_pipeline(
     elif effective_backend == "mlx":
         engine_preview = MLXCardCompiler(
             model=model,
+            intensity=eff_intensity,
+            phase=eff_phase if eff_pipeline == PipelineMode.two_pass else None,
+            pipeline_mode=eff_pipeline,
             hf_token=hf_token,
-            disable_thinking=disable_thinking,
+            disable_thinking=True if (eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.code) else disable_thinking,
             thinking=thinking,
         )
         title_text = "[bold cyan]Pokémon TCG Card Compiler — Exécution Locale Apple MLX Native (CoT)[/bold cyan]"
@@ -736,7 +739,13 @@ def _execute_run_pipeline(
             if engine_preview.hf_token
             else "[yellow]Non renseigné (anonyme)[/yellow]"
         )
-        if engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
+        if eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.all:
+            thinking_display = "[green]Passe 1 : Activé (enable_thinking=True)[/green] | [yellow]Passe 2 : Désactivé (enable_thinking=False)[/yellow]"
+        elif eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.reason:
+            thinking_display = "[green]Activé pour Passe 1 (enable_thinking=True)[/green]"
+        elif eff_pipeline == PipelineMode.two_pass and eff_phase == PipelinePhase.code:
+            thinking_display = "[yellow]Désactivé pour Passe 2 (enable_thinking=False)[/yellow]"
+        elif engine_preview.disable_thinking or getattr(engine_preview, "thinking", None) == "null":
             thinking_display = "[yellow]Désactivé (null / --no-think)[/yellow]"
         elif getattr(engine_preview, "thinking", None) is not None:
             thinking_display = f"[green]Activé (niveau: [bold cyan]{engine_preview.thinking}[/bold cyan])[/green]"
@@ -1572,7 +1581,7 @@ def reason_command(
         "--intensity",
         "-it",
         envvar=["INTENSITY_MODE"],
-        help="Niveau d'intensité du modèle de raisonnement : 'soft' (défaut, 14B 4-bit) ou 'intense' (14B 8-bit).",
+        help="Niveau d'intensité du modèle de raisonnement : 'soft' ou 'intense'.",
     ),
     local_backend: Optional[str] = typer.Option(
         None,
@@ -1647,7 +1656,7 @@ def code_command(
         "--intensity",
         "-it",
         envvar=["INTENSITY_MODE"],
-        help="Niveau d'intensité du modèle de coding : 'soft' (défaut, 7B 8-bit) ou 'intense' (14B 8-bit).",
+        help="Niveau d'intensité du modèle de coding : 'soft' ou 'intense'.",
     ),
     local_backend: Optional[str] = typer.Option(
         None,
@@ -3401,6 +3410,57 @@ def update_index_alias(
         force=force,
         force_raw=force_raw,
     )
+
+
+@app.command("repair-compiled")
+def repair_compiled_command(
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants séparés par des virgules pour restreindre la réparation.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Simule la réparation sans modifier les fichiers JSON.",
+    ),
+) -> None:
+    """Répare déterministiquement toutes les cartes compilées (`data/compiled_cards/*.json`), met à jour `cards_database.json` et génère `data/cards_to_recompile_llm.txt`."""
+    data_dir = get_data_dir()
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+
+    with console.status("[bold cyan]Réparation déterministe du corpus en cours...[/bold cyan]"):
+        res = repair_compiled_corpus(
+            data_dir=data_dir,
+            target_ids=custom_ids,
+            dry_run=dry_run,
+        )
+
+    sim_note = " (simulation --dry-run)" if dry_run else ""
+    console.print(
+        Panel.fit(
+            f"• [bold]Cartes traitées[/bold] : [bold white]{res['total_processed']}[/bold white]\n"
+            f"• [bold]Cartes réparées/validées[/bold] : [bold green]{res['repaired_count']}[/bold green]\n"
+            f"• [bold]Fichiers modifiés[/bold] : [bold cyan]{res['modified_count']}[/bold cyan]{sim_note}\n"
+            f"• [bold]Anciennes cartes listées pour Passe 2 LLM[/bold] : [bold yellow]{res['legacy_recompile_count']}[/bold yellow] ([cyan]{res['recompile_file']}[/cyan])\n"
+            f"• [bold]Base consolidée[/bold] : [cyan]{res['db_path']}[/cyan]\n"
+            f"• [bold]Erreurs[/bold] : [{'bold red' if res['errors'] else 'bold green'}]{len(res['errors'])}[/{'bold red' if res['errors'] else 'bold green'}]",
+            title="[bold green]Réparation Déterministe du Corpus Standard[/bold green]",
+            border_style="green" if not res["errors"] else "red",
+        )
+    )
+
+    if res["errors"]:
+        for cid, msg in res["errors"][:15]:
+            console.print(f"[red]✗ {cid} : {msg}[/red]")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

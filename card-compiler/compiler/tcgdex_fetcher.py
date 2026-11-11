@@ -211,125 +211,17 @@ def generate_candidate_ids(card_id: str) -> List[str]:
     return candidates
 
 
-def _normalize_text(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def infer_category_and_subcategory(
-    raw_fr: Dict[str, Any],
-    raw_en: Optional[Dict[str, Any]] = None,
-) -> Tuple[CardCategory, CardSubCategory]:
-    """Détermine de façon déterministe `CardCategory` et `CardSubCategory` depuis le JSON TCGdex."""
-    cat_fr = (raw_fr.get("category") or "").strip().lower()
-    cat_en = ((raw_en or {}).get("category") or "").strip().lower()
-
-    # 1. POKEMON
-    if "pok" in cat_fr or "pok" in cat_en:
-        stage_fr = (raw_fr.get("stage") or "").strip().lower()
-        stage_en = ((raw_en or {}).get("stage") or "").strip().lower()
-        if "niveau 2" in stage_fr or "stage2" in stage_en or "stage 2" in stage_en:
-            return CardCategory.POKEMON, CardSubCategory.STAGE_2
-        if (
-            "niveau 1" in stage_fr
-            or "stage1" in stage_en
-            or "stage 1" in stage_en
-            or "vmax" in stage_fr
-            or "vstar" in stage_fr
-            or "vmax" in stage_en
-            or "vstar" in stage_en
-        ):
-            return CardCategory.POKEMON, CardSubCategory.STAGE_1
-        return CardCategory.POKEMON, CardSubCategory.BASIC
-
-    # 2. ENERGY
-    if "énerg" in cat_fr or "energ" in cat_fr or "energ" in cat_en:
-        etype_fr = (raw_fr.get("energyType") or "").strip().lower()
-        etype_en = ((raw_en or {}).get("energyType") or "").strip().lower()
-        name_fr = (raw_fr.get("name") or "").strip().lower()
-        name_en = ((raw_en or {}).get("name") or "").strip().lower()
-        effect_fr = (raw_fr.get("effect") or "").strip()
-        effect_en = ((raw_en or {}).get("effect") or "").strip()
-        if (
-            "spécial" in etype_fr
-            or "special" in etype_en
-            or bool(effect_fr or effect_en)
-            and "de base" not in name_fr
-            and "basic" not in name_en
-        ):
-            return CardCategory.ENERGY, CardSubCategory.SPECIAL_ENERGY
-        return CardCategory.ENERGY, CardSubCategory.BASIC_ENERGY
-
-    # 3. TRAINER
-    ttype_fr = (raw_fr.get("trainerType") or "").strip().lower()
-    ttype_en = ((raw_en or {}).get("trainerType") or "").strip().lower()
-    if "supporter" in ttype_fr or "supporter" in ttype_en:
-        return CardCategory.TRAINER, CardSubCategory.SUPPORTER
-    if "outil" in ttype_fr or "tool" in ttype_en or "technical machine" in ttype_en:
-        return CardCategory.TRAINER, CardSubCategory.TOOL
-    if "stade" in ttype_fr or "stadium" in ttype_en:
-        return CardCategory.TRAINER, CardSubCategory.STADIUM
-    return CardCategory.TRAINER, CardSubCategory.ITEM
-
-
-def extract_raw_rules_text(
-    raw_fr: Dict[str, Any],
-    raw_en: Optional[Dict[str, Any]] = None,
-) -> List[str]:
-    """Assemble tous les textes d'effets, talents et attaques (FR + EN) pour le prompt et l'identité."""
-    lines: List[str] = []
-
-    effect_fr = _normalize_text(raw_fr.get("effect"))
-    if effect_fr:
-        lines.append(f"[Effet FR] {effect_fr}")
-
-    if raw_en:
-        effect_en = _normalize_text(raw_en.get("effect"))
-        if effect_en and effect_en != effect_fr:
-            lines.append(f"[Effect EN] {effect_en}")
-
-    for ability in raw_fr.get("abilities") or []:
-        if isinstance(ability, dict):
-            ab_type = ability.get("type") or "Talent"
-            ab_name = ability.get("name") or ""
-            ab_effect = _normalize_text(ability.get("effect"))
-            lines.append(f"[{ab_type} FR: {ab_name}] {ab_effect}")
-
-    if raw_en:
-        for ability in raw_en.get("abilities") or []:
-            if isinstance(ability, dict):
-                ab_type = ability.get("type") or "Ability"
-                ab_name = ability.get("name") or ""
-                ab_effect = _normalize_text(ability.get("effect"))
-                lines.append(f"[{ab_type} EN: {ab_name}] {ab_effect}")
-
-    for attack in raw_fr.get("attacks") or []:
-        if isinstance(attack, dict):
-            atk_name = attack.get("name") or ""
-            atk_cost = ",".join(attack.get("cost") or [])
-            atk_dmg = attack.get("damage")
-            atk_eff = _normalize_text(attack.get("effect"))
-            dmg_str = f" ({atk_dmg} dégâts)" if atk_dmg is not None else ""
-            lines.append(f"[Attaque FR: {atk_name} | Coût: {atk_cost}{dmg_str}] {atk_eff}".strip())
-
-    if raw_en:
-        for attack in raw_en.get("attacks") or []:
-            if isinstance(attack, dict):
-                atk_name = attack.get("name") or ""
-                atk_cost = ",".join(attack.get("cost") or [])
-                atk_dmg = attack.get("damage")
-                atk_eff = _normalize_text(attack.get("effect"))
-                dmg_str = f" ({atk_dmg} dmg)" if atk_dmg is not None else ""
-                lines.append(f"[Attack EN: {atk_name} | Cost: {atk_cost}{dmg_str}] {atk_eff}".strip())
-
-    return lines
-
-
 from compiler.deterministic_builder import (
+    _normalize_whitespace,
     build_identity_and_stats_from_raw,
     detect_rule_box_and_prizes as _det_rule_box_and_prizes,
+    extract_raw_rules_text,
+    infer_category_and_subcategory,
 )
+
+
+def _normalize_text(text: Optional[str]) -> str:
+    return _normalize_whitespace(text)
 
 
 def detect_rule_box_and_prizes(name_fr: str, name_en: Optional[str], raw_fr: Dict[str, Any]) -> Tuple[bool, int]:

@@ -1480,7 +1480,7 @@ class TestLMStudioCompiler(unittest.TestCase):
         # 1. Vérification directe sur le modèle Pydantic LLMCompiledCardPart
         parsed_part = LLMCompiledCardPart.model_validate_json(json.dumps(raw_statitik_llm_json))
         self.assertIsInstance(parsed_part, LLMCompiledCardPart)
-        self.assertEqual(parsed_part.translatedSlots[0].effects[0].primitive.value, "DAMAGE_ACTIVE")
+        self.assertEqual(parsed_part.translatedSlots[0].effects[0].primitive.value, "PREVENT_DAMAGE_OR_EFFECTS")
         self.assertEqual(parsed_part.aiRole.value, "MAIN_ATTACKER")
 
         # 2. Vérification de bout en bout via compile_card
