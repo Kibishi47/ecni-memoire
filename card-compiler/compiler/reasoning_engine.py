@@ -303,7 +303,7 @@ class ReasoningEngine:
                     local_snap = snapshot_download(self.repo_id, local_files_only=True)
                 except Exception:
                     local_snap = snapshot_download(
-                        "mlx-community/gemma-4-26b-a4b-4bit",
+                        "mlx-community/gemma-4-26b-a4b-it-4bit",
                         local_files_only=True,
                     )
                 self._model, self._tokenizer = mlx_lm.load(local_snap)

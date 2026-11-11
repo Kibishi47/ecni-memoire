@@ -27,7 +27,7 @@ Le compilateur sépare strictement ce qui relève de la donnée structurée et c
 
 Configuration centralisée dans [compiler/models_config.py](compiler/models_config.py) :
 
-- **Backend Apple MLX par défaut** : **`mlx-community/gemma-4-26b-a4b-4bit`** (utilisé en Passe 1 et Passe 2, avec `max_tokens=2048` par défaut).
+- **Backend Apple MLX par défaut** : **`mlx-community/gemma-4-26b-a4b-it-4bit`** (utilisé en Passe 1 et Passe 2, avec `max_tokens=2048` par défaut).
 - **Passe 1 — Raisonnement de Juge ([compiler/reasoning_engine.py](compiler/reasoning_engine.py))** :
   - `enable_thinking=True` (capture le canal `<|channel>thought...<channel|>` dans `rawThinkingProcess` et extrait `reasoningText`).
   - Reçoit le socle statique des règles officielles ([`CORE_RULES_SYSTEM_BLOCK`](compiler/rules_knowledge.py)) dans `REASONING_SYSTEM_PROMPT`, plus les micro-règles dynamiques pertinentes pour la carte courante via [`format_relevant_rules_block`](compiler/rules_knowledge.py).
