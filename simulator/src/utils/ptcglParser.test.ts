@@ -12,7 +12,7 @@ describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
     expect(UNIFIED_CARD_REGISTRY['sv03-164']?.identity.nameFr).toBe('Roucarnage-ex')
     expect(UNIFIED_CARD_REGISTRY['sv05-123']?.identity.nameFr).toBe('Ire-Foudre-ex')
     expect(UNIFIED_CARD_REGISTRY['sv06.5-038']?.identity.nameFr).toBe('Favianos-ex')
-    expect(getCompiledCardsCount()).toBe(854)
+    expect(getCompiledCardsCount()).toBe(3509)
   })
 
   it('valide les 3 decks méta de référence à 60 cartes avec 100 % de cartes résolues', () => {

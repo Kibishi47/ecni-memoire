@@ -155,4 +155,35 @@ describe('debugModelHelper — AI Model Clean Extraction & Human-Readable Format
     expect(cleaned?.playableActions[0].effects[0].damageScalingType).toBe('PER_OPPONENT_PRIZE_TAKEN')
     expect(cleaned?.playableActions[0].deadCardCondition).toBeUndefined()
   })
+
+  it('traduit les 29 primitives v2, ActionTypes déclenchés/passifs, cibles, zones, coinFlipMode et scalingMetric en FR et EN', () => {
+    expect(getHumanReadableActionType('TRIGGERED_ABILITY', 'fr')).toBe('Talent Déclenché')
+    expect(getHumanReadableActionType('PASSIVE_ABILITY', 'en')).toBe('Passive Ability')
+
+    expect(getHumanReadablePrimitive('PLACE_DAMAGE_COUNTERS', 'fr')).toBe('Placement de Marqueurs de Dégâts')
+    expect(getHumanReadablePrimitive('LOCK_ITEMS', 'en')).toBe('Lock Items (Item-Lock)')
+    expect(getHumanReadablePrimitive('EXPAND_BENCH', 'fr')).toBe('Extension du Banc')
+
+    const detailsFr = getHumanReadableEffectDetails(
+      {
+        primitive: 'DAMAGE_ACTIVE',
+        target: 'OPPONENT_BENCH_ALL',
+        value: 50,
+        coinFlipMode: 'MULTI_COIN_PER_HEADS',
+        coinCount: 3,
+        scalingOperator: 'MULTIPLY',
+        scalingMetric: 'PER_ENERGY_ON_SELF',
+        bonusValue: 50,
+        sourceZone: 'DECK',
+        destinationZone: 'HAND',
+      },
+      'fr',
+    )
+
+    expect(detailsFr.some((d) => d.value.includes('Tout le Banc Adverse'))).toBe(true)
+    expect(detailsFr.some((d) => d.value.includes('3 lancers'))).toBe(true)
+    expect(detailsFr.some((d) => d.value.includes('×50'))).toBe(true)
+    expect(detailsFr.some((d) => d.value === 'Deck')).toBe(true)
+    expect(detailsFr.some((d) => d.value === 'Main')).toBe(true)
+  })
 })

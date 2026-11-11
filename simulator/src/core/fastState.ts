@@ -40,6 +40,30 @@ export function hashStringFast(str: string): number {
   return finalHash
 }
 
+function getSpecialConditionMask(conds?: readonly string[]): number {
+  if (!conds || conds.length === 0) return 0
+  let mask = 0
+  for (let i = 0; i < conds.length; i++) {
+    const c = conds[i]
+    if (c === 'POISONED') mask |= 1
+    else if (c === 'BURNED') mask |= 2
+    else if (c === 'ASLEEP') mask |= 4
+    else if (c === 'PARALYZED') mask |= 8
+    else if (c === 'CONFUSED') mask |= 16
+  }
+  return mask
+}
+
+function getPokemonStatusBits(p: InPlayPokemon): number {
+  return (
+    (p.evolvedThisTurn ? 1 : 0) |
+    (p.cantAttackNextTurn ? 2 : 0) |
+    (p.cantRetreatNextTurn ? 4 : 0) |
+    (p.preventDamageOrEffectsNextTurn ? 8 : 0) |
+    (getSpecialConditionMask(p.specialConditions) << 4)
+  )
+}
+
 /**
  * Calcule l'empreinte 32 bits d'un `InPlayPokemon` (indépendante de son `instanceId`
  * pour préserver la commutativité des placements sur le Banc).
@@ -49,7 +73,12 @@ export function hashInPlayPokemon(p: InPlayPokemon): number {
   let h = mix32(cardIdNum, 0x13579bdf)
   h = mix32(p.damage, h)
   h = mix32(p.attachedEnergies.length, h)
-  h = mix32((p.evolvedThisTurn ? 1 : 0) | (p.cantAttackNextTurn ? 2 : 0), h)
+  h = mix32(getPokemonStatusBits(p), h)
+  const modPack =
+    ((p.damageTakenModifierNextTurn || 0) & 0xfff) |
+    (((p.damageDealtModifierNextTurn || 0) & 0xfff) << 12) |
+    (((p.retreatCostModifier || 0) & 0xff) << 24)
+  h = mix32(modPack ^ (p.hpBonus || 0), h)
 
   // Hachage commutatif des outils attachés
   let toolsSum = 0
@@ -110,7 +139,9 @@ export function computeNumericBoardHash(b: PlayerBoardState): { h1: number; h2: 
     ((b.retreatUsedThisTurn ? 1 : 0) << 2) |
     ((b.vstarPowerUsed ? 1 : 0) << 3) |
     ((b.itemLockActive ? 1 : 0) << 4) |
-    ((b.extraTurnGranted ? 1 : 0) << 5)
+    ((b.extraTurnGranted ? 1 : 0) << 5) |
+    ((b.abilityLockActive ? 1 : 0) << 6) |
+    (((b.maxBenchSlotsOverride || 0) & 0xf) << 8)
 
   let h1 = mix32(activeHash, 0x10203040)
   h1 = mix32(benchSum, h1)
@@ -197,15 +228,20 @@ function encodePlayerBoardToSlice(b: PlayerBoardState, buf: Int32Array, offset: 
     ((b.retreatUsedThisTurn ? 1 : 0) << 2) |
     ((b.vstarPowerUsed ? 1 : 0) << 3) |
     ((b.itemLockActive ? 1 : 0) << 4) |
-    ((b.extraTurnGranted ? 1 : 0) << 5)
+    ((b.extraTurnGranted ? 1 : 0) << 5) |
+    ((b.abilityLockActive ? 1 : 0) << 6) |
+    (((b.maxBenchSlotsOverride || 0) & 0xf) << 8)
   buf[offset + 6] = b.turnDamageBoost || 0
 
-  // Pokémon Actif (mots offset+8 .. offset+12)
+  // Pokémon Actif (mots offset+7 .. offset+12)
   if (b.activePokemon) {
+    buf[offset + 7] =
+      ((b.activePokemon.damageTakenModifierNextTurn || 0) & 0xffff) ^
+      (((b.activePokemon.hpBonus || 0) & 0xffff) << 16)
     buf[offset + 8] = getCardFastMeta(b.activePokemon.card).numericId
     buf[offset + 9] = b.activePokemon.damage
     buf[offset + 10] = b.activePokemon.attachedEnergies.length
-    buf[offset + 11] = b.activePokemon.evolvedThisTurn ? 1 : 0
+    buf[offset + 11] = getPokemonStatusBits(b.activePokemon)
     buf[offset + 12] = b.activePokemon.attachedTools[0]
       ? getCardFastMeta(b.activePokemon.attachedTools[0]).numericId
       : 0
@@ -219,7 +255,7 @@ function encodePlayerBoardToSlice(b: PlayerBoardState, buf: Int32Array, offset: 
     buf[base + 0] = getCardFastMeta(p.card).numericId
     buf[base + 1] = p.damage
     buf[base + 2] = p.attachedEnergies.length
-    buf[base + 3] = p.evolvedThisTurn ? 1 : 0
+    buf[base + 3] = getPokemonStatusBits(p)
     buf[base + 4] = p.attachedTools[0] ? getCardFastMeta(p.attachedTools[0]).numericId : 0
   }
 

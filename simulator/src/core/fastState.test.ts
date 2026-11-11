@@ -125,6 +125,29 @@ describe('FastState — Zobrist / Murmur3 Numeric Hashing, Flat Int32Array Buffe
     expect(computeNumericStateHash(clonedOut)).toBe(computeNumericStateHash(inPlaceOut))
   })
 
+  it('différencie dans le hachage et le buffer binaire les statuts, verrous v2, hpBonus et capacité de Banc', () => {
+    const deck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const stateA = createInitialMatchState(deck, deck, { seed: 42, firstPlayerIndex: 0, maxTurns: 12 })
+    const stateB = fastCloneState(stateA)
+
+    const hashBase = computeNumericStateHash(stateA)
+
+    stateB.player.activePokemon!.specialConditions = ['PARALYZED']
+    expect(computeNumericStateHash(stateB)).not.toBe(hashBase)
+
+    const stateC = fastCloneState(stateA)
+    stateC.player.activePokemon!.cantRetreatNextTurn = true
+    expect(computeNumericStateHash(stateC)).not.toBe(hashBase)
+
+    const stateD = fastCloneState(stateA)
+    stateD.player.abilityLockActive = true
+    expect(computeNumericStateHash(stateD)).not.toBe(hashBase)
+
+    const stateE = fastCloneState(stateA)
+    stateE.player.activePokemon!.hpBonus = 100
+    expect(computeNumericStateHash(stateE)).not.toBe(hashBase)
+  })
+
   it('executes 100 full 3-ply games at high throughput (> 30 games/sec single-threaded on complex meta decks)', () => {
     const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
     const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[1]!.ptcglText)
