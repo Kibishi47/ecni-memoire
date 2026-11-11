@@ -110,6 +110,13 @@ def main() -> None:
         default=os.environ.get("CONTINUE_ON_ERROR", "false").lower() in {"1", "true", "yes"},
         help="Passe à la carte suivante en cas d'erreur.",
     )
+    parser.add_argument(
+        "-bs",
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Taille de lot MLX pour le parallélisme continu (défaut: MLX_BATCH_SIZE ou 2).",
+    )
 
     args = parser.parse_args()
 
@@ -140,6 +147,7 @@ def main() -> None:
         backend=args.backend,
         force=args.force,
         continue_on_error=args.continue_on_error,
+        batch_size=args.batch_size,
         console=console,
     )
 

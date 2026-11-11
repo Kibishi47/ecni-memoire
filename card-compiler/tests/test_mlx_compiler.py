@@ -289,6 +289,99 @@ class TestMLXCompiler(unittest.TestCase):
         raw = '<|channel>thought\nblabla<channel|>\n```json\n{"aiRole": "DRAW_ENGINE"}\n```'
         self.assertEqual(extract_json_payload(raw), '{"aiRole": "DRAW_ENGINE"}')
 
+    @patch.object(MLXCardCompiler, "load_model_in_memory")
+    def test_compile_cards_batch_with_retry_on_invalid_json(self, mock_load: MagicMock) -> None:
+        """Vérifie le batching continu Passe 2 et le repli individuel en cas de JSON invalide dans le lot."""
+        from compiler.mlx_utils import MLXBatchItemResult, MLXBatchRunStats
+
+        compiler = MLXCardCompiler(disable_thinking=True)
+        tok = MagicMock()
+        tok.bos_token = "<bos>"
+        tok.apply_chat_template.return_value = "<bos>prompt"
+        tok.encode.return_value = [2, 10]
+        compiler._tokenizer = tok
+        compiler._model = MagicMock()
+
+        b1 = create_fake_card_bundle("sv01-001", "Pikachu")
+        b2 = create_fake_card_bundle("sv01-002", "Voltorbe")
+        b2.raw_fr["attacks"][0]["damage"] = "40"
+
+        valid_payload_1 = json.dumps(
+            {
+                "translatedSlots": [
+                    {
+                        "slotId": "attack_0",
+                        "preconditions": [],
+                        "effects": [{"primitive": "DAMAGE_ACTIVE", "target": "OPPONENT_ACTIVE", "amount": 20}],
+                        "deadCardCondition": None,
+                    }
+                ],
+                "aiRole": "MAIN_ATTACKER",
+                "turnPhaseWeights": {"turn1": 0.5, "turn2": 0.9, "turn3": 0.9, "turn4Plus": 0.8},
+                "additionalSynergyTags": [],
+            }
+        )
+
+        def fake_batch_runner(*args, **kwargs):
+            on_done = kwargs["on_item_complete"]
+            r0 = MLXBatchItemResult(
+                index=0,
+                text=valid_payload_1,
+                completion_tokens=40,
+                finish_reason="stop",
+                duration_seconds=0.8,
+                generation_duration_seconds=0.7,
+                time_to_first_token_seconds=0.1,
+                tokens_per_second=57.1,
+            )
+            r1 = MLXBatchItemResult(
+                index=1,
+                text="INVALID_NOT_JSON",
+                completion_tokens=10,
+                finish_reason="stop",
+                duration_seconds=0.3,
+                generation_duration_seconds=0.2,
+                time_to_first_token_seconds=0.1,
+                tokens_per_second=50.0,
+            )
+            on_done(r0)
+            on_done(r1)
+            return [r0, r1], MLXBatchRunStats(
+                prompt_tokens=200,
+                generation_tokens=50,
+                generation_tps=120.0,
+                peak_memory_gb=14.0,
+                wall_seconds=1.0,
+            )
+
+        retry_model_b2 = EngineCardModel(
+            cardId="sv01-002",
+            identity=b2.identity,
+            pokemonStats=b2.pokemon_stats,
+            category=CardCategory.POKEMON,
+            subCategory=CardSubCategory.BASIC,
+            playableActions=[],
+            strategicEvaluator={
+                "primaryRole": "MAIN_ATTACKER",
+                "intrinsicBaseScore": 50,
+                "discardPriorityWhenDead": 50,
+                "holdForNextTurnBonus": 10,
+                "decklistSynergyRequirements": [],
+                "inGameDeadCardConditions": [],
+                "turnPhaseWeights": {"turn1": 1.0, "turn2": 1.0, "turn3": 1.0, "turn4Plus": 1.0},
+            },
+        )
+
+        with patch("compiler.mlx_engine.build_mlx_sampler", return_value=MagicMock()), patch(
+            "compiler.mlx_engine.run_mlx_continuous_batch", side_effect=fake_batch_runner
+        ), patch.object(MLXCardCompiler, "compile_card", return_value=retry_model_b2) as mock_retry:
+            cards, stats = compiler.compile_cards_batch([(b1, "ok"), (b2, "retry")], batch_size=2)
+            self.assertEqual(len(cards), 2)
+            self.assertEqual(cards[0].cardId, "sv01-001")
+            self.assertEqual(cards[1].cardId, "sv01-002")
+            mock_retry.assert_called_once()
+            self.assertEqual(stats["batch_tps"], 120.0)
+
 
 if __name__ == "__main__":
     unittest.main()
