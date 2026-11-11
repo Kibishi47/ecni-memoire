@@ -105,10 +105,10 @@ Tu dois répondre UNIQUEMENT avec un objet JSON strictement conforme au schéma 
 }
 
 RÈGLES STRICTES SUR LES ENUMS ET LA SÉMANTIQUE :
-1. DISTINCTION CRITIQUE :
+1. DISTINCTIONS CRITIQUES :
    - « Cherchez dans votre deck... » / « Search your deck... » = TOUJOURS `SEARCH_DECK` (JAMAIS `DRAW_CARDS`).
-   - « Piochez X cartes » / « Draw X cards » = TOUJOURS `DRAW_CARDS`.
-   - Ne génère JAMAIS `DRAW_CARDS` si le texte ne mentionne ni pioche ni « draw ».
+   - « Piochez X cartes » / « Draw X cards » = TOUJOURS `DRAW_CARDS`. Ne génère JAMAIS `DRAW_CARDS` si le texte ne mentionne ni pioche ni « draw ».
+   - « Placez X marqueurs de dégâts » = TOUJOURS `PLACE_DAMAGE_COUNTERS` (`count` = nb de marqueurs de 10 PV, ignore Faiblesse/Résistance/Banc Téracristal), JAMAIS `DAMAGE_ACTIVE`/`DAMAGE_BENCH`.
 2. `primitive` DOIT appartenir exactement à l'un des 29 termes :
    `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `APPLY_SPECIAL_CONDITION`, `EVOLVE_POKEMON`, `SHUFFLE_HAND_DRAW`, `RECOVER_FROM_DISCARD`, `PLACE_DAMAGE_COUNTERS`, `MOVE_DAMAGE_COUNTERS`, `MOVE_ENERGY`, `MODIFY_DAMAGE_TAKEN`, `MODIFY_DAMAGE_DEALT`, `MODIFY_HP`, `MODIFY_RETREAT_COST`, `PREVENT_DAMAGE_OR_EFFECTS`, `LOCK_NEXT_TURN_ATTACK`, `LOCK_RETREAT`, `LOCK_ABILITIES`, `LOCK_ITEMS`, `EXPAND_BENCH`, `KNOCK_OUT`, `MILL_DECK`, `TAKE_EXTRA_PRIZE`, `PUT_ON_TOP_OR_BOTTOM_OF_DECK`.
 3. `specialCondition` (OBLIGATOIRE si `primitive == APPLY_SPECIAL_CONDITION`, `null` sinon) :
@@ -124,14 +124,14 @@ RÈGLES STRICTES SUR LES ENUMS ET LA SÉMANTIQUE :
 7. `scalingOperator` (`ADD` / `MULTIPLY` ou `null`) & `scalingMetric` (ou `null`) :
    `PER_ENERGY_ON_SELF`, `PER_ENERGY_ON_OPPONENT_ACTIVE`, `PER_ENERGY_ON_BOTH_ACTIVES`, `PER_ENERGY_IN_PLAY`, `PER_ENERGY_DISCARDED`, `PER_DAMAGE_COUNTER_ON_SELF`, `PER_DAMAGE_COUNTER_ON_OPPONENT_ACTIVE`, `PER_BENCHED_POKEMON_WITH_DAMAGE`, `PER_OWN_BENCH_POKEMON`, `PER_OPPONENT_BENCH_POKEMON`, `PER_BOTH_BENCH_POKEMON`, `PER_PRIZE_TAKEN_BY_OPPONENT`, `PER_PRIZE_TAKEN_BY_PLAYER`, `PER_PRIZE_REMAINING_PLAYER`, `PER_CARD_IN_OWN_HAND`, `PER_CARD_IN_OPPONENT_HAND`, `CONDITIONAL_FLAT_BONUS`.
 8. `preconditions` (vocabulaire fermé) et `deadCardCondition` :
-   - Préconditions autorisées : `SELF_IS_ACTIVE`, `SELF_ON_BENCH`, `SELF_IS_IN_HAND`, `BENCH_HAS_EMPTY_SLOT`, `BENCH_HAS_POKEMON`, `OPPONENT_HAS_BENCHED_POKEMON`, `TARGET_IN_PLAY_SINCE_PREVIOUS_TURN`, `NOT_FIRST_TURN`, `ON_EVOLVE_FROM_HAND`, `ON_PLAY_FROM_HAND_TO_BENCH`, `KO_SUFFERED_LAST_TURN`, `PLAYER_BEHIND_ON_PRIZES`, `HAND_MIN_OTHER_CARDS:<N>`, `DECK_NOT_EMPTY`, `HAND_NOT_EMPTY`, `SELF_HAS_ENERGY`, `IN_PLAY:<Nom>`.
-   - RÈGLE D'INVERSION POUR `deadCardCondition` : `deadCardCondition` DOIT être l'INVERSE logique de `preconditions` (la condition où l'action est IMPOSSIBLE/MORTE en main). Exemples : `BENCH_FULL`, `BENCH_IS_EMPTY`, `NO_VALID_TARGET_IN_DECK`, `BENCH_FULL_OR_NO_TARGET_IN_DECK`, `OPPONENT_BENCH_EMPTY`, `NO_KO_SUFFERED_LAST_TURN`, `NOT_BEHIND_ON_PRIZES`, `HAND_IS_EMPTY`, `HAND_FEWER_THAN_2_OTHER_CARDS`, `SELF_NOT_ACTIVE`, `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, ou `null`. Ne mets JAMAIS une condition positive d'activation dans `deadCardCondition` !
+   - Préconditions autorisées : `SELF_IS_ACTIVE`, `SELF_ON_BENCH`, `SELF_IS_IN_HAND`, `BENCH_HAS_EMPTY_SLOT`, `BENCH_HAS_POKEMON`, `OPPONENT_HAS_BENCHED_POKEMON`, `TARGET_IN_PLAY_SINCE_PREVIOUS_TURN`, `NOT_FIRST_TURN`, `ON_EVOLVE_FROM_HAND`, `ON_PLAY_FROM_HAND_TO_BENCH`, `KO_SUFFERED_LAST_TURN`, `PLAYER_BEHIND_ON_PRIZES`, `OPPONENT_PRIZES_EXACT_COUNT`, `HAND_MIN_OTHER_CARDS:<N>`, `DECK_NOT_EMPTY`, `HAND_NOT_EMPTY`, `SELF_HAS_ENERGY`, `ONCE_PER_GAME`, `IN_PLAY:<Nom>`.
+   - RÈGLE D'INVERSION POUR `deadCardCondition` : `deadCardCondition` DOIT être l'INVERSE logique de `preconditions` (la condition où l'action est IMPOSSIBLE/MORTE en main). Exemples : `BENCH_FULL`, `BENCH_IS_EMPTY`, `NO_VALID_TARGET_IN_DECK`, `BENCH_FULL_OR_NO_TARGET_IN_DECK`, `OPPONENT_BENCH_EMPTY`, `NO_KO_SUFFERED_LAST_TURN`, `NOT_BEHIND_ON_PRIZES`, `HAND_IS_EMPTY`, `HAND_FEWER_THAN_2_OTHER_CARDS`, `SELF_NOT_ACTIVE`, `STADIUM_ALREADY_IN_PLAY_SAME_NAME`, `NO_POKEMON_WITHOUT_TOOL`, `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, ou `null`. Ne mets JAMAIS une condition positive d'activation dans `deadCardCondition`, ni de faux `effects` pour des règles structurelles (1 Outil/Pokémon, Stade même nom, 1 Pouvoir VSTAR/partie).
 9. `aiRole` DOIT appartenir exactement à :
    `MAIN_ATTACKER`, `SECONDARY_ATTACKER`, `DRAW_ENGINE`, `ENERGY_ACCELERATOR`, `GUEST_TECH`, `DISRUPTION`, `CONSISTENCY_BOOSTER`.
    - RÈGLE : Les cartes `TRAINER` et `ENERGY` ne sont JAMAIS `MAIN_ATTACKER` ni `SECONDARY_ATTACKER`. Les petits Pokémon de Base pré-évolutifs (<= 70 PV non-ex) sont `CONSISTENCY_BOOSTER` ou `DRAW_ENGINE`.
 10. `turnPhaseWeights` : 4 flottants strictement entre `0.0` et `1.0` reflétant la courbe réelle de cette carte (ex: `turn1 = 0.0` pour Stage 1/Stage 2 ou *behind-on-prizes*, `turn1` élevé pour setup de Base). N'utilise pas des poids génériques identiques sur toutes les cartes.
 11. `additionalSynergyTags` : UNIQUEMENT des tags normalisés (`requires_stage_2_pokemon`, `requires_basic_hp_lte_70`, `requires_tera_pokemon`, `requires_ancient_pokemon`, `requires_future_pokemon`, `requires_discard_synergy`, `requires_pokemon_tool`, `requires_energy_type:<Type>`, `requires_evolution_line:<NomFr>`). Aucun tag descriptif libre en anglais.
-12. `upTo` et `optional` sont toujours des booléens (`true` ou `false`, jamais `null`). Ne génère AUCUN texte hors de l'objet JSON."""
+12. `upTo` et `optional` sont toujours des booléens (`true` ou `false`, jamais `null`). « jusqu'à X » = 1..X (cible requise sauf pioche 0..X) ; « n'importe quel nombre » = 0 permis. Ne génère AUCUN texte hors de l'objet JSON."""
 
 # Alias pour le mode Single-Pass
 SYSTEM_PROMPT = CODING_SYSTEM_PROMPT

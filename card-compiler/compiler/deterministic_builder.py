@@ -374,20 +374,19 @@ def detect_rule_box_and_prizes(
     name_fr_clean = (name_fr or "").strip()
     name_en_clean = (name_en or "").strip()
     combined_name = f"{name_fr_clean} {name_en_clean}"
-    suffix_fr = str(raw_fr.get("suffix") or "").strip().lower()
-    suffix_en = str((raw_en or {}).get("suffix") or "").strip().lower()
-    suffix = suffix_fr or suffix_en
+    raw_suffix = str(raw_fr.get("suffix") or (raw_en or {}).get("suffix") or "").strip()
+    suffix = raw_suffix.lower()
 
     is_mega_prefix = (
         name_fr_clean.lower().startswith(("méga-", "mega-", "méga ", "mega "))
         or name_en_clean.lower().startswith(("mega ", "mega-", "méga-"))
     )
-    has_ex_marker = (
-        suffix == "ex"
-        or bool(re.search(r"(?:\b|-)(ex)\b", combined_name, flags=re.IGNORECASE))
+    has_lowercase_ex = (
+        raw_suffix == "ex"
+        or bool(re.search(r"(?:\b|-)ex\b", combined_name))
     )
 
-    if (is_mega_prefix and has_ex_marker) or re.search(r"\b(vmax|v-union)\b", combined_name, flags=re.IGNORECASE) or "vmax" in suffix:
+    if (is_mega_prefix and has_lowercase_ex) or re.search(r"\b(vmax|v-union)\b", combined_name, flags=re.IGNORECASE) or "vmax" in suffix:
         return True, 3
 
     if (
@@ -775,6 +774,122 @@ def build_identity_and_stats_from_raw(
     return identity, pokemon_stats
 
 
+def _append_ability_actions_and_slots(
+    abilities_fr: List[Dict[str, Any]],
+    abilities_en: List[Dict[str, Any]],
+    can_t1_first_base: bool,
+    playable_actions: List[PlayableAction],
+    slots_for_llm: List[EffectSlotToCompile],
+) -> bool:
+    """Construit les `PlayableAction` et `EffectSlotToCompile` des talents; retourne True si T1 J1 attaque autorisé."""
+    grants_t1_attack = False
+    for idx, ab_fr in enumerate(abilities_fr):
+        ab_en = abilities_en[idx] if idx < len(abilities_en) else None
+        ab_name = _normalize_whitespace(ab_fr.get("name") or (ab_en or {}).get("name") or f"Talent {idx + 1}")
+        ab_text_fr = _normalize_whitespace(ab_fr.get("effect"))
+        ab_text_en = _normalize_whitespace((ab_en or {}).get("effect")) or None
+        if _grants_turn1_going_first(ab_text_fr, ab_text_en):
+            grants_t1_attack = True
+
+        slot_id = f"ability_{idx}"
+        ab_action_type = classify_ability_action_type(ab_text_fr, ab_text_en)
+        forbids_t1 = _forbids_turn1_both(ab_text_fr, ab_text_en, ab_name)
+
+        playable_actions.append(
+            PlayableAction(
+                actionId=slot_id,
+                label=ab_name,
+                actionType=ab_action_type,
+                timingPhase=TimingPhase.MAIN_PHASE_1,
+                canUseTurn1GoingFirst=can_t1_first_base and not forbids_t1,
+                canUseTurn1GoingSecond=not forbids_t1,
+                cost={},
+                preconditions=[],
+                effects=[],
+                deadCardCondition=None,
+            )
+        )
+        if ab_text_fr or ab_text_en:
+            slots_for_llm.append(
+                EffectSlotToCompile(
+                    slotId=slot_id,
+                    actionType=ab_action_type,
+                    label=ab_name,
+                    textFr=ab_text_fr,
+                    textEn=ab_text_en,
+                )
+            )
+    return grants_t1_attack
+
+
+def _append_attack_actions_and_slots(
+    attacks_fr: List[Dict[str, Any]],
+    attacks_en: List[Dict[str, Any]],
+    pokemon_grants_t1_attack: bool,
+    playable_actions: List[PlayableAction],
+    slots_for_llm: List[EffectSlotToCompile],
+    base_synergies: List[str],
+) -> None:
+    """Construit les `PlayableAction` et `EffectSlotToCompile` des attaques (Pokémon ou Capsule Technique)."""
+    for idx, atk_fr in enumerate(attacks_fr):
+        atk_en = attacks_en[idx] if idx < len(attacks_en) else None
+        atk_name = _normalize_whitespace(atk_fr.get("name") or (atk_en or {}).get("name") or f"Attaque {idx + 1}")
+        cost_dict = _count_energy_cost(atk_fr.get("cost"))
+        printed_dmg_str = str(atk_fr.get("damage") or "").strip() or None
+        base_dmg = _parse_base_damage(atk_fr.get("damage"))
+        atk_text_fr = _normalize_whitespace(atk_fr.get("effect"))
+        atk_text_en = _normalize_whitespace((atk_en or {}).get("effect")) or None
+        slot_id = f"attack_{idx}"
+
+        for energy_type in cost_dict.keys():
+            if energy_type.lower() not in {"incolore", "colorless"}:
+                syn_tag = f"requires_energy_type:{energy_type}"
+                if syn_tag not in base_synergies:
+                    base_synergies.append(syn_tag)
+
+        initial_effects: List[AtomicEffect] = []
+        if base_dmg is not None and base_dmg > 0:
+            initial_effects.append(
+                AtomicEffect(
+                    primitive=EffectPrimitive.DAMAGE_ACTIVE,
+                    target=EffectTarget.OPPONENT_ACTIVE,
+                    value=base_dmg,
+                )
+            )
+
+        forbids_t1 = _forbids_turn1_both(atk_text_fr, atk_text_en, atk_name)
+        can_t1_first = (pokemon_grants_t1_attack or _grants_turn1_going_first(atk_text_fr, atk_text_en)) and not forbids_t1
+        can_t1_second = not forbids_t1
+
+        playable_actions.append(
+            PlayableAction(
+                actionId=slot_id,
+                label=atk_name,
+                actionType=ActionType.ATTACK,
+                timingPhase=TimingPhase.ATTACK_PHASE,
+                canUseTurn1GoingFirst=can_t1_first,
+                canUseTurn1GoingSecond=can_t1_second,
+                cost=cost_dict,
+                preconditions=["SELF_IS_ACTIVE"],
+                effects=initial_effects,
+                deadCardCondition=None,
+            )
+        )
+
+        if atk_text_fr or atk_text_en:
+            slots_for_llm.append(
+                EffectSlotToCompile(
+                    slotId=slot_id,
+                    actionType=ActionType.ATTACK,
+                    label=atk_name,
+                    textFr=atk_text_fr,
+                    textEn=atk_text_en,
+                    baseDamage=base_dmg,
+                    printedDamageStr=printed_dmg_str,
+                )
+            )
+
+
 def build_deterministic_skeleton(
     raw_input: Union[Dict[str, Any], Path, Any],
     raw_dir: Optional[Path] = None,
@@ -898,111 +1013,27 @@ def build_deterministic_skeleton(
             if pokemon_stats.rootBasicName:
                 base_synergies.append(f"requires_evolution_line:{pokemon_stats.rootBasicName}")
 
-        # Détecter si un talent du Pokémon autorise d'attaquer au T1 en premier (ex: Meloetta-ex)
+        # Talents & Attaques (construction factorisée)
         abilities_fr = [a for a in (raw_fr.get("abilities") or []) if isinstance(a, dict)]
         abilities_en = [a for a in ((raw_en or {}).get("abilities") or []) if isinstance(a, dict)]
-        pokemon_grants_t1_attack = any(
-            _grants_turn1_going_first(ab_fr.get("effect"), (abilities_en[idx] if idx < len(abilities_en) else {}).get("effect"))
-            for idx, ab_fr in enumerate(abilities_fr)
+        pokemon_grants_t1_attack = _append_ability_actions_and_slots(
+            abilities_fr,
+            abilities_en,
+            is_base,
+            playable_actions,
+            slots_for_llm,
         )
 
-        # Talents : abilities[i]
-        for idx, ab_fr in enumerate(abilities_fr):
-            ab_en = abilities_en[idx] if idx < len(abilities_en) else None
-            ab_name = _normalize_whitespace(ab_fr.get("name") or (ab_en or {}).get("name") or f"Talent {idx + 1}")
-            ab_text_fr = _normalize_whitespace(ab_fr.get("effect"))
-            ab_text_en = _normalize_whitespace((ab_en or {}).get("effect")) or None
-            slot_id = f"ability_{idx}"
-            ab_action_type = classify_ability_action_type(ab_text_fr, ab_text_en)
-
-            can_t1_first = is_base and not _forbids_turn1_both(ab_text_fr, ab_text_en, ab_name)
-            can_t1_second = not _forbids_turn1_both(ab_text_fr, ab_text_en, ab_name)
-
-            playable_actions.append(
-                PlayableAction(
-                    actionId=slot_id,
-                    label=ab_name,
-                    actionType=ab_action_type,
-                    timingPhase=TimingPhase.MAIN_PHASE_1,
-                    canUseTurn1GoingFirst=can_t1_first,
-                    canUseTurn1GoingSecond=can_t1_second,
-                    cost={},
-                    preconditions=[],
-                    effects=[],
-                    deadCardCondition=None,
-                )
-            )
-            if ab_text_fr or ab_text_en:
-                slots_for_llm.append(
-                    EffectSlotToCompile(
-                        slotId=slot_id,
-                        actionType=ab_action_type,
-                        label=ab_name,
-                        textFr=ab_text_fr,
-                        textEn=ab_text_en,
-                    )
-                )
-
-        # Attaques : attacks[i]
         attacks_fr = [a for a in (raw_fr.get("attacks") or []) if isinstance(a, dict)]
         attacks_en = [a for a in ((raw_en or {}).get("attacks") or []) if isinstance(a, dict)]
-        for idx, atk_fr in enumerate(attacks_fr):
-            atk_en = attacks_en[idx] if idx < len(attacks_en) else None
-            atk_name = _normalize_whitespace(atk_fr.get("name") or (atk_en or {}).get("name") or f"Attaque {idx + 1}")
-            cost_dict = _count_energy_cost(atk_fr.get("cost"))
-            printed_dmg_str = str(atk_fr.get("damage") or "").strip() or None
-            base_dmg = _parse_base_damage(atk_fr.get("damage"))
-            atk_text_fr = _normalize_whitespace(atk_fr.get("effect"))
-            atk_text_en = _normalize_whitespace((atk_en or {}).get("effect")) or None
-            slot_id = f"attack_{idx}"
-
-            for energy_type in cost_dict.keys():
-                if energy_type.lower() not in {"incolore", "colorless"}:
-                    syn_tag = f"requires_energy_type:{energy_type}"
-                    if syn_tag not in base_synergies:
-                        base_synergies.append(syn_tag)
-
-            initial_effects: List[AtomicEffect] = []
-            if base_dmg is not None and base_dmg > 0:
-                initial_effects.append(
-                    AtomicEffect(
-                        primitive=EffectPrimitive.DAMAGE_ACTIVE,
-                        target=EffectTarget.OPPONENT_ACTIVE,
-                        value=base_dmg,
-                    )
-                )
-
-            forbids_t1 = _forbids_turn1_both(atk_text_fr, atk_text_en, atk_name)
-            can_t1_first = (pokemon_grants_t1_attack or _grants_turn1_going_first(atk_text_fr, atk_text_en)) and not forbids_t1
-            can_t1_second = not forbids_t1
-
-            playable_actions.append(
-                PlayableAction(
-                    actionId=slot_id,
-                    label=atk_name,
-                    actionType=ActionType.ATTACK,
-                    timingPhase=TimingPhase.ATTACK_PHASE,
-                    canUseTurn1GoingFirst=can_t1_first,
-                    canUseTurn1GoingSecond=can_t1_second,
-                    cost=cost_dict,
-                    preconditions=["SELF_IS_ACTIVE"],
-                    effects=initial_effects,
-                    deadCardCondition=None,
-                )
-            )
-
-            if atk_text_fr or atk_text_en:
-                slots_for_llm.append(
-                    EffectSlotToCompile(
-                        slotId=slot_id,
-                        actionType=ActionType.ATTACK,
-                        label=atk_name,
-                        textFr=atk_text_fr,
-                        textEn=atk_text_en,
-                        baseDamage=base_dmg,
-                        printedDamageStr=printed_dmg_str,
-                    )
-                )
+        _append_attack_actions_and_slots(
+            attacks_fr,
+            attacks_en,
+            pokemon_grants_t1_attack,
+            playable_actions,
+            slots_for_llm,
+            base_synergies,
+        )
 
         # Action Repli (RETREAT)
         retreat_cost = (
@@ -1047,46 +1078,104 @@ def build_deterministic_skeleton(
     if category == CardCategory.TRAINER:
         eff_fr = _normalize_whitespace(raw_fr.get("effect"))
         eff_en = _normalize_whitespace((raw_en or {}).get("effect")) or None
+        abilities_fr = [a for a in (raw_fr.get("abilities") or []) if isinstance(a, dict)]
+        abilities_en = [a for a in ((raw_en or {}).get("abilities") or []) if isinstance(a, dict)]
+        attacks_fr = [a for a in (raw_fr.get("attacks") or []) if isinstance(a, dict)]
+        attacks_en = [a for a in ((raw_en or {}).get("attacks") or []) if isinstance(a, dict)]
 
-        if not eff_fr and raw_fr.get("attacks"):
-            atk_list = [a for a in (raw_fr.get("attacks") or []) if isinstance(a, dict)]
-            if atk_list:
-                a0 = atk_list[0]
-                eff_fr = _normalize_whitespace(f"{a0.get('name', '')}: {a0.get('effect', '')}")
-        if not eff_en and raw_en and raw_en.get("attacks"):
-            atk_list_en = [a for a in (raw_en.get("attacks") or []) if isinstance(a, dict)]
-            if atk_list_en:
-                a0_en = atk_list_en[0]
-                eff_en = _normalize_whitespace(f"{a0_en.get('name', '')}: {a0_en.get('effect', '')}")
-
-        forbids_t1 = _forbids_turn1_both(eff_fr, eff_en, identity.nameFr)
-        can_t1_first = (sub_category != CardSubCategory.SUPPORTER) and not forbids_t1
-        can_t1_second = not forbids_t1
-
-        playable_actions.append(
-            PlayableAction(
-                actionId="trainer_0",
-                label=identity.nameFr,
-                actionType=ActionType.PLAY_FROM_HAND,
-                timingPhase=TimingPhase.MAIN_PHASE_1,
-                canUseTurn1GoingFirst=can_t1_first,
-                canUseTurn1GoingSecond=can_t1_second,
-                cost={},
-                preconditions=[],
-                effects=[],
-                deadCardCondition=None,
-            )
+        combined_trainer_low = f"{eff_fr} {eff_en or ''}".lower()
+        is_fossil_trainer = (
+            "jouez cette carte comme si c'était un pokémon" in combined_trainer_low
+            or "play this card as if it were a" in combined_trainer_low
         )
-        if eff_fr or eff_en:
-            slots_for_llm.append(
-                EffectSlotToCompile(
-                    slotId="trainer_0",
-                    actionType=ActionType.PLAY_FROM_HAND,
+
+        if identity.isTechnicalMachine and attacks_fr:
+            # Capsule Technique / Outil à attaque : l'action trainer_0 gère l'attachement pur (effects=[]),
+            # et les attaques conférées sont compilées avec leur coût en énergie dans attack_0...
+            playable_actions.append(
+                PlayableAction(
+                    actionId="trainer_0",
                     label=identity.nameFr,
-                    textFr=eff_fr,
-                    textEn=eff_en,
+                    actionType=ActionType.PLAY_FROM_HAND,
+                    timingPhase=TimingPhase.MAIN_PHASE_1,
+                    canUseTurn1GoingFirst=True,
+                    canUseTurn1GoingSecond=True,
+                    cost={},
+                    preconditions=[],
+                    effects=[],
+                    deadCardCondition="NO_POKEMON_WITHOUT_TOOL",
                 )
             )
+            _append_attack_actions_and_slots(
+                attacks_fr,
+                attacks_en,
+                False,
+                playable_actions,
+                slots_for_llm,
+                base_synergies,
+            )
+            if abilities_fr:
+                _append_ability_actions_and_slots(
+                    abilities_fr,
+                    abilities_en,
+                    True,
+                    playable_actions,
+                    slots_for_llm,
+                )
+        else:
+            if not eff_fr and attacks_fr:
+                a0 = attacks_fr[0]
+                eff_fr = _normalize_whitespace(f"{a0.get('name', '')}: {a0.get('effect', '')}")
+            if not eff_en and attacks_en:
+                a0_en = attacks_en[0]
+                eff_en = _normalize_whitespace(f"{a0_en.get('name', '')}: {a0_en.get('effect', '')}")
+
+            forbids_t1 = _forbids_turn1_both(eff_fr, eff_en, identity.nameFr)
+            can_t1_first = (sub_category != CardSubCategory.SUPPORTER) and not forbids_t1
+            can_t1_second = not forbids_t1
+
+            default_preconditions: List[str] = []
+            default_dead_cond: Optional[str] = None
+            if sub_category == CardSubCategory.STADIUM:
+                default_dead_cond = "STADIUM_ALREADY_IN_PLAY_SAME_NAME"
+            elif sub_category == CardSubCategory.TOOL:
+                default_dead_cond = "NO_POKEMON_WITHOUT_TOOL"
+            elif is_fossil_trainer:
+                default_preconditions = ["BENCH_HAS_EMPTY_SLOT"]
+                default_dead_cond = "BENCH_FULL"
+
+            playable_actions.append(
+                PlayableAction(
+                    actionId="trainer_0",
+                    label=identity.nameFr,
+                    actionType=ActionType.PLAY_FROM_HAND,
+                    timingPhase=TimingPhase.MAIN_PHASE_1,
+                    canUseTurn1GoingFirst=can_t1_first,
+                    canUseTurn1GoingSecond=can_t1_second,
+                    cost={},
+                    preconditions=default_preconditions,
+                    effects=[],
+                    deadCardCondition=default_dead_cond,
+                )
+            )
+            if eff_fr or eff_en:
+                slots_for_llm.append(
+                    EffectSlotToCompile(
+                        slotId="trainer_0",
+                        actionType=ActionType.PLAY_FROM_HAND,
+                        label=identity.nameFr,
+                        textFr=eff_fr,
+                        textEn=eff_en,
+                    )
+                )
+            if abilities_fr:
+                _append_ability_actions_and_slots(
+                    abilities_fr,
+                    abilities_en,
+                    True,
+                    playable_actions,
+                    slots_for_llm,
+                )
         return DeterministicCardSkeleton(
             cardId=card_id,
             identity=identity,
@@ -1518,6 +1607,14 @@ def translate_slot_deterministically(
     if "plus de cartes récompense restantes que votre adversaire" in lower or "more prize cards remaining than your opponent" in lower:
         preconditions.append("PLAYER_BEHIND_ON_PRIZES")
         dead_cond = "NOT_BEHIND_ON_PRIZES"
+
+    if (
+        "il reste exactement une carte récompense à votre adversaire" in lower
+        or "il reste exactement 1 carte récompense à votre adversaire" in lower
+        or "opponent has exactly 1 prize card remaining" in lower
+    ):
+        preconditions.append("OPPONENT_PRIZES_EXACT_COUNT")
+        dead_cond = dead_cond or "OPPONENT_PRIZES_NOT_1"
 
     m_discard_other = re.search(
         r"(?:défausser|défaussez|discard)\s+(\d+)\s+(?:autres?\s+)?(?:cartes?|cards?)\s+(?:de votre main|from your hand)",
@@ -1977,7 +2074,13 @@ def translate_slot_deterministically(
         effects.append(AtomicEffect(primitive=EffectPrimitive.LOCK_NEXT_TURN_ATTACK, target=tgt_la, filter=flt_la))
 
     if "ne peut pas battre en retraite" in lower or "can't retreat" in lower:
-        effects.append(AtomicEffect(primitive=EffectPrimitive.LOCK_RETREAT, target=EffectTarget.OPPONENT_ACTIVE))
+        lr_tgt = (
+            EffectTarget.SELF
+            if ("cette carte" in lower or "ce pokémon" in lower or "this card" in lower or "this pokémon" in lower)
+            and not any(w in lower for w in ("défenseur", "defending", "adversaire", "opponent"))
+            else EffectTarget.OPPONENT_ACTIVE
+        )
+        effects.append(AtomicEffect(primitive=EffectPrimitive.LOCK_RETREAT, target=lr_tgt))
 
     if "n'ont pas de talent" in lower or "have no abilities" in lower or "n'ont aucun effet" in lower:
         effects.append(AtomicEffect(primitive=EffectPrimitive.LOCK_ABILITIES, target=EffectTarget.ALL_POKEMON_IN_PLAY))
@@ -2365,6 +2468,10 @@ _POSITIVE_TO_NEGATIVE_DEAD_MAP: Dict[str, Optional[str]] = {
     "SELF_IS_ACTIVE_AND_CANNOT_ATTACK": "CANNOT_ATTACK_THIS_TURN",
     "OPPONENT_ACTIVE_IS_KO": "OPPONENT_ACTIVE_NOT_KO",
     "ABILITY_LOCKED": "ABILITY_LOCKED",
+    "STADIUM_ALREADY_IN_PLAY_SAME_NAME": "STADIUM_ALREADY_IN_PLAY_SAME_NAME",
+    "NO_POKEMON_WITHOUT_TOOL": "NO_POKEMON_WITHOUT_TOOL",
+    "OPPONENT_PRIZES_EXACT_COUNT": "OPPONENT_PRIZES_NOT_1",
+    "OPPONENT_PRIZES_NOT_1": "OPPONENT_PRIZES_NOT_1",
 }
 
 _NEGATIVE_PREFIXES = (
@@ -2378,6 +2485,8 @@ _NEGATIVE_PREFIXES = (
     "OPPONENT_HAND_IS_EMPTY",
     "OPPONENT_ACTIVE_NO",
     "OPPONENT_ACTIVE_NOT",
+    "OPPONENT_PRIZES_NOT_",
+    "STADIUM_ALREADY_IN_PLAY",
     "BENCH_IS_EMPTY",
     "CANNOT_",
     "INSUFFICIENT_",
@@ -2418,6 +2527,15 @@ def normalize_and_uninvert_dead_card_condition(
     """Normalise `deadCardCondition` et corrige automatiquement toute inversion logique (condition d'activation recopiée)."""
     if not dead_cond:
         return None
+    if "|" in str(dead_cond):
+        parts_norm = [
+            res
+            for p in str(dead_cond).split("|")
+            if p.strip()
+            for res in [normalize_and_uninvert_dead_card_condition(p, preconditions)]
+            if res
+        ]
+        return "|".join(dict.fromkeys(parts_norm)) or None
     raw_token = re.sub(r"\s+", "_", str(dead_cond).strip().upper())
     if not raw_token or raw_token in {"NONE", "NULL", "N/A", "NA", "NEVER", "FALSE"}:
         return None
@@ -3193,6 +3311,13 @@ def merge_llm_payload_into_skeleton(
                 act_copy.deadCardCondition,
                 act_copy.preconditions,
             )
+
+        if skeleton.subCategory == CardSubCategory.STADIUM and act_copy.actionId == "trainer_0":
+            cur_dead = act_copy.deadCardCondition
+            if not cur_dead or cur_dead in {"STADIUM_IN_PLAY", "NO_STADIUM_IN_PLAY"}:
+                act_copy.deadCardCondition = "STADIUM_ALREADY_IN_PLAY_SAME_NAME"
+            elif "STADIUM_ALREADY_IN_PLAY_SAME_NAME" not in cur_dead.split("|"):
+                act_copy.deadCardCondition = f"{cur_dead}|STADIUM_ALREADY_IN_PLAY_SAME_NAME"
 
         merged_actions.append(act_copy)
 
