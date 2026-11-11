@@ -53,24 +53,24 @@ class PipelinePhase(str, Enum):
 
 # Mode 1 : Inférence Directe (L'IA fait tout)
 SINGLE_PASS_MODELS: Dict[Tuple[IntensityMode, str], str] = {
-    (IntensityMode.soft, "mlx"): "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
-    (IntensityMode.intense, "mlx"): "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit",
+    (IntensityMode.soft, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
+    (IntensityMode.intense, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
     (IntensityMode.soft, "llama_cpp"): "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
     (IntensityMode.intense, "llama_cpp"): "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF",
 }
 
-# Mode 2 : Passe 1 (Raisonnement - DeepSeek-R1 Distill Qwen)
+# Mode 2 : Passe 1 (Raisonnement approfondi - Gemma 4 avec enable_thinking=True)
 REASONING_PASS_MODELS: Dict[Tuple[IntensityMode, str], str] = {
-    (IntensityMode.soft, "mlx"): "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit",
-    (IntensityMode.intense, "mlx"): "mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit",
+    (IntensityMode.soft, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
+    (IntensityMode.intense, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
     (IntensityMode.soft, "llama_cpp"): "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF",
     (IntensityMode.intense, "llama_cpp"): "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF",
 }
 
-# Mode 2 : Passe 2 (Coding / JSON - Qwen2.5-Coder)
+# Mode 2 : Passe 2 (Coding / JSON - Gemma 4 avec enable_thinking=False)
 CODING_PASS_MODELS: Dict[Tuple[IntensityMode, str], str] = {
-    (IntensityMode.soft, "mlx"): "mlx-community/Qwen2.5-Coder-7B-Instruct-8bit",
-    (IntensityMode.intense, "mlx"): "mlx-community/Qwen2.5-Coder-14B-Instruct-8bit",
+    (IntensityMode.soft, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
+    (IntensityMode.intense, "mlx"): "mlx-community/gemma-4-26b-a4b-4bit",
     (IntensityMode.soft, "llama_cpp"): "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
     (IntensityMode.intense, "llama_cpp"): "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
 }

@@ -210,13 +210,18 @@ def build_user_prompt(
 
 
 def extract_json_payload(raw_text: str) -> str:
-    """Extrait l'objet JSON principal d'une réponse LLM (supprime `<think>...</think>`, markdown et virgules pendantes)."""
+    """Extrait l'objet JSON principal d'une réponse LLM (supprime `<think>`, `<|channel>thought...<channel|>`, markdown et virgules pendantes)."""
     if not raw_text:
         return ""
 
-    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+    cleaned = re.sub(r"<\|channel>\s*thought\b.*?<channel\|>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
+    if "<channel|>" in cleaned:
+        cleaned = cleaned.split("<channel|>")[-1].strip()
+    cleaned = re.sub(r"<(?:think|thought)>.*?</(?:think|thought)>", "", cleaned, flags=re.DOTALL | re.IGNORECASE).strip()
     if "</think>" in cleaned:
         cleaned = cleaned.split("</think>")[-1].strip()
+    if "</thought>" in cleaned:
+        cleaned = cleaned.split("</thought>")[-1].strip()
 
     fenced_blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL | re.IGNORECASE)
     if fenced_blocks:

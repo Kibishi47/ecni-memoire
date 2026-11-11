@@ -117,7 +117,7 @@ class TestModelsConfig(unittest.TestCase):
                 intensity=IntensityMode.soft,
                 backend="mlx",
             )
-            self.assertEqual(m, "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit")
+            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-4bit")
 
             # MLX Intense
             m = resolve_model_for_configuration(
@@ -125,7 +125,7 @@ class TestModelsConfig(unittest.TestCase):
                 intensity=IntensityMode.intense,
                 backend="mlx",
             )
-            self.assertEqual(m, "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit")
+            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-4bit")
 
             # GGUF Soft
             m = resolve_model_for_configuration(
@@ -153,7 +153,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.reason,
                 backend="mlx",
             )
-            self.assertEqual(r_mlx_soft, "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit")
+            self.assertEqual(r_mlx_soft, "mlx-community/gemma-4-26b-a4b-4bit")
 
             r_mlx_intense = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -161,7 +161,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.reason,
                 backend="mlx",
             )
-            self.assertEqual(r_mlx_intense, "mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit")
+            self.assertEqual(r_mlx_intense, "mlx-community/gemma-4-26b-a4b-4bit")
 
             r_gguf_soft = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -178,7 +178,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.code,
                 backend="mlx",
             )
-            self.assertEqual(c_mlx_soft, "mlx-community/Qwen2.5-Coder-7B-Instruct-8bit")
+            self.assertEqual(c_mlx_soft, "mlx-community/gemma-4-26b-a4b-4bit")
 
             c_mlx_intense = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -186,7 +186,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.code,
                 backend="mlx",
             )
-            self.assertEqual(c_mlx_intense, "mlx-community/Qwen2.5-Coder-14B-Instruct-8bit")
+            self.assertEqual(c_mlx_intense, "mlx-community/gemma-4-26b-a4b-4bit")
 
             c_gguf_soft = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -254,7 +254,8 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
     @patch("compiler.reasoning_engine.ReasoningEngine.load_model_in_memory")
     def test_reasoning_engine_mocked_generation(self, mock_load: MagicMock) -> None:
         engine = ReasoningEngine(intensity="soft", backend="mlx")
-        self.assertEqual(engine.repo_id, "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit")
+        self.assertEqual(engine.repo_id, "mlx-community/gemma-4-26b-a4b-4bit")
+        self.assertTrue(engine.enable_thinking)
 
         # Mock tokenizer and model
         fake_tok = MagicMock()
@@ -263,19 +264,29 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
         engine._model = MagicMock()
 
         chunk_mock = MagicMock()
-        chunk_mock.text = "Explication de la carte Noeunoeuf."
+        chunk_mock.text = "<|channel>thought\nAnalyse interne Gemma 4.<channel|>\nExplication de la carte Noeunoeuf."
         chunk_mock.generation_tokens = 5
 
         with patch("mlx_lm.stream_generate", return_value=[chunk_mock]):
             bundle = make_test_bundle()
             rec = engine.generate_reasoning(bundle)
             self.assertEqual(rec.cardId, "sv08.5-001")
+            self.assertEqual(rec.rawThinkingProcess, "Analyse interne Gemma 4.")
             self.assertEqual(rec.reasoningText, "Explication de la carte Noeunoeuf.")
             self.assertEqual(rec.completionTokens, 5)
+            _, tpl_kwargs = fake_tok.apply_chat_template.call_args
+            self.assertIs(tpl_kwargs.get("enable_thinking"), True)
 
         engine.close()
         self.assertIsNone(engine._model)
         self.assertIsNone(engine._tokenizer)
+
+    def test_split_gemma4_orphan_channel_closing_tag(self) -> None:
+        from compiler.reasoning_engine import _split_thinking_and_explanation
+
+        think, expl = _split_thinking_and_explanation("Réflexion débutée dans le prompt.<channel|>\nSortie structurée finale.")
+        self.assertEqual(think, "Réflexion débutée dans le prompt.")
+        self.assertEqual(expl, "Sortie structurée finale.")
 
 
 class TestTwoPassPipelineExecution(unittest.TestCase):
@@ -357,13 +368,24 @@ class TestTwoPassPipelineExecution(unittest.TestCase):
         )
         mock_compile.return_value = fake_model
 
-        res = run_coding_phase(
-            bundles=[bundle],
-            data_dir=self.test_dir,
-            intensity="soft",
-            backend="mlx",
-        )
-        self.assertEqual(res["compiled"], 1)
+        from compiler.mlx_engine import MLXCardCompiler
+        orig_init = MLXCardCompiler.__init__
+
+        def spy_init(self_obj, *args, **kwargs):
+            orig_init(self_obj, *args, **kwargs)
+
+        with patch("compiler.mlx_engine.MLXCardCompiler.__init__", autospec=True, side_effect=spy_init) as spy:
+            res = run_coding_phase(
+                bundles=[bundle],
+                data_dir=self.test_dir,
+                intensity="soft",
+                backend="mlx",
+            )
+            self.assertEqual(res["compiled"], 1)
+            _, init_kwargs = spy.call_args
+            self.assertEqual(init_kwargs.get("model"), "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertIs(init_kwargs.get("disable_thinking"), True)
+
         out_file = self.test_dir / "compiled_cards" / "sv08.5-001.json"
         self.assertTrue(out_file.exists())
 
