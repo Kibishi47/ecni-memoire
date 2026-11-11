@@ -4,8 +4,8 @@ import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { createNativeBasicEnergyModel } from '../utils/energy'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
 import type { EngineCardModel } from '../types/cardModel'
-import { applyAction, createInitialMatchState, isCardDeadInHand } from './engine'
-import { evaluateState, getStateHash, selectBestTurnBranch } from './evaluator'
+import { applyAction, createInitialMatchState, fastCloneState, isCardDeadInHand } from './engine'
+import { computeCardIntrinsicValue, evaluateState, getStateHash, selectBestTurnBranch } from './evaluator'
 
 const mockCharmander: EngineCardModel = {
   cardId: 'test-charmander',
@@ -427,5 +427,58 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     expect(decision.chosenActions.some((a) => a.type === 'DECLARE_ATTACK')).toBe(true)
     // 220 HP ex is KO'd by (60 + 60) * 2 = 240 damage -> Player takes 2 prizes!
     expect(decision.finalTurnState.player.prizes.length).toBe(4)
+  })
+
+  it('évalue computeCardIntrinsicValue, les états spéciaux, verrous v2, KNOCK_OUT(SELF) et le risque auto-recul', () => {
+    const deckA = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deckB = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const baseState = createInitialMatchState(deckA, deckB, { seed: 303, firstPlayerIndex: 0, maxTurns: 12 })
+
+    const charizard = UNIFIED_CARD_REGISTRY['sv03-125']!
+    const primeCatcher = UNIFIED_CARD_REGISTRY['sv05-157']!
+    const dusknoir = UNIFIED_CARD_REGISTRY['sv08.5-037']!
+
+    // Vérifie computeCardIntrinsicValue sans intrinsicBaseScore explicite
+    const cloneMain = { ...charizard, strategicEvaluator: { ...charizard.strategicEvaluator, intrinsicBaseScore: undefined } }
+    const cloneTech = { ...charizard, identity: { ...charizard.identity, isAceSpec: false }, playableActions: [], strategicEvaluator: { ...charizard.strategicEvaluator, aiRole: 'GUEST_TECH' as const, intrinsicBaseScore: undefined } }
+    expect(computeCardIntrinsicValue(cloneMain)).toBeGreaterThan(computeCardIntrinsicValue(cloneTech))
+    expect(computeCardIntrinsicValue(primeCatcher)).toBeGreaterThan(85)
+
+    // Évaluation positive des états spéciaux et verrous sur l'adversaire
+    const lockedState = fastCloneState(baseState)
+    const baseScore = evaluateState(lockedState, 0)
+    lockedState.opponent.itemLockActive = true
+    lockedState.opponent.abilityLockActive = true
+    if (lockedState.opponent.activePokemon) {
+      lockedState.opponent.activePokemon.specialConditions = ['PARALYZED', 'POISONED']
+      lockedState.opponent.activePokemon.cantRetreatNextTurn = true
+    }
+    if (lockedState.player.activePokemon) {
+      lockedState.player.activePokemon.damageTakenModifierNextTurn = -50
+    }
+    expect(evaluateState(lockedState, 0)).toBeGreaterThan(baseScore + 150)
+
+    // Safety check KNOCK_OUT(SELF) sur Noctunoir v2 : ne jamais sacrifier si l'adversaire n'a plus qu'1 récompense
+    const sacrificeState = fastCloneState(baseState)
+    sacrificeState.turnNumber = 3
+    sacrificeState.activePlayerIndex = 0
+    sacrificeState.player.hand = []
+    sacrificeState.player.bench = [
+      {
+        instanceId: 'p_dusknoir',
+        card: dusknoir,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      },
+    ]
+    sacrificeState.opponent.prizes = [sacrificeState.opponent.prizes[0]!]
+    const safeDecision = selectBestTurnBranch(sacrificeState, 8, false)
+    expect(safeDecision.chosenActions.some((a) => a.cardId === 'sv08.5-037')).toBe(false)
   })
 })

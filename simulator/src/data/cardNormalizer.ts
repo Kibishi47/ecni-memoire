@@ -10,10 +10,14 @@ import type {
   CardCategory,
   CardIdentity,
   CardSubCategory,
+  CoinFlipMode,
   EffectPrimitive,
   EngineCardModel,
   PlayableAction,
   PokemonStats,
+  ScalingMetric,
+  ScalingOperator,
+  SpecialConditionType,
   StrategicEvaluator,
   TimingPhase,
   TypeModifier,
@@ -69,23 +73,45 @@ export function coerceCardSubCategory(val: any): CardSubCategory {
 
 export function coerceActionType(val: any, actionId = ''): ActionType {
   const s = String(val || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
-  if (s === 'PLAY_FROM_HAND' || s === 'TRAINER_PLAY' || s === 'PLAY_CARD' || s === 'PLAY_POKEMON') {
-    return 'PLAY_FROM_HAND'
+  const exactMap: Record<string, ActionType> = {
+    PLAY_FROM_HAND: 'PLAY_FROM_HAND',
+    TRAINER_PLAY: 'PLAY_FROM_HAND',
+    PLAY_CARD: 'PLAY_FROM_HAND',
+    PLAY_POKEMON: 'PLAY_FROM_HAND',
+    PLAY_TRAINER: 'PLAY_FROM_HAND',
+    STADIUM_EFFECT: 'PLAY_FROM_HAND',
+    TOOL_STATIC_MODIFIER: 'PLAY_FROM_HAND',
+    EVOLVE: 'EVOLVE',
+    EVOLVE_POKEMON: 'EVOLVE',
+    USE_ABILITY: 'USE_ABILITY',
+    ABILITY: 'USE_ABILITY',
+    ABILITY_ACTIVATED: 'USE_ABILITY',
+    TRIGGERED_ABILITY: 'TRIGGERED_ABILITY',
+    ABILITY_ON_EVOLVE: 'TRIGGERED_ABILITY',
+    ABILITY_ON_PLAY_FROM_HAND: 'TRIGGERED_ABILITY',
+    ON_PLAY_ABILITY: 'TRIGGERED_ABILITY',
+    ON_EVOLVE_ABILITY: 'TRIGGERED_ABILITY',
+    ABILITY_REACTIVE: 'TRIGGERED_ABILITY',
+    PASSIVE_ABILITY: 'PASSIVE_ABILITY',
+    ABILITY_PASSIVE: 'PASSIVE_ABILITY',
+    CONTINUOUS_ABILITY: 'PASSIVE_ABILITY',
+    ATTACH_ENERGY: 'ATTACH_ENERGY',
+    ENERGY_ATTACHMENT: 'ATTACH_ENERGY',
+    SPECIAL_ENERGY_EFFECT: 'ATTACH_ENERGY',
+    RETREAT: 'RETREAT',
+    RETREAT_ACTION: 'RETREAT',
+    ATTACK: 'ATTACK',
   }
-  if (s === 'EVOLVE' || s === 'EVOLVE_POKEMON') return 'EVOLVE'
-  if (
-    s === 'USE_ABILITY' ||
-    s === 'ABILITY' ||
-    s.startsWith('ABILITY_') ||
-    s.includes('TALENT')
-  ) {
-    return 'USE_ABILITY'
+  if (exactMap[s]) return exactMap[s]!
+  if (s.includes('PASSIVE') || s.includes('CONTINUOUS')) return 'PASSIVE_ABILITY'
+  if (s.includes('TRIGGER') || s.includes('REACTIVE') || s.includes('ON_PLAY') || s.includes('ON_EVOLVE')) {
+    return 'TRIGGERED_ABILITY'
   }
-  if (s === 'ATTACH_ENERGY' || s === 'ENERGY_ATTACHMENT' || s === 'SPECIAL_ENERGY_EFFECT') {
-    return 'ATTACH_ENERGY'
-  }
-  if (s === 'RETREAT' || s === 'RETREAT_ACTION') return 'RETREAT'
-  if (s === 'ATTACK' || s.includes('ATTAQUE')) return 'ATTACK'
+  if (s.includes('ABILITY') || s.includes('TALENT')) return 'USE_ABILITY'
+  if (s.includes('ATTACK') || s.includes('ATTAQUE')) return 'ATTACK'
+  if (s.includes('EVOLV')) return 'EVOLVE'
+  if (s.includes('RETREAT') || s.includes('RETRAITE')) return 'RETREAT'
+  if (s.includes('ENERG') || s.includes('ATTACH')) return 'ATTACH_ENERGY'
 
   if (actionId.startsWith('attack')) return 'ATTACK'
   if (actionId.startsWith('ability')) return 'USE_ABILITY'
@@ -104,55 +130,151 @@ export function coerceTimingPhase(val: any, actionType: ActionType): TimingPhase
   return 'MAIN_PHASE_1'
 }
 
-export function coerceEffectPrimitive(val: any): EffectPrimitive {
-  const s = String(val || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+const VALID_EFFECT_PRIMITIVES = new Set<EffectPrimitive>([
+  'SEARCH_DECK',
+  'DRAW_CARDS',
+  'DAMAGE_ACTIVE',
+  'DAMAGE_BENCH',
+  'ATTACH_ENERGY',
+  'DISCARD_CARDS',
+  'HEAL',
+  'SWITCH_ACTIVE',
+  'APPLY_SPECIAL_CONDITION',
+  'EVOLVE_POKEMON',
+  'SHUFFLE_HAND_DRAW',
+  'RECOVER_FROM_DISCARD',
+  'PLACE_DAMAGE_COUNTERS',
+  'MOVE_DAMAGE_COUNTERS',
+  'MOVE_ENERGY',
+  'MODIFY_DAMAGE_TAKEN',
+  'MODIFY_DAMAGE_DEALT',
+  'MODIFY_HP',
+  'MODIFY_RETREAT_COST',
+  'PREVENT_DAMAGE_OR_EFFECTS',
+  'LOCK_NEXT_TURN_ATTACK',
+  'LOCK_RETREAT',
+  'LOCK_ABILITIES',
+  'LOCK_ITEMS',
+  'EXPAND_BENCH',
+  'KNOCK_OUT',
+  'MILL_DECK',
+  'TAKE_EXTRA_PRIZE',
+  'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+])
+
+export function coerceEffectPrimitive(val: any): EffectPrimitive | null {
+  if (val === null || val === undefined) return null
+  const s = String(val).trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s || s === 'NONE' || s === 'NULL' || s === 'N_A' || s === 'NA') return null
+  if (VALID_EFFECT_PRIMITIVES.has(s as EffectPrimitive)) {
+    return s as EffectPrimitive
+  }
+
   const map: Record<string, EffectPrimitive> = {
-    SEARCH_DECK: 'SEARCH_DECK',
     SEARCH_DECK_TO_HAND: 'SEARCH_DECK',
     SEARCH_DECK_TO_BENCH: 'SEARCH_DECK',
     SEARCH_DECK_AND_PUT_ON_BENCH: 'SEARCH_DECK',
     SEARCH_CARD: 'SEARCH_DECK',
     SEARCH: 'SEARCH_DECK',
     TUTOR: 'SEARCH_DECK',
-    LOOK_TOP_DECK: 'SEARCH_DECK',
-    LOOK_TOP_DECK_PICK: 'SEARCH_DECK',
 
-    DRAW_CARDS: 'DRAW_CARDS',
+    LOOK_TOP_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    LOOK_TOP_DECK_PICK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    REORDER_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    PUT_ON_TOP_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    PUT_ON_BOTTOM_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    PLACE_ON_TOP_OF_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+    PLACE_ON_BOTTOM_OF_DECK: 'PUT_ON_TOP_OR_BOTTOM_OF_DECK',
+
     DRAW: 'DRAW_CARDS',
     DRAW_CARD: 'DRAW_CARDS',
     DRAW_UNTIL_HAND_SIZE: 'DRAW_CARDS',
     DRAW_UNTIL: 'DRAW_CARDS',
 
-    DAMAGE_ACTIVE: 'DAMAGE_ACTIVE',
     DEAL_DAMAGE_ACTIVE: 'DAMAGE_ACTIVE',
     DEAL_DAMAGE: 'DAMAGE_ACTIVE',
     DAMAGE: 'DAMAGE_ACTIVE',
     ATTACK_DAMAGE: 'DAMAGE_ACTIVE',
     COIN_FLIP_DAMAGE: 'DAMAGE_ACTIVE',
-    BONUS_DAMAGE: 'DAMAGE_ACTIVE',
-    EXTRA_DAMAGE: 'DAMAGE_ACTIVE',
-    PASSIVE_DAMAGE_BOOST: 'DAMAGE_ACTIVE',
 
-    DAMAGE_BENCH: 'DAMAGE_BENCH',
     DEAL_DAMAGE_BENCH: 'DAMAGE_BENCH',
-    PLACE_DAMAGE_COUNTERS: 'DAMAGE_BENCH',
-    PUT_DAMAGE_COUNTERS: 'DAMAGE_BENCH',
     SNIPE_BENCH: 'DAMAGE_BENCH',
     SPREAD_DAMAGE: 'DAMAGE_BENCH',
-    DISTRIBUTE_DAMAGE_COUNTERS_BENCH: 'DAMAGE_BENCH',
 
-    ATTACH_ENERGY: 'ATTACH_ENERGY',
+    PUT_DAMAGE_COUNTERS: 'PLACE_DAMAGE_COUNTERS',
+    PLACE_COUNTERS: 'PLACE_DAMAGE_COUNTERS',
+    DAMAGE_COUNTERS: 'PLACE_DAMAGE_COUNTERS',
+    ADD_DAMAGE_COUNTERS: 'PLACE_DAMAGE_COUNTERS',
+    DISTRIBUTE_DAMAGE_COUNTERS_BENCH: 'PLACE_DAMAGE_COUNTERS',
+
+    TRANSFER_DAMAGE_COUNTERS: 'MOVE_DAMAGE_COUNTERS',
+
+    PREVENT_DAMAGE: 'PREVENT_DAMAGE_OR_EFFECTS',
+    PREVENT_EFFECTS: 'PREVENT_DAMAGE_OR_EFFECTS',
+    PASSIVE_PREVENT_DAMAGE_OR_EFFECTS: 'PREVENT_DAMAGE_OR_EFFECTS',
+    IMMUNITY: 'PREVENT_DAMAGE_OR_EFFECTS',
+
+    PASSIVE_DAMAGE_REDUCTION: 'MODIFY_DAMAGE_TAKEN',
+    REDUCE_DAMAGE: 'MODIFY_DAMAGE_TAKEN',
+    REDUCE_DAMAGE_TAKEN: 'MODIFY_DAMAGE_TAKEN',
+    DAMAGE_REDUCTION: 'MODIFY_DAMAGE_TAKEN',
+
+    PASSIVE_DAMAGE_BOOST: 'MODIFY_DAMAGE_DEALT',
+    BOOST_DAMAGE: 'MODIFY_DAMAGE_DEALT',
+    BONUS_DAMAGE: 'MODIFY_DAMAGE_DEALT',
+    EXTRA_DAMAGE: 'MODIFY_DAMAGE_DEALT',
+    DAMAGE_BOOST: 'MODIFY_DAMAGE_DEALT',
+
+    BOOST_HP: 'MODIFY_HP',
+    INCREASE_HP: 'MODIFY_HP',
+    MAX_HP_MOD: 'MODIFY_HP',
+
+    PASSIVE_RETREAT_COST_MOD: 'MODIFY_RETREAT_COST',
+    REDUCE_RETREAT_COST: 'MODIFY_RETREAT_COST',
+    FREE_RETREAT: 'MODIFY_RETREAT_COST',
+
+    CANT_ATTACK_NEXT_TURN: 'LOCK_NEXT_TURN_ATTACK',
+    LOCK_ATTACK: 'LOCK_NEXT_TURN_ATTACK',
+    CANNOT_ATTACK: 'LOCK_NEXT_TURN_ATTACK',
+    CANT_ATTACK: 'LOCK_NEXT_TURN_ATTACK',
+
+    CANT_RETREAT: 'LOCK_RETREAT',
+    CANNOT_RETREAT: 'LOCK_RETREAT',
+    PREVENT_RETREAT: 'LOCK_RETREAT',
+
+    PASSIVE_ABILITY_OR_ITEM_LOCK: 'LOCK_ITEMS',
+    ITEM_LOCK: 'LOCK_ITEMS',
+    CANT_PLAY_ITEMS: 'LOCK_ITEMS',
+
+    DISABLE_ABILITIES: 'LOCK_ABILITIES',
+    ABILITY_LOCK: 'LOCK_ABILITIES',
+    NEGATE_ABILITIES: 'LOCK_ABILITIES',
+
+    BENCH_SIZE_MOD: 'EXPAND_BENCH',
+
+    KO: 'KNOCK_OUT',
+    INSTANT_KO: 'KNOCK_OUT',
+    AUTO_KO: 'KNOCK_OUT',
+
+    MILL_OPPONENT_DECK: 'MILL_DECK',
+    MILL: 'MILL_DECK',
+    DISCARD_TOP_DECK: 'MILL_DECK',
+
+    TAKE_EXTRA_PRIZE_CARDS: 'TAKE_EXTRA_PRIZE',
+    EXTRA_PRIZE: 'TAKE_EXTRA_PRIZE',
+    TAKE_PRIZE: 'TAKE_EXTRA_PRIZE',
+
     ATTACH_ENERGY_FROM_HAND: 'ATTACH_ENERGY',
     ATTACH_ENERGY_FROM_DISCARD: 'ATTACH_ENERGY',
     ATTACH_ENERGY_FROM_DECK: 'ATTACH_ENERGY',
     SEARCH_AND_ATTACH_ENERGY: 'ATTACH_ENERGY',
     ATTACH_EXTRA_ENERGY_FROM_HAND: 'ATTACH_ENERGY',
     ACCELERATE_ENERGY: 'ATTACH_ENERGY',
-    MOVE_ENERGY_BETWEEN_POKEMON: 'ATTACH_ENERGY',
-    MOVE_ENERGY: 'ATTACH_ENERGY',
     PROVIDE_ENERGY: 'ATTACH_ENERGY',
 
-    DISCARD_CARDS: 'DISCARD_CARDS',
+    MOVE_ENERGY_BETWEEN_POKEMON: 'MOVE_ENERGY',
+    TRANSFER_ENERGY: 'MOVE_ENERGY',
+
     DISCARD: 'DISCARD_CARDS',
     DISCARD_FROM_HAND: 'DISCARD_CARDS',
     DISCARD_HAND: 'DISCARD_CARDS',
@@ -161,17 +283,12 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     DISCARD_TOOL: 'DISCARD_CARDS',
     DISCARD_TOOL_OR_STADIUM: 'DISCARD_CARDS',
     DISCARD_OPPONENT_ENERGY: 'DISCARD_CARDS',
-    MILL_OPPONENT_DECK: 'DISCARD_CARDS',
     DISCARD_FROM_OPPONENT_HAND: 'DISCARD_CARDS',
 
-    HEAL: 'HEAL',
     HEAL_DAMAGE: 'HEAL',
     HEAL_POKEMON: 'HEAL',
     REMOVE_DAMAGE_COUNTERS: 'HEAL',
-    PASSIVE_DAMAGE_REDUCTION: 'HEAL',
-    PASSIVE_PREVENT_DAMAGE_OR_EFFECTS: 'HEAL',
 
-    SWITCH_ACTIVE: 'SWITCH_ACTIVE',
     SWITCH_ACTIVE_POKEMON: 'SWITCH_ACTIVE',
     GUST_OPPONENT_BENCH_TO_ACTIVE: 'SWITCH_ACTIVE',
     GUST_OPPONENT_BENCH: 'SWITCH_ACTIVE',
@@ -179,9 +296,7 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     SWITCH: 'SWITCH_ACTIVE',
     GUST: 'SWITCH_ACTIVE',
     RETREAT: 'SWITCH_ACTIVE',
-    PASSIVE_RETREAT_COST_MOD: 'SWITCH_ACTIVE',
 
-    APPLY_SPECIAL_CONDITION: 'APPLY_SPECIAL_CONDITION',
     SPECIAL_CONDITION: 'APPLY_SPECIAL_CONDITION',
     STATUS_CONDITION: 'APPLY_SPECIAL_CONDITION',
     POISON: 'APPLY_SPECIAL_CONDITION',
@@ -189,9 +304,7 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     SLEEP: 'APPLY_SPECIAL_CONDITION',
     PARALYZE: 'APPLY_SPECIAL_CONDITION',
     CONFUSE: 'APPLY_SPECIAL_CONDITION',
-    PASSIVE_ABILITY_OR_ITEM_LOCK: 'APPLY_SPECIAL_CONDITION',
 
-    EVOLVE_POKEMON: 'EVOLVE_POKEMON',
     EVOLVE_SKIP_STAGE_1: 'EVOLVE_POKEMON',
     EVOLVE_SKIP_STAGE1: 'EVOLVE_POKEMON',
     EVOLVE_FROM_HAND: 'EVOLVE_POKEMON',
@@ -201,7 +314,6 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     USE_STAGE_2_CARD: 'EVOLVE_POKEMON',
     DEVOLVE_OPPONENT_POKEMON: 'EVOLVE_POKEMON',
 
-    SHUFFLE_HAND_DRAW: 'SHUFFLE_HAND_DRAW',
     SHUFFLE_HAND_AND_DRAW: 'SHUFFLE_HAND_DRAW',
     DISCARD_HAND_AND_DRAW: 'SHUFFLE_HAND_DRAW',
     SHUFFLE_HAND_BOTTOM_DRAW_PRIZES: 'SHUFFLE_HAND_DRAW',
@@ -209,7 +321,6 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     RESET_HAND: 'SHUFFLE_HAND_DRAW',
     IONO_EFFECT: 'SHUFFLE_HAND_DRAW',
 
-    RECOVER_FROM_DISCARD: 'RECOVER_FROM_DISCARD',
     RECOVER_FROM_DISCARD_TO_HAND: 'RECOVER_FROM_DISCARD',
     RECOVER_FROM_DISCARD_TO_DECK: 'RECOVER_FROM_DISCARD',
     RECOVER_FROM_DISCARD_TO_BENCH: 'RECOVER_FROM_DISCARD',
@@ -219,20 +330,38 @@ export function coerceEffectPrimitive(val: any): EffectPrimitive {
     RECOVER: 'RECOVER_FROM_DISCARD',
   }
 
-  if (map[s]) return map[s]
-  if (s.includes('SEARCH') && s.includes('ENERG')) return 'ATTACH_ENERGY'
+  if (map[s]) return map[s]!
+
+  if (s.includes('MILL')) return 'MILL_DECK'
+  if (s.includes('KNOCK_OUT') || s.endsWith('_KO')) return 'KNOCK_OUT'
+  if (s.includes('EXTRA_PRIZE')) return 'TAKE_EXTRA_PRIZE'
+  if (s.includes('MOVE') && s.includes('COUNTER')) return 'MOVE_DAMAGE_COUNTERS'
+  if (s.includes('COUNTER') && (s.includes('PLACE') || s.includes('PUT'))) return 'PLACE_DAMAGE_COUNTERS'
+  if (s.includes('MOVE') && s.includes('ENERG')) return 'MOVE_ENERGY'
+  if (s.includes('PREVENT')) return 'PREVENT_DAMAGE_OR_EFFECTS'
+  if (s.includes('REDUCE') && s.includes('DAMAGE')) return 'MODIFY_DAMAGE_TAKEN'
+  if ((s.includes('BOOST') || s.includes('BONUS') || s.includes('DEALT')) && s.includes('DAMAGE')) return 'MODIFY_DAMAGE_DEALT'
+  if (s.includes('RETREAT') && (s.includes('MOD') || s.includes('COST') || s.includes('REDUCE'))) return 'MODIFY_RETREAT_COST'
+  if (s.includes('RETREAT') && (s.includes('LOCK') || s.includes('CANT') || s.includes('CANNOT'))) return 'LOCK_RETREAT'
+  if (s.includes('ABILITY') && (s.includes('LOCK') || s.includes('DISABLE'))) return 'LOCK_ABILITIES'
+  if (s.includes('ITEM') && (s.includes('LOCK') || s.includes('CANT') || s.includes('CANNOT'))) return 'LOCK_ITEMS'
+  if (s.includes('ATTACK') && (s.includes('LOCK') || s.includes('CANT') || s.includes('CANNOT'))) return 'LOCK_NEXT_TURN_ATTACK'
+  if (s.includes('EXPAND') && s.includes('BENCH')) return 'EXPAND_BENCH'
+  if (s.includes('HP') && (s.includes('MOD') || s.includes('BOOST') || s.includes('INCREASE'))) return 'MODIFY_HP'
+  if (s.includes('SEARCH') && s.includes('ENERG') && s.includes('ATTACH')) return 'ATTACH_ENERGY'
   if (s.includes('SEARCH') || s.includes('TUTOR')) return 'SEARCH_DECK'
   if (s.includes('SHUFFLE') && s.includes('DRAW')) return 'SHUFFLE_HAND_DRAW'
   if (s.includes('DRAW') || s.includes('PIOCH')) return 'DRAW_CARDS'
-  if (s.includes('BENCH') && (s.includes('DAMAGE') || s.includes('COUNTER'))) return 'DAMAGE_BENCH'
+  if (s.includes('BENCH') && s.includes('DAMAGE')) return 'DAMAGE_BENCH'
   if (s.includes('DAMAGE') || s.includes('DEGAT')) return 'DAMAGE_ACTIVE'
   if (s.includes('ATTACH') || s.includes('ENERG')) return 'ATTACH_ENERGY'
   if (s.includes('DISCARD') || s.includes('DEFAUSS')) return 'DISCARD_CARDS'
   if (s.includes('HEAL') || s.includes('SOIN')) return 'HEAL'
-  if (s.includes('SWITCH') || s.includes('GUST')) return 'SWITCH_ACTIVE'
+  if (s.includes('SWITCH') || s.includes('GUST') || s.includes('SWAP')) return 'SWITCH_ACTIVE'
   if (s.includes('EVOLV')) return 'EVOLVE_POKEMON'
-  if (s.includes('RECOVER')) return 'RECOVER_FROM_DISCARD'
-  return 'DRAW_CARDS'
+  if (s.includes('RECOVER') || s.includes('RETRIEVE')) return 'RECOVER_FROM_DISCARD'
+  if (s.includes('CONDITION') || s.includes('STATUS')) return 'APPLY_SPECIAL_CONDITION'
+  return null
 }
 
 export function coerceAIRole(val: any): AIRole {
@@ -321,7 +450,7 @@ export function normalizeCardModel(raw: any): EngineCardModel {
   const regulationMark = rawIdent.regulationMark ? String(rawIdent.regulationMark).toUpperCase() : null
   const legalStandard = Boolean(
     rawIdent.legalStandard ??
-      (subCategory === 'BASIC_ENERGY' || ['G', 'H', 'I'].includes(regulationMark || '')),
+      (subCategory === 'BASIC_ENERGY' || ['G', 'H', 'I', 'J'].includes(regulationMark || '')),
   )
 
   const identity: CardIdentity = {
@@ -451,7 +580,7 @@ export function normalizeCardModel(raw: any): EngineCardModel {
         } else if (p && typeof p === 'object') {
           const typeStr = String(p.type || p.condition || '').trim()
           if (typeStr === 'HAND_MIN_OTHER_CARDS' && p.minCount != null) {
-            preconditions.push(`HAND_MIN_OTHER_CARDS_${p.minCount}`)
+            preconditions.push(`HAND_MIN_OTHER_CARDS:${p.minCount}`)
           } else if (typeStr) {
             preconditions.push(typeStr)
           }
@@ -465,7 +594,7 @@ export function normalizeCardModel(raw: any): EngineCardModel {
       for (const c of rawAct.costs) {
         if (c && c.type === 'DISCARD_FROM_HAND') {
           const count = Number(c.count) || 1
-          const preKey = `HAND_MIN_OTHER_CARDS_${count}`
+          const preKey = `HAND_MIN_OTHER_CARDS:${count}`
           if (!preconditions.includes(preKey)) {
             preconditions.push(preKey)
           }
@@ -473,6 +602,8 @@ export function normalizeCardModel(raw: any): EngineCardModel {
             primitive: 'DISCARD_CARDS',
             target: 'PLAYER',
             count,
+            sourceZone: 'HAND',
+            destinationZone: 'DISCARD',
             zone: 'HAND',
             upTo: false,
             optional: false,
@@ -483,38 +614,96 @@ export function normalizeCardModel(raw: any): EngineCardModel {
 
     // Effects: AtomicEffect[]
     const rawEffects = Array.isArray(rawAct.effects) ? rawAct.effects : []
-    const mappedEffects: AtomicEffect[] = rawEffects.map((rawEff: any) => {
-      const primitive = coerceEffectPrimitive(rawEff.primitive || rawEff.type)
-      const target = rawEff.target != null ? String(rawEff.target) : rawEff.targetZone ? String(rawEff.targetZone) : null
-      const zone = rawEff.zone != null ? String(rawEff.zone) : rawEff.sourceZone ? String(rawEff.sourceZone) : null
+    const mappedEffects: AtomicEffect[] = rawEffects
+      .map((rawEff: any): AtomicEffect | null => {
+        const primitive = coerceEffectPrimitive(rawEff.primitive || rawEff.type)
+        if (!primitive) return null
 
-      let val: number | null = null
-      if (rawEff.value != null) val = Number(rawEff.value)
-      else if (rawEff.baseDamage != null) val = Number(rawEff.baseDamage)
-      else if (rawEff.damage != null) val = Number(rawEff.damage)
+        const target =
+          rawEff.target != null
+            ? String(rawEff.target)
+            : rawEff.targetZone
+              ? String(rawEff.targetZone)
+              : null
+        const sourceZone = rawEff.sourceZone != null ? String(rawEff.sourceZone) : null
+        const destinationZone =
+          rawEff.destinationZone != null ? String(rawEff.destinationZone) : null
+        const zone =
+          rawEff.zone != null
+            ? String(rawEff.zone)
+            : sourceZone ?? destinationZone ?? null
 
-      let count: number | null = null
-      if (rawEff.count != null) count = Number(rawEff.count)
+        let val: number | null = null
+        if (rawEff.value != null) val = Number(rawEff.value)
+        else if (rawEff.baseDamage != null) val = Number(rawEff.baseDamage)
+        else if (rawEff.damage != null) val = Number(rawEff.damage)
 
-      let filter: string | null = null
-      if (typeof rawEff.filter === 'string') {
-        filter = rawEff.filter
-      } else if (rawEff.targetFilter) {
-        filter = targetFilterToDsl(rawEff.targetFilter)
-      }
+        let count: number | null = null
+        if (rawEff.count != null) count = Number(rawEff.count)
 
-      return {
-        primitive,
-        target,
-        value: val != null && !isNaN(val) ? val : null,
-        count: count != null && !isNaN(count) ? count : null,
-        zone,
-        filter,
-        upTo: Boolean(rawEff.upTo ?? false),
-        optional: Boolean(rawEff.optional ?? false),
-        baseDamage: val,
-      }
-    })
+        let filter: string | null = null
+        if (typeof rawEff.filter === 'string') {
+          filter = rawEff.filter
+        } else if (rawEff.targetFilter) {
+          filter = targetFilterToDsl(rawEff.targetFilter)
+        }
+
+        const bonusValue =
+          rawEff.bonusValue != null && !isNaN(Number(rawEff.bonusValue))
+            ? Number(rawEff.bonusValue)
+            : null
+        const coinCount =
+          rawEff.coinCount != null && !isNaN(Number(rawEff.coinCount))
+            ? Number(rawEff.coinCount)
+            : null
+
+        const effect: AtomicEffect = {
+          primitive,
+          target,
+          value: val != null && !isNaN(val) ? val : null,
+          count: count != null && !isNaN(count) ? count : null,
+          sourceZone,
+          destinationZone,
+          zone,
+          filter,
+          specialCondition: rawEff.specialCondition
+            ? (String(rawEff.specialCondition) as SpecialConditionType)
+            : null,
+          coinFlipMode: rawEff.coinFlipMode
+            ? (String(rawEff.coinFlipMode) as CoinFlipMode)
+            : null,
+          coinCount,
+          scalingOperator: rawEff.scalingOperator
+            ? (String(rawEff.scalingOperator) as ScalingOperator)
+            : null,
+          scalingMetric: rawEff.scalingMetric
+            ? (String(rawEff.scalingMetric) as ScalingMetric)
+            : null,
+          bonusValue,
+          upTo: Boolean(rawEff.upTo ?? false),
+          optional: Boolean(rawEff.optional ?? false),
+        }
+
+        if (rawEff.baseDamage != null && !isNaN(Number(rawEff.baseDamage))) {
+          effect.baseDamage = Number(rawEff.baseDamage)
+        } else if (val != null && !isNaN(val)) {
+          effect.baseDamage = val
+        }
+        if (rawEff.targetZone != null) effect.targetZone = String(rawEff.targetZone)
+        if (rawEff.targetFilter !== undefined) effect.targetFilter = rawEff.targetFilter
+        if (rawEff.damageScalingPerOpponentPrizeTaken != null) {
+          effect.damageScalingPerOpponentPrizeTaken = Number(rawEff.damageScalingPerOpponentPrizeTaken)
+        }
+        if (rawEff.damageScalingType != null) {
+          effect.damageScalingType = String(rawEff.damageScalingType)
+        }
+        if (rawEff.damageScalingValue != null) {
+          effect.damageScalingValue = Number(rawEff.damageScalingValue)
+        }
+
+        return effect
+      })
+      .filter((e: AtomicEffect | null): e is AtomicEffect => e !== null)
 
     const effects = [...extraEffects, ...mappedEffects]
 
