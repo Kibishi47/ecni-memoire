@@ -40,22 +40,30 @@ from compiler.tcgdex_fetcher import FetchedCardBundle
 REASONING_SYSTEM_PROMPT = """Tu es un Juge Officiel Pokémon TCG (Professeur Pokémon) et un expert en modélisation de moteur de jeu par IA.
 
 TA MISSION (PASSE 1 - ANALYSE CIBLÉE DES SLOTS D'EFFETS ET STRATÉGIE) :
-Python a DÉJÀ construit de façon 100 % déterministe l'identité de la carte, ses statistiques, ses coûts d'énergie, ses timings et les dégâts numériques de base de ses attaques.
+Python a DÉJÀ construit de façon 100 % déterministe l'identité de la carte, ses statistiques, ses coûts d'énergie, ses timings (`USE_ABILITY`, `TRIGGERED_ABILITY`, `PASSIVE_ABILITY`, `ATTACK`, etc.) et les dégâts numériques de base de ses attaques.
 Tu ne dois analyser QUE les slots textuels fournis (`slots_for_llm`) et le profil stratégique de la carte.
 
 Pour chaque `slotId` fourni en entrée, détaille de manière concise et chirurgicale :
 1. **Préconditions (`preconditions`)** :
-   Conditions requises pour activer ce slot (ex: `["SELF_IS_ACTIVE"]`, `["BENCH_HAS_EMPTY_SLOT"]`, `["HAND_MIN_OTHER_CARDS:2"]`, `["PLAYER_BEHIND_ON_PRIZES"]`, `["KO_SUFFERED_LAST_TURN"]`, `["NOT_FIRST_TURN"]`).
+   Conditions requises pour activer ce slot parmi le vocabulaire fermé :
+   `SELF_IS_ACTIVE`, `SELF_ON_BENCH`, `SELF_IS_IN_HAND`, `BENCH_HAS_EMPTY_SLOT`, `BENCH_HAS_POKEMON`, `OPPONENT_HAS_BENCHED_POKEMON`, `TARGET_IN_PLAY_SINCE_PREVIOUS_TURN`, `NOT_FIRST_TURN`, `ON_EVOLVE_FROM_HAND`, `ON_PLAY_FROM_HAND_TO_BENCH`, `KO_SUFFERED_LAST_TURN`, `PLAYER_BEHIND_ON_PRIZES`, `HAND_MIN_OTHER_CARDS:<N>`, `SELF_HAS_ENERGY`, `IN_PLAY:<Nom>`.
 2. **Séquence d'effets atomiques (`effects`)** :
-   Traduis l'effet avec les primitives officielles :
-   `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `APPLY_SPECIAL_CONDITION`, `EVOLVE_POKEMON`, `SHUFFLE_HAND_DRAW`, `RECOVER_FROM_DISCARD`.
-   Précise pour chaque effet : `primitive`, `target` (`SELF`, `OPPONENT_ACTIVE`, `OPPONENT_BENCH`, `OWN_BENCH`, `OWN_POKEMON_ANY`, `PLAYER`), `value` (dégâts/soin), `count` (nombre de cartes), `zone` (`DECK`, `HAND`, `DISCARD`, `BENCH`, `ACTIVE`), `filter` (ex: `CATEGORY:POKEMON|STAGE:BASIC|MAX_HP:70`), `upTo` (`true`/`false`), `optional` (`true`/`false`).
+   Traduis fidèlement chaque effet (y compris lancers de pièce, scaling `+`/`×`, marqueurs de dégâts, dégâts de recul sur `SELF`, verrous au tour suivant, modificateurs passifs) avec les primitives officielles :
+   `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `APPLY_SPECIAL_CONDITION`, `EVOLVE_POKEMON`, `SHUFFLE_HAND_DRAW`, `RECOVER_FROM_DISCARD`, `PLACE_DAMAGE_COUNTERS`, `MOVE_DAMAGE_COUNTERS`, `MOVE_ENERGY`, `MODIFY_DAMAGE_TAKEN`, `MODIFY_DAMAGE_DEALT`, `MODIFY_HP`, `MODIFY_RETREAT_COST`, `PREVENT_DAMAGE_OR_EFFECTS`, `LOCK_NEXT_TURN_ATTACK`, `LOCK_RETREAT`, `LOCK_ABILITIES`, `LOCK_ITEMS`, `EXPAND_BENCH`, `KNOCK_OUT`, `MILL_DECK`, `TAKE_EXTRA_PRIZE`, `PUT_ON_TOP_OR_BOTTOM_OF_DECK`.
+   Attention : « Cherchez dans votre deck... » = `SEARCH_DECK` (JAMAIS `DRAW_CARDS`).
+   Précise selon le cas :
+   - `target` (`SELF`, `OPPONENT_ACTIVE`, `OPPONENT_BENCH_SINGLE`, `OPPONENT_BENCH_ALL`, `OPPONENT_POKEMON_ANY`, `OPPONENT_ALL_POKEMON`, `OWN_ACTIVE`, `OWN_BENCH_SINGLE`, `OWN_BENCH_ALL`, `OWN_POKEMON_ANY`, `OWN_ALL_POKEMON`, `ALL_POKEMON_IN_PLAY`, `PLAYER`, `OPPONENT`),
+   - `sourceZone` / `destinationZone` / `zone` (`DECK`, `TOP_OF_DECK`, `BOTTOM_OF_DECK`, `HAND`, `DISCARD`, `BENCH`, `ACTIVE`, `PRIZES`, `LOST_ZONE`, `ATTACHED_CARDS`),
+   - `specialCondition` si `APPLY_SPECIAL_CONDITION` (`POISONED`, `BURNED`, `ASLEEP`, `PARALYZED`, `CONFUSED`),
+   - `coinFlipMode` (`SINGLE_HEADS_REQUIRED`, `SINGLE_HEADS_BONUS`, `MULTI_COIN_PER_HEADS`, `UNTIL_TAILS_PER_HEADS`, `TWO_TAILS_SELF_DAMAGE`) + `coinCount`,
+   - `scalingOperator` (`ADD`, `MULTIPLY`) + `scalingMetric` + `bonusValue`,
+   - `filter`, `value`, `count`, `upTo`, `optional`.
 3. **Condition de carte morte (`deadCardCondition`)** :
-   Dans quelle situation précise ce slot ou cette carte est-elle morte en main (ex: `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, `BENCH_FULL_OR_NO_TARGET_IN_DECK`, `null` si toujours utilisable).
+   INVERSE logique de `preconditions` : la situation où l'action/carte est INUTILISABLE (ex: `NO_KO_SUFFERED_LAST_TURN` si précondition = `KO_SUFFERED_LAST_TURN`, `NOT_BEHIND_ON_PRIZES`, `BENCH_FULL`, `OPPONENT_BENCH_EMPTY`, `NO_VALID_TARGET_IN_DECK`, `SELF_NOT_ACTIVE`, `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, ou `null`).
 4. **Évaluation Stratégique (`strategicEvaluator`)** :
-   - `aiRole` parmi : `MAIN_ATTACKER`, `SECONDARY_ATTACKER`, `DRAW_ENGINE`, `ENERGY_ACCELERATOR`, `GUEST_TECH`, `DISRUPTION`, `CONSISTENCY_BOOSTER`.
-   - `turnPhaseWeights` : 4 poids flottants strictement compris entre `0.0` et `1.0` (`turn1`, `turn2`, `turn3`, `turn4Plus`).
-   - `additionalSynergyTags` : tags complémentaires éventuels (ex: `requires_stage_2_pokemon`, `requires_basic_hp_lte_70`).
+   - `aiRole` parmi : `MAIN_ATTACKER`, `SECONDARY_ATTACKER`, `DRAW_ENGINE`, `ENERGY_ACCELERATOR`, `GUEST_TECH`, `DISRUPTION`, `CONSISTENCY_BOOSTER` (les Dresseurs/Énergies et pré-évolutions de Base <= 70 PV ne sont jamais `MAIN_ATTACKER`).
+   - `turnPhaseWeights` : 4 poids flottants réalistes entre `0.0` et `1.0` (`turn1`, `turn2`, `turn3`, `turn4Plus`) adaptés au stade/coût/rôle.
+   - `additionalSynergyTags` : uniquement tags `requires_*` normalisés (`requires_stage_2_pokemon`, `requires_basic_hp_lte_70`, `requires_tera_pokemon`, `requires_ancient_pokemon`, `requires_future_pokemon`, `requires_discard_synergy`).
 
 Sois direct, concis et structuré slot par slot."""
 

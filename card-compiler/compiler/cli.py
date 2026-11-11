@@ -65,7 +65,7 @@ from compiler.models_config import (
     normalize_pipeline_phase,
     resolve_model_for_configuration,
 )
-from compiler.post_processor import sanitize_and_enrich_card
+from compiler.post_processor import repair_compiled_corpus, sanitize_and_enrich_card
 from compiler.reasoning_engine import (
     ReasoningRecord,
     get_reasoning_texts_dir,
@@ -3401,6 +3401,57 @@ def update_index_alias(
         force=force,
         force_raw=force_raw,
     )
+
+
+@app.command("repair-compiled")
+def repair_compiled_command(
+    ids: Optional[str] = typer.Option(
+        None,
+        "--ids",
+        help="Liste d'identifiants séparés par des virgules pour restreindre la réparation.",
+    ),
+    ids_file: Optional[Path] = typer.Option(
+        None,
+        "--ids-file",
+        "-f",
+        help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Simule la réparation sans modifier les fichiers JSON.",
+    ),
+) -> None:
+    """Répare déterministiquement toutes les cartes compilées (`data/compiled_cards/*.json`), met à jour `cards_database.json` et génère `data/cards_to_recompile_llm.txt`."""
+    data_dir = get_data_dir()
+    custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+
+    with console.status("[bold cyan]Réparation déterministe du corpus en cours...[/bold cyan]"):
+        res = repair_compiled_corpus(
+            data_dir=data_dir,
+            target_ids=custom_ids,
+            dry_run=dry_run,
+        )
+
+    sim_note = " (simulation --dry-run)" if dry_run else ""
+    console.print(
+        Panel.fit(
+            f"• [bold]Cartes traitées[/bold] : [bold white]{res['total_processed']}[/bold white]\n"
+            f"• [bold]Cartes réparées/validées[/bold] : [bold green]{res['repaired_count']}[/bold green]\n"
+            f"• [bold]Fichiers modifiés[/bold] : [bold cyan]{res['modified_count']}[/bold cyan]{sim_note}\n"
+            f"• [bold]Anciennes cartes listées pour Passe 2 LLM[/bold] : [bold yellow]{res['legacy_recompile_count']}[/bold yellow] ([cyan]{res['recompile_file']}[/cyan])\n"
+            f"• [bold]Base consolidée[/bold] : [cyan]{res['db_path']}[/cyan]\n"
+            f"• [bold]Erreurs[/bold] : [{'bold red' if res['errors'] else 'bold green'}]{len(res['errors'])}[/{'bold red' if res['errors'] else 'bold green'}]",
+            title="[bold green]Réparation Déterministe du Corpus Standard[/bold green]",
+            border_style="green" if not res["errors"] else "red",
+        )
+    )
+
+    if res["errors"]:
+        for cid, msg in res["errors"][:15]:
+            console.print(f"[red]✗ {cid} : {msg}[/red]")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

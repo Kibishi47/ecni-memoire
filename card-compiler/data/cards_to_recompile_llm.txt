@@ -1,0 +1,43 @@
+# Cartes issues d'anciennes versions du pipeline (Qwen3-14B-GGUF du 29/10,
+# model.safetensors (MLX Native) du 04/11) ainsi que sv08.5-037 et me02.5-215.
+# Commande recommandee :
+#   python3 main.py re-run --phase 2 --ids-file data/cards_to_recompile_llm.txt
+me02.5-215
+me04-061
+me04-082
+sv01-166
+sv01-181
+sv01-196
+sv02-185
+sv03-125
+sv03-164
+sv04-125
+sv04-160
+sv05-025
+sv05-128
+sv05-129
+sv05-144
+sv05-145
+sv05-152
+sv06-025
+sv06-064
+sv06-095
+sv06-129
+sv06-130
+sv06-141
+sv06-158
+sv06-163
+sv06-165
+sv06-166
+sv06.5-047
+sv06.5-054
+sv07-057
+sv07-058
+sv07-131
+sv07-133
+sv08-056
+sv08-076
+sv08-170
+sv08.5-037
+sv09-056
+sv10-078

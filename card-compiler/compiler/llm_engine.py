@@ -65,62 +65,73 @@ CODING_SYSTEM_PROMPT = """Tu es un compilateur JSON formel pour un moteur Pokém
 Tu reçois uniquement les slots d'effets textuels d'une carte (`slots_for_llm`) ainsi que l'analyse de règles produite en Passe 1.
 Toute l'identité, les statistiques Pokémon, les coûts d'énergie et les dégâts de base sont DÉJÀ construits par Python.
 
-Tu dois répondre UNIQUEMENT avec un objet JSON strictement conforme au schéma `LLMCompiledPayload` suivant :
+Tu dois répondre UNIQUEMENT avec un objet JSON strictement conforme au schéma abstrait `LLMCompiledPayload` suivant (remplace tous les placeholders `<...>` par les vraies valeurs calculées pour LA CARTE COURANTE — ne recopie jamais des valeurs par défaut) :
 {
   "translatedSlots": [
     {
-      "slotId": "identifiant exact du slot fourni en entrée (ex: 'ability_0', 'attack_0', 'trainer_0')",
-      "preconditions": ["SELF_IS_ACTIVE"],
+      "slotId": "<exact_slotId_from_input>",
+      "preconditions": ["<CANONICAL_PRECONDITION_IF_REQUIRED>"],
       "effects": [
         {
-          "primitive": "DRAW_CARDS",
-          "target": "PLAYER",
-          "value": null,
-          "count": 2,
-          "zone": "DECK",
-          "filter": null,
+          "primitive": "<EffectPrimitive>",
+          "target": "<EffectTarget_or_null>",
+          "value": "<int_or_null>",
+          "count": "<int_or_null>",
+          "sourceZone": "<ZoneType_or_null>",
+          "destinationZone": "<ZoneType_or_null>",
+          "zone": "<ZoneType_or_null>",
+          "filter": "<FILTER_EXPRESSION_or_null>",
+          "specialCondition": "<SpecialCondition_or_null>",
+          "coinFlipMode": "<CoinFlipMode_or_null>",
+          "coinCount": "<int_or_null>",
+          "scalingOperator": "<ADD_or_MULTIPLY_or_null>",
+          "scalingMetric": "<ScalingMetric_or_null>",
+          "bonusValue": "<int_or_null>",
           "upTo": false,
           "optional": false
         }
       ],
-      "deadCardCondition": null
+      "deadCardCondition": "<LOGICAL_INVERSE_OF_PRECONDITIONS_or_null>"
     }
   ],
-  "aiRole": "MAIN_ATTACKER",
+  "aiRole": "<AIRole>",
   "turnPhaseWeights": {
-    "turn1": 0.9,
-    "turn2": 0.9,
-    "turn3": 0.8,
-    "turn4Plus": 0.8
+    "turn1": "<float_0.0_to_1.0>",
+    "turn2": "<float_0.0_to_1.0>",
+    "turn3": "<float_0.0_to_1.0>",
+    "turn4Plus": "<float_0.0_to_1.0>"
   },
-  "additionalSynergyTags": []
+  "additionalSynergyTags": ["<only_requires_*_tags_if_needed>"]
 }
 
-RÈGLES STRICTES SUR LES ENUMS ET VALEURS :
-1. `primitive` DOIT appartenir exactement à :
-   - "SEARCH_DECK"
-   - "DRAW_CARDS"
-   - "DAMAGE_ACTIVE"
-   - "DAMAGE_BENCH"
-   - "ATTACH_ENERGY"
-   - "DISCARD_CARDS"
-   - "HEAL"
-   - "SWITCH_ACTIVE"
-   - "APPLY_SPECIAL_CONDITION"
-   - "EVOLVE_POKEMON"
-   - "SHUFFLE_HAND_DRAW"
-   - "RECOVER_FROM_DISCARD"
-2. `aiRole` DOIT appartenir exactement à :
-   - "MAIN_ATTACKER"
-   - "SECONDARY_ATTACKER"
-   - "DRAW_ENGINE"
-   - "ENERGY_ACCELERATOR"
-   - "GUEST_TECH"
-   - "DISRUPTION"
-   - "CONSISTENCY_BOOSTER"
-3. `turnPhaseWeights` : `turn1`, `turn2`, `turn3`, `turn4Plus` sont des nombres flottants strictement bornés entre `0.0` et `1.0`.
-4. `upTo` et `optional` sont toujours des booléens (`true` ou `false`, jamais `null`).
-5. Ne génère AUCUN texte hors de l'objet JSON."""
+RÈGLES STRICTES SUR LES ENUMS ET LA SÉMANTIQUE :
+1. DISTINCTION CRITIQUE :
+   - « Cherchez dans votre deck... » / « Search your deck... » = TOUJOURS `SEARCH_DECK` (JAMAIS `DRAW_CARDS`).
+   - « Piochez X cartes » / « Draw X cards » = TOUJOURS `DRAW_CARDS`.
+   - Ne génère JAMAIS `DRAW_CARDS` si le texte ne mentionne ni pioche ni « draw ».
+2. `primitive` DOIT appartenir exactement à l'un des 29 termes :
+   `SEARCH_DECK`, `DRAW_CARDS`, `DAMAGE_ACTIVE`, `DAMAGE_BENCH`, `ATTACH_ENERGY`, `DISCARD_CARDS`, `HEAL`, `SWITCH_ACTIVE`, `APPLY_SPECIAL_CONDITION`, `EVOLVE_POKEMON`, `SHUFFLE_HAND_DRAW`, `RECOVER_FROM_DISCARD`, `PLACE_DAMAGE_COUNTERS`, `MOVE_DAMAGE_COUNTERS`, `MOVE_ENERGY`, `MODIFY_DAMAGE_TAKEN`, `MODIFY_DAMAGE_DEALT`, `MODIFY_HP`, `MODIFY_RETREAT_COST`, `PREVENT_DAMAGE_OR_EFFECTS`, `LOCK_NEXT_TURN_ATTACK`, `LOCK_RETREAT`, `LOCK_ABILITIES`, `LOCK_ITEMS`, `EXPAND_BENCH`, `KNOCK_OUT`, `MILL_DECK`, `TAKE_EXTRA_PRIZE`, `PUT_ON_TOP_OR_BOTTOM_OF_DECK`.
+3. `specialCondition` (OBLIGATOIRE si `primitive == APPLY_SPECIAL_CONDITION`, `null` sinon) :
+   `POISONED`, `BURNED`, `ASLEEP`, `PARALYZED`, `CONFUSED`.
+   N'utilise JAMAIS `APPLY_SPECIAL_CONDITION` pour un verrou d'attaque/retraite ou un modificateur de dégâts : utilise `LOCK_NEXT_TURN_ATTACK`, `LOCK_RETREAT`, `LOCK_ABILITIES`, `LOCK_ITEMS`, `MODIFY_DAMAGE_TAKEN`, `PREVENT_DAMAGE_OR_EFFECTS`.
+4. `target` DOIT appartenir exactement à `EffectTarget` (ou `null`) :
+   `SELF`, `OPPONENT_ACTIVE`, `OPPONENT_BENCH_SINGLE`, `OPPONENT_BENCH_ALL`, `OPPONENT_POKEMON_ANY`, `OPPONENT_ALL_POKEMON`, `OWN_ACTIVE`, `OWN_BENCH_SINGLE`, `OWN_BENCH_ALL`, `OWN_POKEMON_ANY`, `OWN_ALL_POKEMON`, `ALL_POKEMON_IN_PLAY`, `PLAYER`, `OPPONENT`.
+   Attention : « Ce Pokémon s'inflige X dégâts » -> `DAMAGE_ACTIVE` avec `target = "SELF"` (en plus du `DAMAGE_ACTIVE` sur `OPPONENT_ACTIVE`).
+5. `sourceZone`, `destinationZone`, `zone` DOIVENT appartenir à `ZoneType` (ou `null`) :
+   `DECK`, `TOP_OF_DECK`, `BOTTOM_OF_DECK`, `HAND`, `DISCARD`, `BENCH`, `ACTIVE`, `PRIZES`, `LOST_ZONE`, `ATTACHED_CARDS`.
+6. `coinFlipMode` (ou `null`) :
+   `SINGLE_HEADS_REQUIRED`, `SINGLE_HEADS_BONUS`, `MULTI_COIN_PER_HEADS`, `UNTIL_TAILS_PER_HEADS`, `TWO_TAILS_SELF_DAMAGE`.
+7. `scalingOperator` (`ADD` / `MULTIPLY` ou `null`) & `scalingMetric` (ou `null`) :
+   `PER_ENERGY_ON_SELF`, `PER_ENERGY_ON_OPPONENT_ACTIVE`, `PER_ENERGY_ON_BOTH_ACTIVES`, `PER_ENERGY_IN_PLAY`, `PER_ENERGY_DISCARDED`, `PER_DAMAGE_COUNTER_ON_SELF`, `PER_DAMAGE_COUNTER_ON_OPPONENT_ACTIVE`, `PER_BENCHED_POKEMON_WITH_DAMAGE`, `PER_OWN_BENCH_POKEMON`, `PER_OPPONENT_BENCH_POKEMON`, `PER_BOTH_BENCH_POKEMON`, `PER_PRIZE_TAKEN_BY_OPPONENT`, `PER_PRIZE_TAKEN_BY_PLAYER`, `PER_PRIZE_REMAINING_PLAYER`, `PER_CARD_IN_OWN_HAND`, `PER_CARD_IN_OPPONENT_HAND`, `CONDITIONAL_FLAT_BONUS`.
+8. `preconditions` (vocabulaire fermé) et `deadCardCondition` :
+   - Préconditions autorisées : `SELF_IS_ACTIVE`, `SELF_ON_BENCH`, `SELF_IS_IN_HAND`, `BENCH_HAS_EMPTY_SLOT`, `BENCH_HAS_POKEMON`, `OPPONENT_HAS_BENCHED_POKEMON`, `TARGET_IN_PLAY_SINCE_PREVIOUS_TURN`, `NOT_FIRST_TURN`, `ON_EVOLVE_FROM_HAND`, `ON_PLAY_FROM_HAND_TO_BENCH`, `KO_SUFFERED_LAST_TURN`, `PLAYER_BEHIND_ON_PRIZES`, `HAND_MIN_OTHER_CARDS:<N>`, `DECK_NOT_EMPTY`, `HAND_NOT_EMPTY`, `SELF_HAS_ENERGY`, `IN_PLAY:<Nom>`.
+   - RÈGLE D'INVERSION POUR `deadCardCondition` : `deadCardCondition` DOIT être l'INVERSE logique de `preconditions` (la condition où l'action est IMPOSSIBLE/MORTE en main). Exemples : `BENCH_FULL`, `BENCH_IS_EMPTY`, `NO_VALID_TARGET_IN_DECK`, `BENCH_FULL_OR_NO_TARGET_IN_DECK`, `OPPONENT_BENCH_EMPTY`, `NO_KO_SUFFERED_LAST_TURN`, `NOT_BEHIND_ON_PRIZES`, `HAND_IS_EMPTY`, `HAND_FEWER_THAN_2_OTHER_CARDS`, `SELF_NOT_ACTIVE`, `NO_STAGE_2_IN_HAND_OR_NO_BASIC_IN_PLAY`, ou `null`. Ne mets JAMAIS une condition positive d'activation dans `deadCardCondition` !
+9. `aiRole` DOIT appartenir exactement à :
+   `MAIN_ATTACKER`, `SECONDARY_ATTACKER`, `DRAW_ENGINE`, `ENERGY_ACCELERATOR`, `GUEST_TECH`, `DISRUPTION`, `CONSISTENCY_BOOSTER`.
+   - RÈGLE : Les cartes `TRAINER` et `ENERGY` ne sont JAMAIS `MAIN_ATTACKER` ni `SECONDARY_ATTACKER`. Les petits Pokémon de Base pré-évolutifs (<= 70 PV non-ex) sont `CONSISTENCY_BOOSTER` ou `DRAW_ENGINE`.
+10. `turnPhaseWeights` : 4 flottants strictement entre `0.0` et `1.0` reflétant la courbe réelle de cette carte (ex: `turn1 = 0.0` pour Stage 1/Stage 2 ou *behind-on-prizes*, `turn1` élevé pour setup de Base). N'utilise pas des poids génériques identiques sur toutes les cartes.
+11. `additionalSynergyTags` : UNIQUEMENT des tags normalisés (`requires_stage_2_pokemon`, `requires_basic_hp_lte_70`, `requires_tera_pokemon`, `requires_ancient_pokemon`, `requires_future_pokemon`, `requires_discard_synergy`, `requires_pokemon_tool`, `requires_energy_type:<Type>`, `requires_evolution_line:<NomFr>`). Aucun tag descriptif libre en anglais.
+12. `upTo` et `optional` sont toujours des booléens (`true` ou `false`, jamais `null`). Ne génère AUCUN texte hors de l'objet JSON."""
 
 # Alias pour le mode Single-Pass
 SYSTEM_PROMPT = CODING_SYSTEM_PROMPT
