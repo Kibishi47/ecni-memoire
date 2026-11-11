@@ -12,19 +12,26 @@ Ce module gère :
 
 from __future__ import annotations
 
-import gc
 import json
+import os
 import re
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from compiler import load_env_file
 from compiler.deterministic_builder import (
     DeterministicCardSkeleton,
     build_deterministic_skeleton,
+)
+from compiler.mlx_utils import (
+    build_mlx_sampler,
+    clear_mlx_memory_cache,
+    encode_prompt_tokens,
+    resolve_mlx_batch_size,
+    run_mlx_continuous_batch,
 )
 from compiler.models_config import (
     IntensityMode,
@@ -74,6 +81,12 @@ Pour chaque `slotId` fourni en entrée, détaille de manière concise et chirurg
 Sois direct, concis et structuré slot par slot."""
 
 
+DEFAULT_REASONING_MAX_TOKENS = 8192
+DEFAULT_REASONING_TEMPERATURE = 1.0
+DEFAULT_REASONING_TOP_P = 0.95
+DEFAULT_REASONING_TOP_K = 64
+
+
 @dataclass
 class ReasoningRecord:
     """Structure sauvegardée dans `data/reasoning_texts/{card_id}.json`."""
@@ -90,6 +103,9 @@ class ReasoningRecord:
     tokensPerSecond: float = 0.0
     generationDurationSeconds: float = 0.0
     timeToFirstTokenSeconds: float = 0.0
+    finishReason: Optional[str] = None
+    wasTruncated: bool = False
+    dedupSourceCardId: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -109,7 +125,54 @@ class ReasoningRecord:
             tokensPerSecond=float(data.get("tokensPerSecond", 0.0) or 0.0),
             generationDurationSeconds=float(data.get("generationDurationSeconds", 0.0) or 0.0),
             timeToFirstTokenSeconds=float(data.get("timeToFirstTokenSeconds", 0.0) or 0.0),
+            finishReason=data.get("finishReason"),
+            wasTruncated=bool(data.get("wasTruncated", False)),
+            dedupSourceCardId=data.get("dedupSourceCardId"),
         )
+
+
+def detect_reasoning_truncation(
+    raw_text: str,
+    finish_reason: Optional[str] = None,
+) -> bool:
+    """Détecte si la réponse de Passe 1 a été interrompue avant sa conclusion complète."""
+    if finish_reason == "length":
+        return True
+    text = raw_text or ""
+    if "<|channel>thought" in text and "<channel|>" not in text:
+        return True
+    for open_tag, close_tag in (
+        ("<think>", "</think>"),
+        ("<thought>", "</thought>"),
+        ("<|thought|>", "</|thought|>"),
+    ):
+        if open_tag in text and close_tag not in text:
+            return True
+    return False
+
+
+def clone_reasoning_record(
+    source: ReasoningRecord,
+    target_bundle: FetchedCardBundle,
+) -> ReasoningRecord:
+    """Clone une fiche d'analyse validée vers une carte fonctionnellement identique."""
+    return ReasoningRecord(
+        cardId=target_bundle.card_id,
+        nameFr=target_bundle.identity.nameFr,
+        nameEn=target_bundle.identity.nameEn,
+        modelRepoId=source.modelRepoId,
+        modelBackend=source.modelBackend,
+        reasoningText=source.reasoningText,
+        rawThinkingProcess=source.rawThinkingProcess,
+        createdAtIso=datetime.now(timezone.utc).isoformat(),
+        completionTokens=0,
+        tokensPerSecond=0.0,
+        generationDurationSeconds=0.0,
+        timeToFirstTokenSeconds=0.0,
+        finishReason=source.finishReason,
+        wasTruncated=source.wasTruncated,
+        dedupSourceCardId=source.dedupSourceCardId or source.cardId,
+    )
 
 
 def get_reasoning_texts_dir(data_dir: Path) -> Path:
@@ -261,8 +324,10 @@ class ReasoningEngine:
         intensity: Optional[Union[IntensityMode, str]] = None,
         backend: Optional[str] = None,
         hf_token: Optional[str] = None,
-        max_tokens: int = 2048,
-        temperature: float = 0.2,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
         enable_thinking: bool = True,
     ) -> None:
         load_env_file()
@@ -279,8 +344,31 @@ class ReasoningEngine:
             explicit_model=model,
         )
         self.hf_token = hf_token
-        self.max_tokens = max_tokens
-        self.temperature = temperature
+
+        env_max_tok = os.environ.get("REASONING_MAX_TOKENS")
+        self.max_tokens = (
+            max(256, int(max_tokens))
+            if max_tokens is not None
+            else (max(256, int(env_max_tok)) if env_max_tok and env_max_tok.strip().isdigit() else DEFAULT_REASONING_MAX_TOKENS)
+        )
+        env_temp = os.environ.get("REASONING_TEMPERATURE")
+        self.temperature = (
+            float(temperature)
+            if temperature is not None
+            else (float(env_temp) if env_temp and env_temp.strip() else DEFAULT_REASONING_TEMPERATURE)
+        )
+        env_top_p = os.environ.get("REASONING_TOP_P")
+        self.top_p = (
+            float(top_p)
+            if top_p is not None
+            else (float(env_top_p) if env_top_p and env_top_p.strip() else DEFAULT_REASONING_TOP_P)
+        )
+        env_top_k = os.environ.get("REASONING_TOP_K")
+        self.top_k = (
+            int(top_k)
+            if top_k is not None
+            else (int(env_top_k) if env_top_k and env_top_k.strip().isdigit() else DEFAULT_REASONING_TOP_K)
+        )
         self.enable_thinking = enable_thinking
 
         self._model: Any = None
@@ -333,11 +421,94 @@ class ReasoningEngine:
             self._llama_instance = Llama(
                 model_path=model_path,
                 n_gpu_layers=-1,
-                n_ctx=8192,
+                n_ctx=max(16384, self.max_tokens + 4096),
                 n_batch=512,
                 flash_attn=True,
                 verbose=False,
             )
+
+    def _build_static_record(self, bundle: FetchedCardBundle) -> ReasoningRecord:
+        static_text = (
+            f"Analyse déterministe immédiate pour {bundle.card_id} ({bundle.identity.nameFr}) : "
+            "aucun slot d'effet textuel à traduire (0 slot IA)."
+        )
+        return ReasoningRecord(
+            cardId=bundle.card_id,
+            nameFr=bundle.identity.nameFr,
+            nameEn=bundle.identity.nameEn,
+            modelRepoId="STATIC_DETERMINISTIC",
+            modelBackend=self.backend,
+            reasoningText=static_text,
+            rawThinkingProcess=None,
+            createdAtIso=datetime.now(timezone.utc).isoformat(),
+            completionTokens=0,
+            tokensPerSecond=0.0,
+            generationDurationSeconds=0.0,
+            timeToFirstTokenSeconds=0.0,
+            finishReason="static",
+            wasTruncated=False,
+        )
+
+    def _build_messages_and_prompt(
+        self,
+        bundle: FetchedCardBundle,
+        skeleton: DeterministicCardSkeleton,
+    ) -> Tuple[List[Dict[str, str]], str]:
+        user_prompt = build_reasoning_prompt(bundle, skeleton=skeleton)
+        messages = [
+            {"role": "system", "content": REASONING_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        if self._tokenizer is None:
+            return messages, f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
+        try:
+            formatted = self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=self.enable_thinking,
+            )
+        except TypeError:
+            try:
+                formatted = self._tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            except Exception:
+                formatted = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
+        except Exception:
+            formatted = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
+        return messages, formatted
+
+    def _finalize_record(
+        self,
+        bundle: FetchedCardBundle,
+        raw_full_text: str,
+        completion_tokens: int,
+        tps: float,
+        gen_duration: float,
+        ttft: float,
+        finish_reason: Optional[str],
+    ) -> ReasoningRecord:
+        thinking_part, explanation_part = _split_thinking_and_explanation(raw_full_text)
+        was_truncated = detect_reasoning_truncation(raw_full_text, finish_reason)
+        return ReasoningRecord(
+            cardId=bundle.card_id,
+            nameFr=bundle.identity.nameFr,
+            nameEn=bundle.identity.nameEn,
+            modelRepoId=self.repo_id,
+            modelBackend=self.backend,
+            reasoningText=explanation_part,
+            rawThinkingProcess=thinking_part,
+            createdAtIso=datetime.now(timezone.utc).isoformat(),
+            completionTokens=completion_tokens,
+            tokensPerSecond=tps,
+            generationDurationSeconds=round(gen_duration, 3),
+            timeToFirstTokenSeconds=round(ttft, 3),
+            finishReason=finish_reason,
+            wasTruncated=was_truncated,
+        )
 
     def generate_reasoning(
         self,
@@ -351,62 +522,26 @@ class ReasoningEngine:
 
         # Court-circuit déterministe si Énergie de base ou aucun slot d'effet textuel (0 slot IA)
         if is_basic_energy(bundle) or not skeleton.slots_for_llm:
-            static_text = (
-                f"Analyse déterministe immédiate pour {bundle.card_id} ({bundle.identity.nameFr}) : "
-                "aucun slot d'effet textuel à traduire (0 slot IA)."
-            )
-            return ReasoningRecord(
-                cardId=bundle.card_id,
-                nameFr=bundle.identity.nameFr,
-                nameEn=bundle.identity.nameEn,
-                modelRepoId="STATIC_DETERMINISTIC",
-                modelBackend=self.backend,
-                reasoningText=static_text,
-                rawThinkingProcess=None,
-                createdAtIso=datetime.now(timezone.utc).isoformat(),
-                completionTokens=0,
-                tokensPerSecond=0.0,
-                generationDurationSeconds=0.0,
-                timeToFirstTokenSeconds=0.0,
-            )
+            return self._build_static_record(bundle)
 
         self.load_model_in_memory()
-        user_prompt = build_reasoning_prompt(bundle, skeleton=skeleton)
-        messages = [
-            {"role": "system", "content": REASONING_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
+        messages, formatted_prompt = self._build_messages_and_prompt(bundle, skeleton)
 
         t0 = time.perf_counter()
         first_token_time: Optional[float] = None
         last_ui_update = t0
         token_count = 0
         chunks: List[str] = []
+        finish_reason: Optional[str] = None
 
         if self.backend == "mlx":
             import mlx_lm
-            from mlx_lm.sample_utils import make_sampler
 
-            try:
-                formatted_prompt = self._tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=self.enable_thinking,
-                )
-            except TypeError:
-                try:
-                    formatted_prompt = self._tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-                except Exception:
-                    formatted_prompt = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
-            except Exception:
-                formatted_prompt = f"{REASONING_SYSTEM_PROMPT}\n\n{user_prompt}\n"
-
-            sampler = make_sampler(temp=self.temperature)
+            sampler = build_mlx_sampler(
+                temperature=self.temperature,
+                top_p=self.top_p,
+                top_k=self.top_k,
+            )
             for response in mlx_lm.stream_generate(
                 self._model,
                 self._tokenizer,
@@ -415,6 +550,9 @@ class ReasoningEngine:
                 sampler=sampler,
             ):
                 piece = getattr(response, "text", "")
+                resp_finish = getattr(response, "finish_reason", None)
+                if isinstance(resp_finish, str):
+                    finish_reason = resp_finish
                 if piece:
                     now = time.perf_counter()
                     if first_token_time is None:
@@ -427,25 +565,32 @@ class ReasoningEngine:
                         on_token(token_count, live_tps)
                         last_ui_update = now
         else:
+            llama_kwargs: Dict[str, Any] = {
+                "messages": messages,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "max_tokens": self.max_tokens,
+                "stream": True,
+                "chat_template_kwargs": {"enable_thinking": self.enable_thinking},
+            }
             try:
-                stream = self._llama_instance.create_chat_completion(
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    stream=True,
-                    chat_template_kwargs={"enable_thinking": self.enable_thinking},
-                )
+                stream = self._llama_instance.create_chat_completion(**llama_kwargs)
             except TypeError:
-                stream = self._llama_instance.create_chat_completion(
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    stream=True,
-                )
+                llama_kwargs.pop("chat_template_kwargs", None)
+                try:
+                    stream = self._llama_instance.create_chat_completion(**llama_kwargs)
+                except TypeError:
+                    llama_kwargs.pop("top_k", None)
+                    llama_kwargs.pop("top_p", None)
+                    stream = self._llama_instance.create_chat_completion(**llama_kwargs)
+
             for chunk in stream:
                 choices = chunk.get("choices", [])
                 if not choices:
                     continue
+                if choices[0].get("finish_reason") is not None:
+                    finish_reason = choices[0].get("finish_reason")
                 delta = choices[0].get("delta", {})
                 piece = delta.get("content") or delta.get("reasoning_content") or ""
                 if piece:
@@ -469,23 +614,128 @@ class ReasoningEngine:
         if on_token is not None and token_count > 0:
             on_token(token_count, tps)
 
-        raw_full_text = "".join(chunks)
-        thinking_part, explanation_part = _split_thinking_and_explanation(raw_full_text)
-
-        return ReasoningRecord(
-            cardId=bundle.card_id,
-            nameFr=bundle.identity.nameFr,
-            nameEn=bundle.identity.nameEn,
-            modelRepoId=self.repo_id,
-            modelBackend=self.backend,
-            reasoningText=explanation_part,
-            rawThinkingProcess=thinking_part,
-            createdAtIso=datetime.now(timezone.utc).isoformat(),
-            completionTokens=token_count,
-            tokensPerSecond=tps,
-            generationDurationSeconds=round(gen_duration, 3),
-            timeToFirstTokenSeconds=round(ttft, 3),
+        return self._finalize_record(
+            bundle=bundle,
+            raw_full_text="".join(chunks),
+            completion_tokens=token_count,
+            tps=tps,
+            gen_duration=gen_duration,
+            ttft=ttft,
+            finish_reason=finish_reason,
         )
+
+    def generate_reasoning_batch(
+        self,
+        bundles: Sequence[FetchedCardBundle],
+        batch_size: Optional[int] = None,
+        on_card_done: Optional[Callable[[ReasoningRecord], None]] = None,
+    ) -> Tuple[List[ReasoningRecord], Dict[str, Any]]:
+        """Exécute la Passe 1 en parallèle continu (batching MLX) ou séquentiel si repli."""
+        from compiler.static_cards import is_basic_energy
+
+        if not bundles:
+            return [], {"batch_tps": 0.0, "generation_tokens": 0, "wall_seconds": 0.0, "peak_memory_gb": 0.0}
+
+        eff_batch = resolve_mlx_batch_size(batch_size)
+        ordered_records: List[Optional[ReasoningRecord]] = [None] * len(bundles)
+        pending_llm: List[Tuple[int, FetchedCardBundle, DeterministicCardSkeleton]] = []
+
+        for idx, b in enumerate(bundles):
+            sk = build_deterministic_skeleton(b)
+            if is_basic_energy(b) or not sk.slots_for_llm:
+                rec = self._build_static_record(b)
+                ordered_records[idx] = rec
+                if on_card_done is not None:
+                    on_card_done(rec)
+            else:
+                pending_llm.append((idx, b, sk))
+
+        if not pending_llm:
+            return [r for r in ordered_records if r is not None], {
+                "batch_tps": 0.0,
+                "generation_tokens": 0,
+                "wall_seconds": 0.0,
+                "peak_memory_gb": 0.0,
+            }
+
+        if self.backend != "mlx" or eff_batch <= 1 or len(pending_llm) <= 1:
+            t_seq0 = time.perf_counter()
+            total_toks = 0
+            for idx, b, _ in pending_llm:
+                rec = self.generate_reasoning(b)
+                ordered_records[idx] = rec
+                total_toks += rec.completionTokens
+                if on_card_done is not None:
+                    on_card_done(rec)
+            wall_s = max(0.001, time.perf_counter() - t_seq0)
+            return [r for r in ordered_records if r is not None], {
+                "batch_tps": round(total_toks / wall_s, 2) if total_toks > 0 else 0.0,
+                "generation_tokens": total_toks,
+                "wall_seconds": round(wall_s, 3),
+                "peak_memory_gb": 0.0,
+            }
+
+        self.load_model_in_memory()
+        sampler = build_mlx_sampler(
+            temperature=self.temperature,
+            top_p=self.top_p,
+            top_k=self.top_k,
+        )
+
+        # Traitement par vagues pour checkpointing régulier et stabilité mémoire Metal
+        chunk_size = max(eff_batch * 8, 32)
+        total_toks = 0
+        total_wall = 0.0
+        total_gen_time = 0.0
+        peak_mem = 0.0
+
+        for start in range(0, len(pending_llm), chunk_size):
+            chunk = pending_llm[start : start + chunk_size]
+            prompts_tokens: List[List[int]] = []
+            for _, b, sk in chunk:
+                _, formatted = self._build_messages_and_prompt(b, sk)
+                prompts_tokens.append(encode_prompt_tokens(self._tokenizer, formatted))
+
+            def handle_item(item_res: Any, local_chunk: List[Tuple[int, FetchedCardBundle, DeterministicCardSkeleton]] = chunk) -> None:
+                orig_idx, target_b, _ = local_chunk[item_res.index]
+                rec = self._finalize_record(
+                    bundle=target_b,
+                    raw_full_text=item_res.text,
+                    completion_tokens=item_res.completion_tokens,
+                    tps=item_res.tokens_per_second,
+                    gen_duration=item_res.generation_duration_seconds,
+                    ttft=item_res.time_to_first_token_seconds,
+                    finish_reason=item_res.finish_reason,
+                )
+                ordered_records[orig_idx] = rec
+                if on_card_done is not None:
+                    on_card_done(rec)
+
+            _, chunk_stats = run_mlx_continuous_batch(
+                model=self._model,
+                tokenizer=self._tokenizer,
+                prompts_tokens=prompts_tokens,
+                max_tokens=self.max_tokens,
+                sampler=sampler,
+                batch_size=eff_batch,
+                on_item_complete=handle_item,
+            )
+            total_toks += chunk_stats.generation_tokens
+            total_wall += chunk_stats.wall_seconds
+            if chunk_stats.generation_tps > 0 and chunk_stats.generation_tokens > 0:
+                total_gen_time += chunk_stats.generation_tokens / chunk_stats.generation_tps
+            else:
+                total_gen_time += chunk_stats.wall_seconds
+            peak_mem = max(peak_mem, chunk_stats.peak_memory_gb)
+            clear_mlx_memory_cache()
+
+        agg_tps = round(total_toks / total_gen_time, 2) if total_gen_time > 0 and total_toks > 0 else 0.0
+        return [r for r in ordered_records if r is not None], {
+            "batch_tps": agg_tps,
+            "generation_tokens": total_toks,
+            "wall_seconds": round(total_wall, 3),
+            "peak_memory_gb": peak_mem,
+        }
 
     def close(self) -> None:
         """Décharge strictement et intégralement le modèle de la RAM/VRAM."""
@@ -504,13 +754,4 @@ class ReasoningEngine:
             del self._llama_instance
             self._llama_instance = None
 
-        gc.collect()
-        try:
-            import mlx.core as mx
-
-            if hasattr(mx, "clear_cache"):
-                mx.clear_cache()
-            elif hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                mx.metal.clear_cache()
-        except Exception:
-            pass
+        clear_mlx_memory_cache()
