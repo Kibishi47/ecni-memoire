@@ -80,6 +80,8 @@ export interface CardFastMeta {
   hasLockItemsPassive: boolean
   hasLockAbilitiesPassive: boolean
   protectsBenchFromDamage: boolean
+  hasFairyZonePassive: boolean
+  hasOnPlayFromHandTrigger: boolean
   hasAbilityFlag: boolean
 }
 
@@ -137,6 +139,8 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
     } else if (
       normCombinedName.includes('lumineuse') ||
       normCombinedName.includes('luminous') ||
+      normCombinedName.includes('prisme') ||
+      normCombinedName.includes('prism') ||
       normCombinedName.includes('rainbow') ||
       normCombinedName.includes('arc en ciel') ||
       normCombinedName.includes('aurora') ||
@@ -313,6 +317,35 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
     hpBonusValue = 50
   }
 
+  const hasFairyZonePassive =
+    normCombinedName.includes('melofee ex de lilie') ||
+    normCombinedName.includes('lillies clefairy ex') ||
+    normCombinedName.includes('lillie s clefairy ex') ||
+    /zone feerique|fairy zone/i.test(normalizeCardNameForMatch((card.identity?.rawRulesText || []).join(' ')))
+
+  let hasOnPlayFromHandTrigger = normNameFr.includes('lumineon') || normNameEn.includes('lumineon')
+  if (!hasOnPlayFromHandTrigger && Array.isArray(card.playableActions)) {
+    for (const act of card.playableActions) {
+      const rulesJoined = `${act.label || ''} ${(card.identity?.rawRulesText || []).join(' ')}`
+      const isReactionToDamageOrKo =
+        act.timing === 'ON_DAMAGED_OR_KO_TRIGGER' ||
+        act.timing === 'ON_EVOLVE_TRIGGER' ||
+        act.sourceType === 'ABILITY_ON_EVOLVE' ||
+        /subit des d[eé]g[aâ]ts|d[eé]g[aâ]ts d'une attaque|damaged by an opponent|mise? k\.?o\.?|knocked out/i.test(
+          rulesJoined,
+        ) ||
+        (act.preconditions || []).some((p) => /SELF_IS_DAMAGED|KO|EVOLV/i.test(String(p)))
+      if (
+        act.sourceType === 'ABILITY_ON_PLAY_FROM_HAND' ||
+        act.timing === 'ON_PLAY_FROM_HAND_TRIGGER' ||
+        (act.actionType === 'TRIGGERED_ABILITY' && !isReactionToDamageOrKo)
+      ) {
+        hasOnPlayFromHandTrigger = true
+        break
+      }
+    }
+  }
+
   const hasAbilityFlag = Boolean(
     card.pokemonStats?.hasAbility ||
       (Array.isArray(card.playableActions) &&
@@ -347,6 +380,8 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
     hasLockItemsPassive,
     hasLockAbilitiesPassive,
     protectsBenchFromDamage,
+    hasFairyZonePassive,
+    hasOnPlayFromHandTrigger,
     hasAbilityFlag,
   }
 

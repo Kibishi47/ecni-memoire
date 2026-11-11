@@ -10,7 +10,7 @@ import { isCardStandardLegal, type CardFilter, type EngineCardModel } from '../t
 import { inferFormat, isCardLine, isSectionLine, isTotalLine, splitCardTokens } from './lines'
 import { detectBasicEnergy, isEnergyCardName } from './energy'
 import { lookupSetMapping } from '../data/ptcglSetMapping'
-import { hasCompiledCardData, matchesCardFilter, resolveCardModel } from '../data/cardCatalog'
+import { hasCompiledCardData, matchesCardFilter, normalizeCardNameForMatch, resolveCardModel } from '../data/cardCatalog'
 
 export function padLocalNumber(rawNumber: string): string {
   const trimmed = rawNumber.trim()
@@ -426,6 +426,40 @@ export function computeDeckSummary(
     })
   }
 
+  // Règle stricte Pokémon Radieux : au maximum 1 seul Pokémon Radieux par deck
+  const radiantCount = activeCards
+    .filter((c) => c.isRadiant)
+    .reduce((sum, c) => sum + c.quantity, 0)
+
+  if (radiantCount > 1) {
+    warnings.push({
+      message: `Le deck contient ${radiantCount} Pokémon Radieux. Un seul Pokémon Radieux est autorisé par deck.`,
+    })
+  }
+
+  // Règle des 4 exemplaires maximum par nom exact (hors Énergies de base)
+  const copyCountByName = new Map<string, { displayName: string; count: number }>()
+  for (const c of activeCards) {
+    if (c.upperCategory === 'ENERGY' && c.subCategory === 'BASIC_ENERGY') continue
+    const key = normalizeCardNameForMatch(c.nameFr || c.nameEn || c.name)
+    if (!key) continue
+    const prev = copyCountByName.get(key)
+    if (prev) {
+      prev.count += c.quantity
+    } else {
+      copyCountByName.set(key, { displayName: c.nameFr || c.name, count: c.quantity })
+    }
+  }
+  const copyLimitViolations: string[] = []
+  for (const entry of copyCountByName.values()) {
+    if (entry.count > 4) {
+      copyLimitViolations.push(entry.displayName)
+      warnings.push({
+        message: `La carte "${entry.displayName}" apparaît en ${entry.count} exemplaires (maximum réglementaire : 4 par nom).`,
+      })
+    }
+  }
+
   // Validation de légalité Standard (marques de régulation G, H, I ou Énergies de base)
   const illegalStandardCards = activeCards.filter((c) => !isCardStandardLegal(c.model))
   if (illegalStandardCards.length > 0) {
@@ -452,6 +486,8 @@ export function computeDeckSummary(
       basicPokemonCount >= 1 &&
       isFullyResolved &&
       aceSpecCount <= 1 &&
+      radiantCount <= 1 &&
+      copyLimitViolations.length === 0 &&
       isStandardLegal,
     hasAtLeastOneBasic: basicPokemonCount >= 1,
     isFullyResolved,
@@ -461,6 +497,8 @@ export function computeDeckSummary(
     warnings,
     synergyAudit,
     aceSpecCount,
+    radiantCount,
+    copyLimitViolations,
     isStandardLegal,
   }
 }
