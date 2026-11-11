@@ -72,7 +72,7 @@ class MLXCardCompiler:
         phase: Optional[Union[PipelinePhase, str]] = None,
         pipeline_mode: Optional[Union[PipelineMode, str]] = None,
         temperature: float = 0.1,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         hf_token: Optional[str] = None,
         disable_thinking: bool = False,
         thinking: Optional[str] = None,
