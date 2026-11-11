@@ -10,7 +10,7 @@ Il interroge l'API officielle **TCGdex**, charge des modèles d'IA locaux sur **
 
 - **2 Modes de Travail au Choix** :
   - **Mode 1 (Single-Pass / Direct)** : L'IA produit directement le JSON formel à partir des données de la carte.
-  - **Mode 2 (Two-Pass Découplé)** : Une IA de raisonnement approfondi (DeepSeek-R1) analyse d'abord les règles et génère un rapport textuel complet. Puis, l'IA 1 est **déchargée à 100 % de la mémoire**, et une IA de programmation (Qwen Coder) transforme ces analyses en JSON formel sans jamais saturer la RAM.
+  - **Mode 2 (Two-Pass Découplé)** : La Passe 1 active le raisonnement (`enable_thinking=True`) sur `mlx-community/gemma-4-26b-a4b-4bit` (ou DeepSeek-R1 en GGUF) pour analyser les règles et générer un rapport textuel complet. Puis, la Passe 2 désactive le raisonnement (`enable_thinking=False`) pour transformer ces analyses en JSON formel rapidement.
 - **2 Paliers d'Intensité (`soft` et `intense`)** :
   - **`soft` (Par défaut, ~7-8 Go RAM)** : Conçu pour tourner confortablement en journée pendant que votre navigateur, IDE et autres applications sont ouverts.
   - **`intense` (~14-18 Go RAM)** : Conçu pour les sessions dédiées ou le mode nuit (AFK) avec les applications fermées.
@@ -28,16 +28,16 @@ Il interroge l'API officielle **TCGdex**, charge des modèles d'IA locaux sur **
 ```mermaid
 flowchart TD
     subgraph Mode1["Mode 1 : Inférence Directe (Single-Pass)"]
-        A1["Données TCGdex"] --> B1["IA Générale (Qwen 2.5 Coder 14B/32B)"]
+        A1["Données TCGdex"] --> B1["IA Générale (Gemma 4 26B-A4B MLX / Qwen 2.5 GGUF)"]
         B1 --> C1["Validation Pydantic V2"]
         C1 --> D1["JSON Formel (data/compiled_cards/)"]
     end
 
     subgraph Mode2["Mode 2 : Pipeline en 2 Étapes Découplées (Two-Pass)"]
-        A2["Données TCGdex"] --> B2["Passe 1 : IA Raisonnement (DeepSeek-R1 Distill 14B)"]
+        A2["Données TCGdex"] --> B2["Passe 1 : IA Raisonnement (Gemma 4 26B-A4B Thinking ON)"]
         B2 --> C2["Analyses de Règles (data/reasoning_texts/)"]
         C2 --> D2["⚡ Déchargement strict de l'IA 1 (Libération RAM)"]
-        D2 --> E2["Passe 2 : IA Coding (Qwen 2.5 Coder 7B/14B)"]
+        D2 --> E2["Passe 2 : IA Coding (Gemma 4 26B-A4B Thinking OFF)"]
         E2 --> F2["Validation Pydantic V2"]
         F2 --> G2["JSON Formel (data/compiled_cards/)"]
     end
@@ -51,11 +51,11 @@ Le compilateur résout automatiquement le bon modèle selon vos choix de **Mode*
 
 | Mode | Étape / Phase | Intensité `soft` (Défaut - ~7-8 Go RAM) | Intensité `intense` (Mode AFK/Nuit - ~14-18 Go RAM) | Backend |
 | :--- | :--- | :--- | :--- | :--- |
-| **Mode 1** *(Direct)* | Passe Unique | `mlx-community/Qwen2.5-Coder-14B-Instruct-4bit` | `mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` | **MLX** |
+| **Mode 1** *(Direct)* | Passe Unique | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
 | **Mode 1** *(Direct)* | Passe Unique | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-32B-Instruct-GGUF` | **GGUF** |
-| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** | `mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit` | `mlx-community/DeepSeek-R1-Distill-Qwen-14B-8bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** *(thinking ON)* | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
 | **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q4_K_M)* | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q8_0)* | **GGUF** |
-| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** | `mlx-community/Qwen2.5-Coder-7B-Instruct-8bit` | `mlx-community/Qwen2.5-Coder-14B-Instruct-8bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** *(thinking OFF)* | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
 | **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** | `bartowski/Qwen2.5-Coder-7B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | **GGUF** |
 
 > [!TIP]
