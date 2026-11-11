@@ -5,6 +5,8 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { env } from './config/env.js'
 import { closePool, getPool } from './db/pool.js'
+import { registerCardRoutes } from './routes/cards.js'
+import { registerDeckRoutes } from './routes/decks.js'
 import { registerHealthRoutes } from './routes/health.js'
 
 export interface BuildServerOptions {
@@ -28,6 +30,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   })
 
   await registerHealthRoutes(app, { pool })
+  await registerDeckRoutes(app, { pool })
+  await registerCardRoutes(app, { pool })
 
   app.addHook('onClose', async () => {
     if (!options.pool) {
