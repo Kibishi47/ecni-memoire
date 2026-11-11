@@ -114,7 +114,7 @@ def main() -> None:
         "--batch-size",
         type=int,
         default=None,
-        help="Taille de lot MLX pour le parallélisme continu (défaut: MLX_BATCH_SIZE ou 4).",
+        help="Taille de lot MLX pour le parallélisme continu (défaut: MLX_BATCH_SIZE ou 2).",
     )
     parser.add_argument(
         "--max-tokens",

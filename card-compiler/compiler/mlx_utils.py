@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
-DEFAULT_MLX_BATCH_SIZE = 4
+DEFAULT_MLX_BATCH_SIZE = 2
 
 
 def resolve_mlx_batch_size(batch_size: Optional[int] = None) -> int:

@@ -35,7 +35,7 @@ Configuration centralisée dans [compiler/models_config.py](compiler/models_conf
   - Sauvegarde les analyses dans `data/reasoning_texts/{card_id}.json`.
 - **Déduplication & Batching continu MLX ([compiler/mlx_utils.py](compiler/mlx_utils.py), [compiler/two_pass_pipeline.py](compiler/two_pass_pipeline.py))** :
   - `compute_card_rule_signature` génère une empreinte canonique SHA-256 des règles/statistiques : toute réédition ou variante d'illustration identique réutilise instantanément les fiches Passe 1 & Passe 2 (`dedupSourceCardId`, clonage sans perte avec conservation du `cardId` et de l'`identity` propres à chaque carte).
-  - `run_mlx_continuous_batch` exécute `BatchGenerator` (`mlx-lm`) en continu (`MLX_BATCH_SIZE` / `--batch-size`, défaut `4`) pour la Passe 1 et la Passe 2 (avec réessai séquentiel ciblé en Passe 2 en cas d'erreur JSON).
+  - `run_mlx_continuous_batch` exécute `BatchGenerator` (`mlx-lm`) en continu (`MLX_BATCH_SIZE` / `--batch-size`, défaut `2` sécurisé pour Mac 24 Go RAM ; ajustable jusqu'à `4` en mode dédié) pour la Passe 1 et la Passe 2 (avec réessai séquentiel ciblé en Passe 2 en cas d'erreur JSON).
 - **Libération stricte mémoire ([compiler/two_pass_pipeline.py](compiler/two_pass_pipeline.py))** :
   - Déchargement complet du modèle Passe 1 (`close()`, `gc.collect()`, vidage cache GPU/MLX) avant de charger le modèle Passe 2.
 - **Passe 2 — Codage JSON ([compiler/mlx_engine.py](compiler/mlx_engine.py), [compiler/llm_engine.py](compiler/llm_engine.py))** :
@@ -74,7 +74,8 @@ Configuration centralisée dans [compiler/models_config.py](compiler/models_conf
 3. **Alignement avec le simulateur (`simulator/`)** :
    - Maintenir la compatibilité stricte des primitives, cibles, zones et tokens canoniques attendus par le moteur de simulation (`SELF_IS_ACTIVE`, `BENCH_HAS_EMPTY_SLOT`, `BENCH_FULL`, `PLAYER_BEHIND_ON_PRIZES`, `NOT_BEHIND_ON_PRIZES`, `KO_SUFFERED_LAST_TURN`, `OPPONENT_PRIZES_EXACT_COUNT`, `STADIUM_ALREADY_IN_PLAY_SAME_NAME`, `trainer_0.effects == []` sur les Outils/Machines Techniques).
    - Toute évolution sur `deterministic_builder.py` ou `post_processor.py` impactant des cartes existantes doit rester **idempotente** sous `python3 main.py repair-compiled`.
-4. **Tests & Données** :
+4. **Tests, Ressources & Sécurité MLX** :
+   - **Ne JAMAIS lancer d'inférence LLM réelle (MLX / llama.cpp) sans demande et accord explicite de l'utilisateur** : `mlx-community/gemma-4-26b-a4b-it-4bit` consomme ~14,2 Go dès le chargement (sur Mac 24 Go RAM unifiée, limite recommandée Metal ~19 Go) et peut saturer la machine si l'utilisateur travaille en parallèle.
    - Ne jamais lancer d'inférence LLM réelle ni d'appels réseau TCGdex dans les tests automatisés ; utiliser des mocks ou fixtures locales.
    - Exécuter l'ensemble des tests unitaires du dossier après toute modification :
      ```bash

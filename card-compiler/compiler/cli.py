@@ -1405,7 +1405,7 @@ def run_command(
         "--batch-size",
         "-bs",
         envvar=["MLX_BATCH_SIZE"],
-        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 4 ou MLX_BATCH_SIZE).",
+        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 2 ou MLX_BATCH_SIZE).",
     ),
     max_tokens: Optional[int] = typer.Option(
         None,
@@ -1634,7 +1634,7 @@ def reason_command(
         "--batch-size",
         "-bs",
         envvar=["MLX_BATCH_SIZE"],
-        help="Taille de lot MLX pour la Passe 1 (défaut: 4).",
+        help="Taille de lot MLX pour la Passe 1 (défaut: 2).",
     ),
     max_tokens: Optional[int] = typer.Option(
         None,
@@ -1724,7 +1724,7 @@ def code_command(
         "--batch-size",
         "-bs",
         envvar=["MLX_BATCH_SIZE"],
-        help="Taille de lot MLX pour la Passe 2 (défaut: 4).",
+        help="Taille de lot MLX pour la Passe 2 (défaut: 2).",
     ),
 ) -> None:
     """Exécute la Passe 2 du pipeline Two-Pass : Transforme les textes d'analyse en code JSON formel validé."""
@@ -1849,7 +1849,7 @@ def re_run_command(
         "--batch-size",
         "-bs",
         envvar=["MLX_BATCH_SIZE"],
-        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 4).",
+        help="Taille de lot MLX pour l'inférence parallèle continue (défaut: 2).",
     ),
     max_tokens: Optional[int] = typer.Option(
         None,

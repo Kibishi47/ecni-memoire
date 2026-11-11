@@ -602,6 +602,178 @@ class TestTwoPassPipelineExecution(unittest.TestCase):
         self.assertEqual(c_b2.cardId, "me02.5-200")
         self.assertEqual(c_b2.identity.setId, "me02.5")
 
+    def test_run_coding_phase_batch_and_deduplication(self) -> None:
+        """Vérifie de bout en bout le batching continu et la déduplication de la Passe 2."""
+        from types import SimpleNamespace
+
+        b1 = make_test_bundle("sv08-187", "Noeunoeuf")
+        b1.raw_fr["hp"] = 50
+        b2_no_reason_dup = make_test_bundle("me02.5-200", "Noeunoeuf")
+        b2_no_reason_dup.raw_fr["hp"] = 50
+        b2_no_reason_dup.identity = b2_no_reason_dup.identity.model_copy(
+            update={"setId": "me02.5", "localId": "200"}
+        )
+        b3 = make_test_bundle("sv09-010", "Noeunoeuf")
+        b3.identity = b3.identity.model_copy(update={"setId": "sv09", "localId": "010"})
+        b3.raw_fr["hp"] = 70
+        b4_dup = make_test_bundle("sv09-011", "Noeunoeuf")
+        b4_dup.identity = b4_dup.identity.model_copy(update={"setId": "sv09", "localId": "011"})
+        b4_dup.raw_fr["hp"] = 70
+        b5_missing = make_test_bundle("sv06.5-054", "Noeunoeuf")
+        b5_missing.raw_fr["hp"] = 90
+
+        raw_dir = self.test_dir / "raw_tcgdex"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        for bx in (b1, b2_no_reason_dup, b3, b4_dup, b5_missing):
+            bx.raw_cache_path = raw_dir / f"{bx.card_id}.json"
+            bx.raw_cache_path.write_text(json.dumps(bx.raw_fr), encoding="utf-8")
+
+        # Enregistre la Passe 1 uniquement pour b1, b3 et b4 (b2 et b5 n'ont pas de fiche)
+        for bx in (b1, b3, b4_dup):
+            save_reasoning_record(
+                ReasoningRecord(
+                    cardId=bx.card_id,
+                    nameFr=bx.identity.nameFr,
+                    modelRepoId="mock-reason",
+                    modelBackend="mlx",
+                    reasoningText=f"Analyse pour {bx.card_id}",
+                    createdAtIso="2026-11-11T10:00:00Z",
+                ),
+                self.test_dir,
+            )
+
+        valid_json = json.dumps(
+            {
+                "translatedSlots": [
+                    {
+                        "slotId": "attack_0",
+                        "preconditions": [],
+                        "effects": [
+                            {"primitive": "DAMAGE_ACTIVE", "target": "OPPONENT_ACTIVE", "amount": 10}
+                        ],
+                        "deadCardCondition": None,
+                    }
+                ],
+                "aiRole": "MAIN_ATTACKER",
+                "turnPhaseWeights": {"turn1": 0.6, "turn2": 0.9, "turn3": 0.9, "turn4Plus": 0.8},
+                "additionalSynergyTags": [],
+            }
+        )
+
+        observed_batches = []
+
+        class FakeCodingBatchGen:
+            def __init__(self, *args, **kwargs) -> None:
+                self.kwargs = kwargs
+                self.closed = False
+                self._step = 0
+
+            def insert(self, prompts, max_tokens=None):
+                observed_batches.append((prompts, self.kwargs))
+                return [100 + i for i in range(len(prompts))]
+
+            def stats(self):
+                class _Ctx:
+                    def __init__(self):
+                        self.prompt_tokens = 400
+                        self.prompt_tps = 1200.0
+                        self.generation_tokens = 2
+                        self.generation_tps = 145.0
+                        self.peak_memory = 15.1
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args):
+                        return False
+
+                return _Ctx()
+
+            def next(self):
+                if self._step == 0:
+                    self._step += 1
+                    return [], [
+                        SimpleNamespace(uid=100, token=11, finish_reason=None),
+                        SimpleNamespace(uid=101, token=12, finish_reason=None),
+                    ]
+                if self._step == 1:
+                    self._step += 1
+                    return [], [
+                        SimpleNamespace(uid=100, token=106, finish_reason="stop"),
+                        SimpleNamespace(uid=101, token=106, finish_reason="stop"),
+                    ]
+                return [], []
+
+            def close(self):
+                self.closed = True
+
+        fake_tok = MagicMock()
+        fake_tok.bos_token = "<bos>"
+        fake_tok.eos_token_ids = {1, 106}
+        fake_tok.apply_chat_template.return_value = "<bos><|turn>user\nhi<turn|>\n<|turn>model\n"
+        fake_tok.encode.return_value = [2, 105, 10]
+        fake_tok.decode.side_effect = [valid_json, valid_json]
+
+        from compiler.mlx_engine import MLXCardCompiler
+
+        def load_patched(self_obj):
+            self_obj._tokenizer = fake_tok
+            self_obj._model = MagicMock()
+
+        with patch.object(MLXCardCompiler, "load_model_in_memory", autospec=True, side_effect=load_patched), patch(
+            "mlx_lm.sample_utils.make_sampler", return_value=MagicMock()
+        ), patch("mlx_lm.generate.BatchGenerator", side_effect=FakeCodingBatchGen) as mock_bg_cls:
+            res = run_coding_phase(
+                bundles=[b1, b2_no_reason_dup, b3, b4_dup, b5_missing],
+                data_dir=self.test_dir,
+                backend="mlx",
+                batch_size=2,
+            )
+
+            # Uniquement 2 cartes uniques (b1 et b3) doivent être soumises à BatchGenerator
+            mock_bg_cls.assert_called_once()
+            self.assertEqual(len(observed_batches), 1)
+            submitted_prompts, bg_kwargs = observed_batches[0]
+            self.assertEqual(len(submitted_prompts), 2)
+            self.assertEqual(bg_kwargs["completion_batch_size"], 2)
+            # enable_thinking=False obligatoire en Passe 2
+            self.assertTrue(all(call_kw.get("enable_thinking") is False for _, call_kw in fake_tok.apply_chat_template.call_args_list))
+
+            self.assertEqual(res["compiled"], 4)
+            self.assertEqual(res["deduplicated"], 2)
+            self.assertEqual(res["missing_reasoning"], [("sv06.5-054", "Noeunoeuf")])
+            self.assertEqual(res["batch_stats"]["batch_tps"], 145.0)
+
+            c_b1 = EngineCardModel.model_validate_json((self.test_dir / "compiled_cards" / "sv08-187.json").read_text())
+            c_b2 = EngineCardModel.model_validate_json((self.test_dir / "compiled_cards" / "me02.5-200.json").read_text())
+            c_b3 = EngineCardModel.model_validate_json((self.test_dir / "compiled_cards" / "sv09-010.json").read_text())
+            c_b4 = EngineCardModel.model_validate_json((self.test_dir / "compiled_cards" / "sv09-011.json").read_text())
+
+            self.assertEqual(c_b1.pokemonStats.hp, 50)
+            self.assertEqual(c_b2.cardId, "me02.5-200")
+            self.assertEqual(c_b2.identity.setId, "me02.5")
+            self.assertEqual(c_b2.compilationMetadata.completionTokens, 0)
+            self.assertIn("dedup:sv08-187", c_b2.compilationMetadata.modelFilename)
+            self.assertEqual(c_b3.pokemonStats.hp, 70)
+            self.assertEqual(c_b4.cardId, "sv09-011")
+            self.assertIn("dedup:sv09-010", c_b4.compilationMetadata.modelFilename)
+            self.assertFalse((self.test_dir / "compiled_cards" / "sv06.5-054.json").exists())
+
+            # Deuxième appel Passe 2 avec une nouvelle réimpression identique à sv08-187 (sans fiche Passe 1) -> 0 appel IA
+            b6_disk_dup = make_test_bundle("sv08-235", "Noeunoeuf")
+            b6_disk_dup.raw_fr["hp"] = 50
+            b6_disk_dup.identity = b6_disk_dup.identity.model_copy(update={"setId": "sv08", "localId": "235"})
+            b6_disk_dup.raw_cache_path = raw_dir / "sv08-235.json"
+            b6_disk_dup.raw_cache_path.write_text(json.dumps(b6_disk_dup.raw_fr), encoding="utf-8")
+
+            res2 = run_coding_phase(bundles=[b6_disk_dup], data_dir=self.test_dir, backend="mlx", batch_size=2)
+            mock_bg_cls.assert_called_once()
+            self.assertEqual(res2["compiled"], 1)
+            self.assertEqual(res2["deduplicated"], 1)
+            c_b6 = EngineCardModel.model_validate_json((self.test_dir / "compiled_cards" / "sv08-235.json").read_text())
+            self.assertEqual(c_b6.cardId, "sv08-235")
+            self.assertEqual(c_b6.identity.setId, "sv08")
+
 
 class TestCliTwoPassCommands(unittest.TestCase):
     """Tests pour les commandes Typer CLI Two-Pass."""
