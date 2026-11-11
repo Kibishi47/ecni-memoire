@@ -1756,4 +1756,439 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
       ).toBe(25)
     })
   })
+
+  describe('Conformité Règles Officielles — Étape F, Stades, Double Turbo, Checkup, Lost Zone & Désevolutions', () => {
+    it('diffère la résolution des K.O. à la fin de l’attaque (Étape F) sans affecter le Pokémon promu et gère la victoire simultanée (2 vs 1 / DRAW)', () => {
+      const deck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+      const state = createInitialMatchState(deck, deck, { seed: 12, firstPlayerIndex: 0, maxTurns: 14 })
+      state.turnNumber = 3
+      state.activePlayerIndex = 0
+
+      // Attaque : 80 dégâts + Paralyse l'Actif adverse + 80 recul sur soi-même
+      const finisherRecoilAtk = {
+        actionId: 'atk_finish_recoil',
+        label: 'Charge Finale',
+        actionType: 'ATTACK' as const,
+        timingPhase: 'ATTACK_PHASE' as const,
+        cost: {},
+        canUseTurn1GoingFirst: false,
+        canUseTurn1GoingSecond: true,
+        preconditions: [],
+        effects: [
+          { primitive: 'DAMAGE_ACTIVE' as const, target: 'OPPONENT_ACTIVE', value: 80, baseDamage: 80 },
+          { primitive: 'APPLY_SPECIAL_CONDITION' as const, target: 'OPPONENT_ACTIVE', specialCondition: 'PARALYZED' as const },
+          { primitive: 'DAMAGE_ACTIVE' as const, target: 'SELF', value: 80, baseDamage: 80 },
+        ],
+      }
+
+      state.player.activePokemon = {
+        instanceId: 'p_recoil_atk',
+        card: { ...mockCharmander, pokemonStats: { ...mockCharmander.pokemonStats!, hp: 70, weaknesses: [], resistances: [] }, playableActions: [finisherRecoilAtk] },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      state.player.bench = [
+        {
+          instanceId: 'p_backup',
+          card: mockCharmander,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      state.opponent.activePokemon = {
+        instanceId: 'o_ko_target',
+        card: { ...mockTargetBasic, pokemonStats: { ...mockTargetBasic.pokemonStats!, hp: 70, weaknesses: [], resistances: [] } },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 2,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      state.opponent.bench = [
+        {
+          instanceId: 'o_promoted_later',
+          card: mockTargetBasic,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 2,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+
+      // Le Pokémon Actif promu du Banc adverse ne doit PAS être paralysé après le K.O.
+      const resMid = applyAction(state, {
+        type: 'DECLARE_ATTACK',
+        cardId: 'atk',
+        actionId: 'atk_finish_recoil',
+        endsTurnImmediately: true,
+        label: 'Charge Finale',
+      })
+      expect(resMid.winner).toBeNull()
+      expect(resMid.opponent.activePokemon?.instanceId).toBe('o_promoted_later')
+      expect(resMid.opponent.activePokemon?.specialConditions).toEqual([])
+      expect(resMid.player.prizes.length).toBe(5)
+      expect(resMid.opponent.prizes.length).toBe(5)
+
+      // Test victoire simultanée 2 conditions vs 1 condition :
+      // Player n'a plus de Banc (perd par NO_POKEMON_IN_PLAY quand il meurt de recul) ET Opponent a 2 Récompenses,
+      // tandis que Player prend sa dernière Récompense ET vide le Banc adverse (2 conditions contre 1 => Player gagne !)
+      const simWinState = createInitialMatchState(deck, deck, { seed: 13, firstPlayerIndex: 0, maxTurns: 14 })
+      simWinState.turnNumber = 3
+      simWinState.activePlayerIndex = 0
+      simWinState.player.prizes = [simWinState.player.prizes[0]!]
+      simWinState.opponent.prizes = [simWinState.opponent.prizes[0]!]
+      simWinState.player.bench = [
+        {
+          instanceId: 'p_keep_alive',
+          card: mockCharmander,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      simWinState.player.activePokemon = {
+        ...state.player.activePokemon!,
+        damage: 0,
+      }
+      simWinState.opponent.activePokemon = {
+        ...state.opponent.activePokemon!,
+        damage: 0,
+      }
+      simWinState.opponent.bench = [] // L'adversaire n'a plus de Banc !
+
+      const afterSimWin = applyAction(simWinState, {
+        type: 'DECLARE_ATTACK',
+        cardId: 'atk',
+        actionId: 'atk_finish_recoil',
+        endsTurnImmediately: true,
+        label: 'Charge Finale',
+      })
+      // Player remplit 2 conditions (ALL_PRIZES + NO_POKEMON_IN_PLAY) vs Opponent 1 condition (ALL_PRIZES) => PLAYER gagne !
+      expect(afterSimWin.winner).toBe('PLAYER')
+    })
+
+    it('limite à 1 Stade par tour et réduit le Banc de 8 à 5 quand Abîme Zéro quitte le jeu', () => {
+      const deck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+      const state = createInitialMatchState(deck, deck, { seed: 44, firstPlayerIndex: 0, maxTurns: 14 })
+      state.turnNumber = 3
+      state.activePlayerIndex = 0
+
+      const areaZero = UNIFIED_CARD_REGISTRY['sv07-131']!
+      const jammingTower = UNIFIED_CARD_REGISTRY['sv06-153']!
+      state.player.hand = [areaZero, jammingTower]
+      state.player.activePokemon = {
+        instanceId: 'tera_active',
+        card: { ...mockCharmander, pokemonStats: { ...mockCharmander.pokemonStats!, isTera: true } },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      state.player.bench = []
+
+      // Joue Abîme Zéro : passe la capacité max à 8 et pose stadiumPlayedThisTurn = true
+      const afterAreaZero = applyAction(state, {
+        type: 'PLAY_TRAINER',
+        cardId: areaZero.cardId,
+        handIndex: 0,
+        label: 'Jouer le Stade Abîme Zéro',
+      })
+      expect(afterAreaZero.player.stadiumPlayedThisTurn).toBe(true)
+      expect(getMaxBenchSlots(afterAreaZero.player, afterAreaZero.activeStadium)).toBe(8)
+
+      // Un second Stade ne peut pas être proposé légalement dans le même tour
+      const legalSameTurn = getLegalActions(afterAreaZero)
+      expect(legalSameTurn.some((a) => a.cardId === jammingTower.cardId)).toBe(false)
+
+      // Remplir le Banc à 7 Pokémon puis défausser le Stade au tour suivant doit ramener le Banc à 5
+      while (afterAreaZero.player.bench.length < 7) {
+        afterAreaZero.player.bench.push({
+          instanceId: `b_${afterAreaZero.player.bench.length}`,
+          card: mockCharmander,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        })
+      }
+      afterAreaZero.player.stadiumPlayedThisTurn = false
+      const afterReplace = applyAction(afterAreaZero, {
+        type: 'PLAY_TRAINER',
+        cardId: jammingTower.cardId,
+        handIndex: 0,
+        label: 'Jouer Tour de Brouillage',
+      })
+      expect(getMaxBenchSlots(afterReplace.player, afterReplace.activeStadium)).toBe(5)
+      expect(afterReplace.player.bench.length).toBe(5)
+    })
+
+    it('applique -20 de Double Turbo avant Faiblesse, coupe à 0, économise 1 carte en Retraite et applique Zone Féérique', () => {
+      const doubleTurbo: EngineCardModel = {
+        ...mockCharmander,
+        cardId: 'test-dt',
+        category: 'ENERGY',
+        subCategory: 'SPECIAL_ENERGY',
+        pokemonStats: null,
+        identity: { ...mockCharmander.identity, nameFr: 'Énergie Double Turbo', nameEn: 'Double Turbo Energy', category: 'ENERGY', subCategory: 'SPECIAL_ENERGY' },
+      }
+      const fireEnergy = createNativeBasicEnergyModel('Feu')
+      const deck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+      const state = createInitialMatchState(deck, deck, { seed: 55, firstPlayerIndex: 0, maxTurns: 14 })
+      state.turnNumber = 3
+      state.activePlayerIndex = 0
+
+      // 20 dégâts de base + Double Turbo (-20) = 0 AVANT Faiblesse x2 -> total = 0 (et non -40 ou +40) !
+      const atk20 = {
+        actionId: 'atk_20',
+        label: 'Flammèche 20',
+        actionType: 'ATTACK' as const,
+        timingPhase: 'ATTACK_PHASE' as const,
+        cost: {},
+        canUseTurn1GoingFirst: false,
+        canUseTurn1GoingSecond: true,
+        preconditions: [],
+        effects: [{ primitive: 'DAMAGE_ACTIVE' as const, target: 'OPPONENT_ACTIVE', value: 20, baseDamage: 20 }],
+      }
+      state.player.activePokemon = {
+        instanceId: 'dt_atk',
+        card: { ...mockCharmander, pokemonStats: { ...mockCharmander.pokemonStats!, types: ['Feu'], retreatCost: 2 }, playableActions: [atk20] },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [fireEnergy, doubleTurbo],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      state.opponent.activePokemon = {
+        instanceId: 'grass_def',
+        card: { ...mockTargetBasic, pokemonStats: { ...mockTargetBasic.pokemonStats!, types: ['Plante'], weaknesses: [{ type: 'Feu', value: '×2' }], resistances: [] } },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 2,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+      }
+      expect(computeAttackDamageToActive(state.player, state.opponent, atk20, state).activeDamage).toBe(0)
+
+      // Retraite coût 2 avec [Fire, DoubleTurbo] -> ne doit défausser que DoubleTurbo (reste Fire attachée)
+      state.player.bench = [
+        {
+          instanceId: 'pivot',
+          card: mockTargetBasic,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      const afterRetreat = applyAction(state, {
+        type: 'RETREAT_ACTIVE',
+        targetBenchIndex: 0,
+        label: 'Retraite',
+      })
+      const retreatedPoke = afterRetreat.player.bench[0]!
+      expect(retreatedPoke.attachedEnergies.length).toBe(1)
+      expect(retreatedPoke.attachedEnergies[0]?.category).toBe('ENERGY')
+
+      // Test Mélofée-ex de Lilie (Zone Féérique) rendant Lanssorien-ex (Dragon) faible x2 au Psy
+      const clefairyEx = UNIFIED_CARD_REGISTRY['me02.5-076']!
+      const dragapultEx = UNIFIED_CARD_REGISTRY['me02.5-160']!
+      state.player.bench = [
+        {
+          instanceId: 'clefairy_bench',
+          card: clefairyEx,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      state.player.activePokemon.card = {
+        ...mockCharmander,
+        pokemonStats: { ...mockCharmander.pokemonStats!, types: ['Psy'] },
+        playableActions: [atk20],
+      }
+      state.player.activePokemon.attachedEnergies = []
+      state.opponent.activePokemon.card = dragapultEx
+      // 20 dégâts Psy x2 grâce à Zone Féérique = 40 dégâts !
+      expect(computeAttackDamageToActive(state.player, state.opponent, atk20, state).activeDamage).toBe(40)
+    })
+
+    it('nettoie tous les effets temporaires sur Retraite/Dévolution, respecte l’ordre Checkup + K.O. simultanés et protège Civière Nocturne', () => {
+      const deck = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+      const state = createInitialMatchState(deck, deck, { seed: 66, firstPlayerIndex: 0, maxTurns: 14 })
+      state.turnNumber = 3
+      state.activePlayerIndex = 0
+
+      // 1. Checkup simultané Poison + Brûlure ne doit PAS mettre koSufferedLastOpponentTurn = true
+      state.player.activePokemon!.card = mockCharmander
+      state.opponent.activePokemon!.card = mockTargetBasic
+      state.player.activePokemon!.specialConditions = ['PARALYZED', 'POISONED']
+      state.player.activePokemon!.damage = getPokemonMaxHp(state.player.activePokemon!) - 10
+      state.opponent.activePokemon!.specialConditions = ['BURNED']
+      state.opponent.activePokemon!.damage = getPokemonMaxHp(state.opponent.activePokemon!) - 20
+      state.player.bench = [
+        {
+          instanceId: 'p_sub',
+          card: mockCharmander,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      state.opponent.bench = [
+        {
+          instanceId: 'o_sub',
+          card: mockTargetBasic,
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      runBetweenTurnsCheckup(state)
+      expect(state.player.activePokemon?.instanceId).toBe('p_sub')
+      expect(state.opponent.activePokemon?.instanceId).toBe('o_sub')
+      expect(state.player.prizes.length).toBe(5)
+      expect(state.opponent.prizes.length).toBe(5)
+      expect(state.player.koSufferedLastOpponentTurn).toBe(false)
+      expect(state.opponent.koSufferedLastOpponentTurn).toBe(false)
+
+      // 2. Retraite purge damageTakenModifierNextTurn, damageDealtModifierNextTurn et preventDamageOrEffectsNextTurn
+      state.player.activePokemon!.damageTakenModifierNextTurn = -30
+      state.player.activePokemon!.damageDealtModifierNextTurn = -40
+      state.player.activePokemon!.preventDamageOrEffectsNextTurn = true
+      state.player.activePokemon!.attachedEnergies = []
+      state.player.bench = [
+        {
+          instanceId: 'p_pivot2',
+          card: { ...mockCharmander, pokemonStats: { ...mockCharmander.pokemonStats!, retreatCost: 0 } },
+          previousStages: [],
+          damage: 0,
+          attachedEnergies: [],
+          attachedTools: [],
+          turnPlayed: 1,
+          evolvedThisTurn: false,
+          specialConditions: [],
+          cantAttackNextTurn: false,
+        },
+      ]
+      state.player.activePokemon!.card = {
+        ...mockCharmander,
+        pokemonStats: { ...mockCharmander.pokemonStats!, retreatCost: 0 },
+      }
+      const afterCleanRetreat = applyAction(state, {
+        type: 'RETREAT_ACTIVE',
+        targetBenchIndex: 0,
+        label: 'Retraite propre',
+      })
+      const benchedAfter = afterCleanRetreat.player.bench[0]!
+      expect(benchedAfter.damageTakenModifierNextTurn).toBe(0)
+      expect(benchedAfter.damageDealtModifierNextTurn).toBe(0)
+      expect(benchedAfter.preventDamageOrEffectsNextTurn).toBe(false)
+
+      // 3. Civière Nocturne (me02.5-196) ne doit jamais retirer d'énergie sur notre Pokémon Actif
+      const stretcher = UNIFIED_CARD_REGISTRY['me02.5-196']!
+      const fireEnergy = createNativeBasicEnergyModel('Feu')
+      const stretcherState = createInitialMatchState(deck, deck, { seed: 67, firstPlayerIndex: 0, maxTurns: 14 })
+      stretcherState.turnNumber = 3
+      stretcherState.activePlayerIndex = 0
+      stretcherState.player.hand = [stretcher]
+      stretcherState.player.discard = [mockCharmander]
+      stretcherState.player.activePokemon!.attachedEnergies = [fireEnergy]
+      const afterStretcher = applyAction(stretcherState, {
+        type: 'PLAY_TRAINER',
+        cardId: stretcher.cardId,
+        handIndex: 0,
+        label: 'Jouer Civière Nocturne',
+      })
+      expect(afterStretcher.player.activePokemon?.attachedEnergies.length).toBe(1)
+      expect(afterStretcher.player.hand.some((c) => c.cardId === mockCharmander.cardId)).toBe(true)
+
+      // 4. Zone Perdue (destinationZone: 'LOST_ZONE') envoie la carte dans board.lostZone et non discard
+      const millLostCard: EngineCardModel = {
+        ...mockCharmander,
+        category: 'TRAINER',
+        subCategory: 'ITEM',
+        playableActions: [
+          {
+            actionId: 'lost_mill',
+            label: 'Envoyer en Zone Perdue',
+            actionType: 'PLAY_FROM_HAND',
+            timingPhase: 'MAIN_PHASE_1',
+            cost: {},
+            canUseTurn1GoingFirst: true,
+            canUseTurn1GoingSecond: true,
+            preconditions: [],
+            effects: [{ primitive: 'MILL_DECK', target: 'OPPONENT', count: 2, destinationZone: 'LOST_ZONE' }],
+          },
+        ],
+      }
+      const lostState = createInitialMatchState(deck, deck, { seed: 68, firstPlayerIndex: 0, maxTurns: 14 })
+      lostState.player.hand = [millLostCard]
+      const prevOppDiscard = lostState.opponent.discard.length
+      const afterLost = applyAction(lostState, {
+        type: 'PLAY_TRAINER',
+        cardId: millLostCard.cardId,
+        handIndex: 0,
+        label: 'Zone Perdue',
+      })
+      expect(afterLost.opponent.lostZone.length).toBe(2)
+      expect(afterLost.opponent.discard.length).toBe(prevOppDiscard)
+    })
+  })
 })

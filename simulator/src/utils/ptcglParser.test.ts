@@ -158,4 +158,31 @@ Total Cards: 60`
     const parsed = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
     expect(parsed.isStandardLegal).toBe(true)
   })
+
+  it('applique la limite réglementaire de 4 exemplaires par nom et 1 Pokémon Radieux max', () => {
+    const tooManyCopies = `Pokémon: 6
+4 Ire-Foudre-ex TEF 123
+1 Ire-Foudre-ex TEF 123
+1 Favianos-ex SFA 38
+
+Dresseurs: 28
+4 Pepper SVI 166
+4 Mashynn PAL 185
+4 Hyper Ball SVI 196
+4 Faiblo Ball SVI 181
+4 Poffin Copain-Copain TEF 144
+4 Super Bonbon PAF 125
+4 Attrape-Riposte PAR 160
+
+Énergies: 26
+26 Énergie Combat de base SVE 6
+
+Total Cards: 60`
+
+    const parsedCopies = parsePtcglDecklist(tooManyCopies)
+    expect(parsedCopies.totalCards).toBe(60)
+    expect(parsedCopies.isValid60).toBe(false)
+    expect(parsedCopies.copyLimitViolations?.length).toBe(1)
+    expect(parsedCopies.warnings.some((w) => w.message.includes('maximum réglementaire : 4 par nom'))).toBe(true)
+  })
 })

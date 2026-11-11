@@ -9,25 +9,32 @@
  * 4. Calculer le score final : Score(B) = 0.35 * V(S_T) - 0.30 * V_adv(S_{T_adv}) + 0.35 * V(S_{T+1}).
  */
 
-import type { EngineCardModel } from '../types/cardModel'
+import type { EngineCardModel, PlayableAction } from '../types/cardModel'
+import { getCardFastMeta } from '../data/cardCatalog'
 import {
   applyAction,
+  canPayEnergyCost,
   canPokemonAttackTwice,
   computeAttackDamageToActive,
   fastCloneState,
   getActiveBoard,
+  getEffectiveAttackCost,
   getMainAttackEnergyRequirement,
   getPassiveBoard,
   getPokemonMaxHp,
+  getPokemonRetreatCost,
   getRemainingHp,
   getLegalActions,
   hasEffectiveItemLock,
   isCardDeadInHand,
+  isCardTemporallyWaiting,
+  isPokemonAttackBlocked,
   isZeroEnergyItemLockAttack,
   startTurn,
   type GameAction,
   type InPlayPokemon,
   type MatchState,
+  type PlayerBoardState,
 } from './engine'
 import { computeNumericStateHash } from './fastState'
 
@@ -66,6 +73,55 @@ interface PartialTurnNode {
 const WIN_SCORE = 10000
 
 const intrinsicValueCache = new WeakMap<EngineCardModel, number>()
+
+/**
+ * Calcule les dégâts garantis du Contrôle Pokémon entre deux tours (Poison +10, Brûlure +20 avant lancer de pièce).
+ */
+function getGuaranteedCheckupDamage(
+  poke: InPlayPokemon | null | undefined,
+  pendingEffects?: PlayableAction['effects'],
+): number {
+  let dmg = 0
+  let hasPoison = Boolean(poke?.specialConditions?.includes('POISONED'))
+  let hasBurn = Boolean(poke?.specialConditions?.includes('BURNED'))
+  if (pendingEffects) {
+    for (let i = 0; i < pendingEffects.length; i++) {
+      const eff = pendingEffects[i]!
+      if (eff.primitive === 'APPLY_SPECIAL_CONDITION' && eff.target !== 'SELF') {
+        if (eff.specialCondition === 'BURNED') hasBurn = true
+        else if (!eff.specialCondition || eff.specialCondition === 'POISONED') hasPoison = true
+      }
+    }
+  }
+  if (hasPoison) dmg += 10
+  if (hasBurn) dmg += 20
+  return dmg
+}
+
+/**
+ * Estime les dégâts maximums qu'un Pokémon Actif peut immédiatement infliger avec ses attaques payables.
+ */
+function getMaxImmediateAttackDamage(
+  attackerBoard: PlayerBoardState,
+  defenderBoard: PlayerBoardState,
+  state: MatchState,
+  atkPoke: InPlayPokemon | null,
+): number {
+  if (!atkPoke || !defenderBoard.activePokemon) return 0
+  if (isPokemonAttackBlocked(atkPoke, state)) return 0
+  let maxDmg = 0
+  const mult = canPokemonAttackTwice(atkPoke, state) ? 2 : 1
+  for (const pAct of atkPoke.card.playableActions) {
+    if (pAct.actionType !== 'ATTACK' && pAct.sourceType !== 'ATTACK') continue
+    const effCost = getEffectiveAttackCost(atkPoke, pAct, state, defenderBoard)
+    if (!canPayEnergyCost(atkPoke.attachedEnergies, effCost)) continue
+    const dmgInfo = computeAttackDamageToActive(attackerBoard, defenderBoard, pAct, state)
+    const checkup = getGuaranteedCheckupDamage(defenderBoard.activePokemon, pAct.effects)
+    const total = dmgInfo.expectedActiveDamage * mult + (dmgInfo.expectedActiveDamage > 0 || checkup > 0 ? checkup : 0)
+    if (total > maxDmg) maxDmg = total
+  }
+  return maxDmg
+}
 
 /**
  * Calcule dynamiquement la valeur intrinsèque d'une carte (mise en cache O(1))
@@ -379,10 +435,34 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     }
   }
 
+  // Course aux Récompenses & Risque d'exposition d'un Pokémon à 2 ou 3 Récompenses
+  if (myBoard.activePokemon && oppBoard.activePokemon) {
+    const myActivePrizes = myBoard.activePokemon.card.pokemonStats?.prizeCardsGiven ?? 1
+    const myActiveRemHp = getRemainingHp(myBoard.activePokemon, state)
+    if (myActivePrizes >= 2) {
+      const oppMaxDmg = getMaxImmediateAttackDamage(oppBoard, myBoard, state, oppBoard.activePokemon)
+      if (oppMaxDmg >= myActiveRemHp) {
+        totalScore -= myActivePrizes >= oppBoard.prizes.length ? 170 : oppBoard.prizes.length <= 2 || myActivePrizes >= 3 ? 75 : 25
+      }
+    }
+    const checkupSelfRisk = getGuaranteedCheckupDamage(myBoard.activePokemon)
+    if (checkupSelfRisk > 0 && myActiveRemHp <= checkupSelfRisk) {
+      totalScore -= myActivePrizes * 40
+    }
+  }
+
   // 4. Évaluation dynamique de la Main (`computeCardIntrinsicValue`, `turnPhaseWeights`, `inGameDeadCardConditions`, `holdForNextTurnBonus`)
   const seenHandCardIds = new Set<string>()
   for (const card of myBoard.hand) {
     if (isCardDeadInHand(card, myBoard, oppBoard, state.activeStadium)) {
+      // Conserver une valeur de rétention pour les cartes de riposte en attente de K.O. / retard aux Récompenses (Tampon Injuste, Attrape-Riposte)
+      if (isCardTemporallyWaiting(card, myBoard, oppBoard, state.activeStadium)) {
+        const base = computeCardIntrinsicValue(card)
+        const holdBonus = card.strategicEvaluator.holdForNextTurnBonus ?? 20
+        const duplicateFactor = seenHandCardIds.has(card.cardId) ? 0.35 : 1.0
+        seenHandCardIds.add(card.cardId)
+        totalScore += (base * 0.08 + holdBonus * 0.35) * duplicateFactor
+      }
       continue
     }
     const base = computeCardIntrinsicValue(card)
@@ -520,32 +600,51 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
     case 'DECLARE_ATTACK': {
       let atkScore = 300 + (action.estimatedDamage || 0)
       if (activeBoard.activePokemon) {
-        const attackAction = activeBoard.activePokemon.card.playableActions.find(
-          (a) => a.actionId === action.actionId,
-        )
+        const attackAction =
+          activeBoard.activePokemon.card.playableActions.find((a) => a.actionId === action.actionId) ||
+          activeBoard.activePokemon.attachedTools
+            .flatMap((t) => t.playableActions)
+            .find((a) => a.actionId === action.actionId)
         if (attackAction) {
           const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, attackAction, state)
+          const checkupBonus = passiveBoard.activePokemon
+            ? getGuaranteedCheckupDamage(passiveBoard.activePokemon, attackAction.effects)
+            : 0
+          const mult = canPokemonAttackTwice(activeBoard.activePokemon, state) ? 2 : 1
+          const projectedOppDmg = dmgInfo.expectedActiveDamage * mult + checkupBonus
+          const oppRemHp = passiveBoard.activePokemon
+            ? getRemainingHp(passiveBoard.activePokemon, state)
+            : 9999
+          const oppPrizes = passiveBoard.activePokemon?.card.pokemonStats?.prizeCardsGiven ?? 1
+          const hasExtraPrize = attackAction.effects.some(
+            (e) =>
+              e.primitive === 'TAKE_EXTRA_PRIZE' || (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
+          )
+
+          if (passiveBoard.activePokemon && projectedOppDmg >= oppRemHp && projectedOppDmg > 0) {
+            const prizeGain = oppPrizes + (hasExtraPrize ? 1 : 0)
+            if (activeBoard.prizes.length <= prizeGain || passiveBoard.bench.length === 0) {
+              atkScore += 900
+            } else {
+              atkScore += prizeGain * 95
+            }
+          }
+
           if (dmgInfo.selfRecoilDamage > 0) {
             const myRemHp = getRemainingHp(activeBoard.activePokemon, state)
-            const oppKOs =
-              passiveBoard.activePokemon != null &&
-              dmgInfo.expectedActiveDamage >= getRemainingHp(passiveBoard.activePokemon, state)
-            const oppPrizesAfterKo = oppKOs
-              ? passiveBoard.prizes.length - (passiveBoard.activePokemon?.card.pokemonStats?.prizeCardsGiven ?? 1)
-              : passiveBoard.prizes.length
+            const oppKOs = passiveBoard.activePokemon != null && projectedOppDmg >= oppRemHp
+            const oppPrizesAfterKo = oppKOs ? activeBoard.prizes.length - oppPrizes : activeBoard.prizes.length
             // Si le recul met K.O. notre propre Actif sans clore immédiatement la victoire, pénaliser fortement
             if (dmgInfo.selfRecoilDamage >= myRemHp && !(oppKOs && oppPrizesAfterKo <= 0)) {
-              atkScore -= passiveBoard.prizes.length <= (activeBoard.activePokemon.card.pokemonStats?.prizeCardsGiven ?? 1) ? 500 : 180
+              atkScore -=
+                passiveBoard.prizes.length <= (activeBoard.activePokemon.card.pokemonStats?.prizeCardsGiven ?? 1)
+                  ? 500
+                  : 180
             } else {
               atkScore -= dmgInfo.expectedSelfRecoil * 0.35
             }
           }
-          if (
-            attackAction.effects.some(
-              (e) =>
-                e.primitive === 'TAKE_EXTRA_PRIZE' || (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
-            )
-          ) {
+          if (hasExtraPrize) {
             atkScore += 180
           }
           if (isTurn1GoingSecond && isZeroEnergyItemLockAttack(attackAction)) {
@@ -557,7 +656,7 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
     }
 
     case 'NORMAL_EVOLVE':
-      return 240 + handReducesBonus
+      return 244 + handReducesBonus
 
     case 'PLAY_TRAINER': {
       const trainerCard = activeBoard.hand.find((c) => c.cardId === action.cardId)
@@ -571,16 +670,52 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
       ) {
         return 380
       }
-      if (
-        trainerCard?.subCategory !== 'TOOL' &&
-        trainerCard?.playableActions.some((a) =>
-          a.effects.some(
-            (e) =>
-              e.primitive === 'TAKE_EXTRA_PRIZE' || (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
-          ),
-        )
-      ) {
-        return 340
+
+      // Évaluation prioritaire du Gust (Ordres du Boss / Attrape-Riposte / Attrape-Suprême)
+      // Simule la cible du Banc en Actif adverse pour évaluer Faiblesse, Résistance, Checkup et immunités (Mimiriqui)
+      if (action.targetBenchIndex !== undefined && passiveBoard.bench[action.targetBenchIndex]) {
+        const oppTarget = passiveBoard.bench[action.targetBenchIndex]!
+        const targetHp = getRemainingHp(oppTarget, state)
+        const targetPrizes = oppTarget.card.pokemonStats?.prizeCardsGiven ?? 1
+
+        let currentActiveMaxDmg = 0
+        let maxTargetDmg = 0
+        if (activeBoard.activePokemon) {
+          const simDefBoard: PlayerBoardState = { ...passiveBoard, activePokemon: oppTarget }
+          const simState: MatchState =
+            passiveBoard === state.opponent
+              ? { ...state, opponent: simDefBoard }
+              : { ...state, player: simDefBoard }
+          currentActiveMaxDmg = getMaxImmediateAttackDamage(
+            activeBoard,
+            passiveBoard,
+            state,
+            activeBoard.activePokemon,
+          )
+          maxTargetDmg = getMaxImmediateAttackDamage(
+            activeBoard,
+            simDefBoard,
+            simState,
+            activeBoard.activePokemon,
+          )
+        }
+
+        const canKoTarget = maxTargetDmg >= targetHp && maxTargetDmg > 0
+        const breaksImmunityWall = currentActiveMaxDmg === 0 && maxTargetDmg >= 20
+        if (canKoTarget) {
+          const lethalWinBonus = activeBoard.prizes.length <= targetPrizes ? 250 : 0
+          return (
+            275 +
+            lethalWinBonus +
+            targetPrizes * 70 +
+            computePokemonThreatScore(oppTarget, state.turnNumber, false) * 0.5
+          )
+        }
+        if (breaksImmunityWall) {
+          return 235 + targetPrizes * 35
+        }
+        // Si on ne peut ni mettre K.O. ni contourner un mur immunisé, éviter de gaspiller le Gust
+        return 40
       }
 
       // Priorité au Stade si un Pokémon "Fête Battante" (canAttackTwice) est en jeu
@@ -598,56 +733,72 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
         }
       }
 
-      // Bonus pour vider la main si un Supporter "seule carte en main" attend d'être débloqué
+      const pAction =
+        trainerCard?.playableActions.find((a) => a.actionId === action.actionId) ||
+        trainerCard?.playableActions[0]
+
+      // Échange de soi (Échange / Switch) pour purger Paralysie, Sommeil, Confusion, Verrou ou Recul fatal
+      const isSelfSwitchTrainer = pAction?.effects.some((e) => {
+        if (e.primitive !== 'SWITCH_ACTIVE' && (e as any).primitive !== 'SWITCH_ACTIVE_POKEMON') return false
+        const t = (e.target || '').toUpperCase()
+        return t === 'SELF' || t === 'OWN_BENCH_SINGLE' || t === 'OWN_BENCH' || t === 'OWN_ACTIVE'
+      })
+      if (isSelfSwitchTrainer && activeBoard.activePokemon) {
+        const activeP = activeBoard.activePokemon
+        if (
+          isTurn1GoingSecond &&
+          action.targetBenchIndex !== undefined &&
+          activeBoard.bench[action.targetBenchIndex]?.card.playableActions.some(isZeroEnergyItemLockAttack)
+        ) {
+          return 295
+        }
+        const conds = activeP.specialConditions || []
+        const crippled =
+          conds.includes('PARALYZED') ||
+          conds.includes('ASLEEP') ||
+          conds.includes('CONFUSED') ||
+          Boolean(activeP.cantAttackNextTurn) ||
+          (activeP.damageDealtModifierNextTurn || 0) < 0 ||
+          getRemainingHp(activeP, state) <= getGuaranteedCheckupDamage(activeP)
+        if (crippled && activeBoard.bench.length > 0) {
+          return 268
+        }
+      }
+
       const hasDiscardCost = trainerCard?.playableActions.some(
         (a) =>
           (Array.isArray(a.costs) && a.costs.some((c) => c.type === 'DISCARD_FROM_HAND')) ||
           a.effects.some((e) => e.primitive === 'DISCARD_CARDS'),
       )
 
-      // Bonus en J2 Tour 1 pour un échange (Switch) amenant un Pokémon Item-Lock à 0 énergie (ex: Rozbouton)
-      if (
-        isTurn1GoingSecond &&
-        trainerCard?.playableActions.some((a) =>
-          a.effects.some(
-            (e) =>
-              e.primitive === 'SWITCH_ACTIVE' || (e as any).primitive === 'SWITCH_ACTIVE_POKEMON',
-          ),
-        ) &&
-        action.targetBenchIndex !== undefined &&
-        activeBoard.bench[action.targetBenchIndex]
-      ) {
-        const targetBenchPoke = activeBoard.bench[action.targetBenchIndex]!
-        if (targetBenchPoke.card.playableActions.some(isZeroEnergyItemLockAttack)) {
-          return 295
-        }
-      }
-
       if (action.cardId === 'sv04-125') return 260 + handReducesBonus // Super Bonbon
-      if (action.cardId === 'sv05-144') return (state.turnNumber <= 2 ? 250 : 160) + handReducesBonus // Poffin Copain-Copain
-      if (action.cardId === 'sv01-181') return (state.turnNumber <= 2 ? 235 : 155) + handReducesBonus // Faiblo Ball
+      if (action.cardId === 'sv05-144') return (state.turnNumber <= 2 ? 258 : 246) + handReducesBonus // Poffin Copain-Copain
+      if (action.cardId === 'sv01-181') return (state.turnNumber <= 2 ? 254 : 242) + handReducesBonus // Faiblo Ball
 
-      // Évaluation fine du Gust (Ordres du Boss / Attrape-Riposte / Attrape-Suprême)
-      if (action.targetBenchIndex !== undefined && passiveBoard.bench[action.targetBenchIndex]) {
-        const oppTarget = passiveBoard.bench[action.targetBenchIndex]!
-        const targetHp = getRemainingHp(oppTarget, state)
-        const targetPrizes = oppTarget.card.pokemonStats?.prizeCardsGiven ?? 1
-        // Vérifie si notre Pokémon Actif peut mettre KO cette cible
-        let maxOurDmg = 0
-        if (activeBoard.activePokemon) {
-          for (const pAct of activeBoard.activePokemon.card.playableActions) {
-            if (pAct.actionType === 'ATTACK' || pAct.sourceType === 'ATTACK') {
-              const dmg = computeAttackDamageToActive(activeBoard, passiveBoard, pAct, state).activeDamage
-              if (dmg > maxOurDmg) maxOurDmg = dmg
-            }
-          }
+      // Séquencement pro intra-tour : Épuration / Recherche (252) -> Préparation dessus de deck (236) -> Pioche/Mélange (228) -> Énergie manuelle (205) -> Outils/Divers (185)
+      if (pAction && trainerCard?.subCategory !== 'TOOL') {
+        const hasSearchOrRecover = pAction.effects.some(
+          (e) => e.primitive === 'SEARCH_DECK' || e.primitive === 'RECOVER_FROM_DISCARD',
+        )
+        const hasShuffleOrDraw = pAction.effects.some(
+          (e) =>
+            e.primitive === 'SHUFFLE_HAND_DRAW' ||
+            e.primitive === 'DRAW_CARDS' ||
+            (e as any).primitive === 'DISCARD_HAND_AND_DRAW' ||
+            (e as any).primitive === 'DRAW_UNTIL_HAND_SIZE',
+        )
+        const hasTopDeckStack = pAction.effects.some(
+          (e) => e.primitive === 'PUT_ON_TOP_OR_BOTTOM_OF_DECK' && e.destinationZone === 'TOP_OF_DECK',
+        )
+        if (hasSearchOrRecover && !hasShuffleOrDraw) {
+          return 252 + handReducesBonus
         }
-        const canKoTarget = maxOurDmg >= targetHp && maxOurDmg > 0
-        if (canKoTarget) {
-          return 255 + targetPrizes * 70 + computePokemonThreatScore(oppTarget, state.turnNumber, false) * 0.5
+        if (hasTopDeckStack) {
+          return 236 + handReducesBonus
         }
-        // Si on ne peut pas mettre KO la cible, évite de gaspiller Ordres du Boss / Attrape-Riposte
-        return 40
+        if (hasShuffleOrDraw) {
+          return 228 + handReducesBonus
+        }
       }
 
       return 185 + (hasDiscardCost ? handReducesBonus : 0)
@@ -699,12 +850,12 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
         // Combo KO avec le Pokémon actif ce tour
         let maxActiveDmg = 0
         if (activeBoard.activePokemon) {
-          for (const act of activeBoard.activePokemon.card.playableActions) {
-            if (act.actionType === 'ATTACK' || act.sourceType === 'ATTACK') {
-              const d = computeAttackDamageToActive(activeBoard, passiveBoard, act, state).activeDamage
-              if (d > maxActiveDmg) maxActiveDmg = d
-            }
-          }
+          maxActiveDmg = getMaxImmediateAttackDamage(
+            activeBoard,
+            passiveBoard,
+            state,
+            activeBoard.activePokemon,
+          )
         }
         const canComboKoActive =
           passiveBoard.activePokemon &&
@@ -732,26 +883,40 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
         if (koTargets > 0) return 295 + Math.min(80, koTargets * 40)
       }
 
-      if (
-        pAction?.effects.some(
-          (e) => e.primitive === 'TAKE_EXTRA_PRIZE' || (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
-        )
-      ) {
-        return 350
-      }
-
       if (action.endsTurnImmediately) return 140
-      return 225
+      const isDrawOrSearchAbility = pAction?.effects.some(
+        (e) =>
+          e.primitive === 'DRAW_CARDS' ||
+          e.primitive === 'SEARCH_DECK' ||
+          (e as any).primitive === 'DRAW_UNTIL_HAND_SIZE',
+      )
+      return isDrawOrSearchAbility ? 234 : 222
     }
 
     case 'ATTACH_MANUAL_ENERGY':
-      return (action.targetSlot === 'ACTIVE' ? 210 : 195) + handReducesBonus
+      return (action.targetSlot === 'ACTIVE' ? 205 : 192) + handReducesBonus
 
-    case 'PUT_BASIC_ON_BENCH':
+    case 'PUT_BASIC_ON_BENCH': {
+      const card = activeBoard.hand.find((c) => c.cardId === action.cardId)
+      if (card) {
+        const meta = getCardFastMeta(card)
+        const role = (card.strategicEvaluator.aiRole || card.strategicEvaluator.primaryRole) as string
+        const hp = card.pokemonStats?.hp ?? 70
+        // Évite d'exposer gratuitement un Pokémon à 2 Récompenses fragile hors Tour 1 ou dont le talent T1 est expiré
+        if (
+          card.pokemonStats?.isRuleBox &&
+          hp <= 180 &&
+          state.turnNumber > 2 &&
+          role !== 'MAIN_ATTACKER' &&
+          meta.normCombinedName.includes('squawkabilly')
+        ) {
+          return 45
+        }
+      }
       return (state.turnNumber <= 2 ? 220 : 165) + handReducesBonus
+    }
 
     case 'RETREAT_ACTIVE': {
-      // Battre en retraite n'est pertinent que si l'Actif ne peut pas attaquer et que le Pokémon promu le peut (ou a un meilleur rôle)
       const activePoke = activeBoard.activePokemon
       const benchPoke =
         action.targetBenchIndex !== undefined ? activeBoard.bench[action.targetBenchIndex] : null
@@ -765,9 +930,34 @@ function scoreAtomicActionHeuristic(state: MatchState, action: GameAction): numb
       }
       const activeReq = getMainAttackEnergyRequirement(activePoke.card)
       const benchReq = getMainAttackEnergyRequirement(benchPoke.card)
-      const activeReady = activePoke.attachedEnergies.length >= activeReq
-      const benchReady = benchPoke.attachedEnergies.length >= benchReq
+      const activeBlocked = isPokemonAttackBlocked(activePoke, state)
+      const benchBlocked = isPokemonAttackBlocked(benchPoke, state)
+      const activeReady = !activeBlocked && activePoke.attachedEnergies.length >= activeReq
+      const benchReady = !benchBlocked && benchPoke.attachedEnergies.length >= benchReq
+
+      const hasCripplingCondition =
+        (activePoke.specialConditions || []).includes('CONFUSED') ||
+        (activePoke.damageDealtModifierNextTurn || 0) < 0
+      const checkupFatal =
+        getRemainingHp(activePoke, state) <= getGuaranteedCheckupDamage(activePoke)
+      const retreatCost = getPokemonRetreatCost(activePoke, activeBoard, state)
+
+      // Déblocage : si l'Actif a cantAttackNextTurn, est Confus ou va mourir au Checkup, autoriser et prioriser la Retraite !
+      if (activeBlocked || hasCripplingCondition || checkupFatal) {
+        if (benchReady || retreatCost === 0 || checkupFatal) {
+          return 235
+        }
+      }
       if (!activeReady && benchReady) return 215
+      // Pivoter un Pokémon à >=2 Récompenses gravement blessé si le coût de retraite est faible et le Banc prêt
+      if (
+        (activePoke.card.pokemonStats?.prizeCardsGiven ?? 1) >= 2 &&
+        getRemainingHp(activePoke, state) <= 60 &&
+        benchReady &&
+        retreatCost <= 1
+      ) {
+        return 205
+      }
       return 35
     }
 
