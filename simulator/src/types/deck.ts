@@ -69,6 +69,8 @@ export interface ParsedDeck {
   warnings: ParseWarning[]
   synergyAudit: SynergyAuditItem[]
   aceSpecCount: number
+  radiantCount?: number
+  copyLimitViolations?: string[]
   isStandardLegal: boolean
 }
 
