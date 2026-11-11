@@ -45,7 +45,7 @@ from compiler.static_cards import build_basic_energy_model, is_basic_energy
 from compiler.tcgdex_fetcher import FetchedCardBundle
 
 
-DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/gemma-4-26b-a4b-4bit"
+DEFAULT_MLX_MODEL_REPO_ID = "mlx-community/gemma-4-26b-a4b-it-4bit"
 
 MLX_MODEL_ALIASES: Dict[str, str] = {
     "uqer1244/Qwen3.8-27B-GSQ-RC0-MLX": "uqer1244/Qwen3.8-27B-GSQ-RCO-MLX",

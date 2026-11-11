@@ -117,7 +117,7 @@ class TestModelsConfig(unittest.TestCase):
                 intensity=IntensityMode.soft,
                 backend="mlx",
             )
-            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             # MLX Intense
             m = resolve_model_for_configuration(
@@ -125,7 +125,7 @@ class TestModelsConfig(unittest.TestCase):
                 intensity=IntensityMode.intense,
                 backend="mlx",
             )
-            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(m, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             # GGUF Soft
             m = resolve_model_for_configuration(
@@ -153,7 +153,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.reason,
                 backend="mlx",
             )
-            self.assertEqual(r_mlx_soft, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(r_mlx_soft, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             r_mlx_intense = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -161,7 +161,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.reason,
                 backend="mlx",
             )
-            self.assertEqual(r_mlx_intense, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(r_mlx_intense, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             r_gguf_soft = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -178,7 +178,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.code,
                 backend="mlx",
             )
-            self.assertEqual(c_mlx_soft, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(c_mlx_soft, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             c_mlx_intense = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -186,7 +186,7 @@ class TestModelsConfig(unittest.TestCase):
                 phase=PipelinePhase.code,
                 backend="mlx",
             )
-            self.assertEqual(c_mlx_intense, "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(c_mlx_intense, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
             c_gguf_soft = resolve_model_for_configuration(
                 pipeline_mode=PipelineMode.two_pass,
@@ -254,7 +254,7 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
     @patch("compiler.reasoning_engine.ReasoningEngine.load_model_in_memory")
     def test_reasoning_engine_mocked_generation(self, mock_load: MagicMock) -> None:
         engine = ReasoningEngine(intensity="soft", backend="mlx")
-        self.assertEqual(engine.repo_id, "mlx-community/gemma-4-26b-a4b-4bit")
+        self.assertEqual(engine.repo_id, "mlx-community/gemma-4-26b-a4b-it-4bit")
         self.assertTrue(engine.enable_thinking)
 
         # Mock tokenizer and model
@@ -383,7 +383,7 @@ class TestTwoPassPipelineExecution(unittest.TestCase):
             )
             self.assertEqual(res["compiled"], 1)
             _, init_kwargs = spy.call_args
-            self.assertEqual(init_kwargs.get("model"), "mlx-community/gemma-4-26b-a4b-4bit")
+            self.assertEqual(init_kwargs.get("model"), "mlx-community/gemma-4-26b-a4b-it-4bit")
             self.assertIs(init_kwargs.get("disable_thinking"), True)
 
         out_file = self.test_dir / "compiled_cards" / "sv08.5-001.json"
