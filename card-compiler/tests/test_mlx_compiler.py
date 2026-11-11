@@ -263,10 +263,10 @@ class TestMLXCompiler(unittest.TestCase):
         self.assertIn("GSQ-RCO", str(ctx.exception))
 
     def test_gemma4_default_model_and_thinking_toggle_for_pass2(self) -> None:
-        """Vérifie le modèle par défaut gemma-4-26b-a4b-4bit, le flag enable_thinking et le nettoyage JSON."""
+        """Vérifie le modèle par défaut gemma-4-26b-a4b-it-4bit, le flag enable_thinking et le nettoyage JSON."""
         from compiler.llm_engine import extract_json_payload
 
-        self.assertEqual(DEFAULT_MLX_MODEL_REPO_ID, "mlx-community/gemma-4-26b-a4b-4bit")
+        self.assertEqual(DEFAULT_MLX_MODEL_REPO_ID, "mlx-community/gemma-4-26b-a4b-it-4bit")
 
         tok = MagicMock()
         tok.apply_chat_template.return_value = "FORMATTED"

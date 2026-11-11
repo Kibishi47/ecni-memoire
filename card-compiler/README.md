@@ -10,7 +10,7 @@ Il interroge l'API officielle **TCGdex**, charge des modèles d'IA locaux sur **
 
 - **2 Modes de Travail au Choix** :
   - **Mode 1 (Single-Pass / Direct)** : L'IA produit directement le JSON formel à partir des données de la carte.
-  - **Mode 2 (Two-Pass Découplé)** : La Passe 1 active le raisonnement (`enable_thinking=True`) sur `mlx-community/gemma-4-26b-a4b-4bit` (ou DeepSeek-R1 en GGUF) pour analyser les règles et générer un rapport textuel complet. Puis, la Passe 2 désactive le raisonnement (`enable_thinking=False`) pour transformer ces analyses en JSON formel rapidement.
+  - **Mode 2 (Two-Pass Découplé)** : La Passe 1 active le raisonnement (`enable_thinking=True`) sur `mlx-community/gemma-4-26b-a4b-it-4bit` (ou DeepSeek-R1 en GGUF) pour analyser les règles et générer un rapport textuel complet. Puis, la Passe 2 désactive le raisonnement (`enable_thinking=False`) pour transformer ces analyses en JSON formel rapidement.
 - **2 Paliers d'Intensité (`soft` et `intense`)** :
   - **`soft` (Par défaut, ~7-8 Go RAM)** : Conçu pour tourner confortablement en journée pendant que votre navigateur, IDE et autres applications sont ouverts.
   - **`intense` (~14-18 Go RAM)** : Conçu pour les sessions dédiées ou le mode nuit (AFK) avec les applications fermées.
@@ -51,11 +51,11 @@ Le compilateur résout automatiquement le bon modèle selon vos choix de **Mode*
 
 | Mode | Étape / Phase | Intensité `soft` (Défaut - ~7-8 Go RAM) | Intensité `intense` (Mode AFK/Nuit - ~14-18 Go RAM) | Backend |
 | :--- | :--- | :--- | :--- | :--- |
-| **Mode 1** *(Direct)* | Passe Unique | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
+| **Mode 1** *(Direct)* | Passe Unique | `mlx-community/gemma-4-26b-a4b-it-4bit` | `mlx-community/gemma-4-26b-a4b-it-4bit` | **MLX** |
 | **Mode 1** *(Direct)* | Passe Unique | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-32B-Instruct-GGUF` | **GGUF** |
-| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** *(thinking ON)* | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** *(thinking ON)* | `mlx-community/gemma-4-26b-a4b-it-4bit` | `mlx-community/gemma-4-26b-a4b-it-4bit` | **MLX** |
 | **Mode 2** *(Two-Pass)* | **Passe 1 : Raisonnement** | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q4_K_M)* | `bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF` *(Q8_0)* | **GGUF** |
-| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** *(thinking OFF)* | `mlx-community/gemma-4-26b-a4b-4bit` | `mlx-community/gemma-4-26b-a4b-4bit` | **MLX** |
+| **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** *(thinking OFF)* | `mlx-community/gemma-4-26b-a4b-it-4bit` | `mlx-community/gemma-4-26b-a4b-it-4bit` | **MLX** |
 | **Mode 2** *(Two-Pass)* | **Passe 2 : Codage JSON** | `bartowski/Qwen2.5-Coder-7B-Instruct-GGUF` | `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF` | **GGUF** |
 
 > [!TIP]
