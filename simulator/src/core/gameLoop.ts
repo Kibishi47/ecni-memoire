@@ -173,23 +173,27 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
     normCardName.includes('pomdramour') ||
     normCardName.includes('poissoroy')
 
-  if (canDouble && action.sourceType === 'ATTACK') {
+  if (canDouble && (action.actionType === 'ATTACK' || action.sourceType === 'ATTACK')) {
     return 'Double attaque sous Stade (Fête Battante)'
   }
 
   for (const rawPre of action.preconditions) {
     const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
-    if (preType === 'HAND_MAX_OTHER_CARDS_ZERO') {
+    if (preType === 'HAND_MAX_OTHER_CARDS_ZERO' || preType === 'HAND_IS_EMPTY') {
       return 'Seule carte en main (0 autre carte)'
     }
-    if (preType === 'KO_SUFFERED_LAST_TURN') {
+    if (preType === 'KO_SUFFERED_LAST_TURN' || preType === 'OPPONENT_CAUSED_KO_LAST_TURN') {
       return 'Après K.O. subi au tour précédent'
     }
     if (preType === 'PLAYER_BEHIND_ON_PRIZES') {
       return 'Retard aux Récompenses'
     }
-    if (preType.startsWith('OPPONENT_PRIZES_EXACT_COUNT')) {
-      const minCount = typeof rawPre === 'object' ? (rawPre as any).minCount ?? 1 : 1
+    if (preType.startsWith('OPPONENT_PRIZES_EXACT_COUNT') || preType.startsWith('OPPONENT_PRIZES_EQUAL:')) {
+      const minCount = preType.includes(':')
+        ? preType.split(':')[1] || '1'
+        : typeof rawPre === 'object'
+          ? (rawPre as any).minCount ?? 1
+          : 1
       return `Adversaire à ${minCount} Récompense(s)`
     }
     if (preType === 'STADIUM_IN_PLAY') {
@@ -207,6 +211,12 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
   }
 
   for (const eff of action.effects) {
+    if (eff.scalingMetric) {
+      return `Dégâts dynamiques (${eff.scalingMetric})`
+    }
+    if (eff.coinFlipMode) {
+      return `Lancer de pièce (${eff.coinFlipMode})`
+    }
     if (eff.damageScalingType) {
       return `Dégâts dynamiques (${eff.damageScalingType})`
     }
@@ -214,10 +224,18 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
       return `Dégâts progressifs (+${eff.damageScalingPerOpponentPrizeTaken}/Récompense)`
     }
     if (
+      eff.primitive === 'LOCK_ITEMS' ||
+      eff.primitive === 'LOCK_ABILITIES' ||
       eff.primitive === 'APPLY_SPECIAL_CONDITION' ||
       (eff as any).primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK'
     ) {
-      return "Verrouillage d'Objets (Item-Lock)"
+      return "Verrouillage & Contrôle"
+    }
+    if (eff.primitive === 'PLACE_DAMAGE_COUNTERS') {
+      return 'Placement de marqueurs de dégâts'
+    }
+    if (eff.primitive === 'KNOCK_OUT' && eff.target === 'SELF') {
+      return 'Sacrifice stratégique (K.O.)'
     }
   }
 
@@ -266,10 +284,21 @@ export function createShardTelemetryAccumulator(
     for (const pAction of sampleModel.playableActions) {
       const hasNonTrivialPrecondition = pAction.preconditions.some((p) => {
         const pType = typeof p === 'string' ? p : (p as any).type
-        return pType !== 'SELF_HAS_ENERGY_COST' && pType !== 'SELF_IS_ACTIVE'
+        return (
+          pType !== 'SELF_HAS_ENERGY_COST' &&
+          pType !== 'SELF_IS_ACTIVE' &&
+          pType !== 'BENCH_HAS_EMPTY_SLOT' &&
+          pType !== 'BENCH_HAS_EMPTY_SLOTS' &&
+          pType !== 'SELF_IS_IN_HAND'
+        )
       })
       const hasDynamicDmg = pAction.effects.some((e) =>
-        Boolean(e.damageScalingType || e.damageScalingPerOpponentPrizeTaken),
+        Boolean(
+          e.scalingMetric ||
+            e.coinFlipMode ||
+            e.damageScalingType ||
+            e.damageScalingPerOpponentPrizeTaken,
+        ),
       )
       const hasDoubleAtk =
         Boolean(pAction.canAttackTwice) || Boolean(sampleModel.pokemonStats?.canAttackTwice)
@@ -284,7 +313,7 @@ export function createShardTelemetryAccumulator(
             cardId: sampleModel.cardId,
             cardNameFr: sampleModel.identity.nameFr,
             conditionSummary: describeComboCondition(sampleModel, pAction),
-            sourceType: pAction.sourceType || pAction.actionType,
+            sourceType: (pAction.actionType || pAction.sourceType) as any,
             actionId: pAction.actionId,
             gamesTriggered: 0,
             totalTriggersCount: 0,
@@ -299,18 +328,28 @@ export function createShardTelemetryAccumulator(
   return { cardCounters, comboCounters }
 }
 
+function isGustEffect(e: { primitive: string; target?: string | null; sourceZone?: string | null; targetZone?: string | null }): boolean {
+  if ((e as any).primitive === 'GUST_OPPONENT_BENCH') return true
+  if (e.primitive !== 'SWITCH_ACTIVE') return false
+  const t = (e.target || '').toUpperCase()
+  const tz = (e.targetZone || '').toUpperCase()
+  const sz = (e.sourceZone || '').toUpperCase()
+  return (
+    t === 'OPPONENT_BENCH' ||
+    t === 'OPPONENT_BENCH_SINGLE' ||
+    t === 'OPPONENT_ACTIVE' ||
+    t === 'OPPONENT' ||
+    t === 'OPPONENT_POKEMON_ANY' ||
+    tz === 'OPPONENT_BENCH' ||
+    (sz === 'BENCH' && t !== 'OWN_BENCH' && t !== 'OWN_BENCH_SINGLE' && t !== 'OWN_ACTIVE' && t !== 'SELF')
+  )
+}
+
 function isGustAction(action: GameAction, deckLookup: Map<string, EngineCardModel>): boolean {
   if (!action.cardId) return false
   const model = deckLookup.get(action.cardId)
   if (model) {
-    const hasGustPrimitive = model.playableActions.some((pa) =>
-      pa.effects.some(
-        (e) =>
-          (e.primitive === 'SWITCH_ACTIVE' &&
-            (e.target === 'OPPONENT_BENCH' || (e as any).targetZone === 'OPPONENT_BENCH')) ||
-          (e as any).primitive === 'GUST_OPPONENT_BENCH',
-      ),
-    )
+    const hasGustPrimitive = model.playableActions.some((pa) => pa.effects.some(isGustEffect))
     if (hasGustPrimitive) return true
     const norm = normalizeCardNameForMatch(model.identity.nameFr)
     if (
@@ -341,9 +380,10 @@ function isDrawOrSearchSupporterAction(
   const isOffensiveOrGustSupporter = model.playableActions.some((pa) =>
     pa.effects.some(
       (e) =>
-        (e.primitive === 'SWITCH_ACTIVE' &&
-          (e.target === 'OPPONENT_BENCH' || (e as any).targetZone === 'OPPONENT_BENCH')) ||
-        (e as any).primitive === 'GUST_OPPONENT_BENCH' ||
+        isGustEffect(e) ||
+        e.primitive === 'MODIFY_DAMAGE_DEALT' ||
+        e.primitive === 'LOCK_ITEMS' ||
+        e.primitive === 'TAKE_EXTRA_PRIZE' ||
         (e as any).primitive === 'PASSIVE_DAMAGE_BOOST' ||
         (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
     ),
@@ -614,7 +654,7 @@ export function playFullGame(
             p.attachedEnergies.length >= req &&
             (p.card.strategicEvaluator.primaryRole === 'MAIN_ATTACKER' ||
               p.card.subCategory !== 'BASIC' ||
-              p.card.playableActions.some((a) => a.sourceType === 'ATTACK'))
+              p.card.playableActions.some((a) => a.actionType === 'ATTACK' || a.sourceType === 'ATTACK'))
           )
         })
 

@@ -70,6 +70,16 @@ export interface CardFastMeta {
   canAttackTwiceStatic: boolean
   isBraveryCharm: boolean
   isAreaZeroStadium: boolean
+  isJammingTowerStadium: boolean
+  expandsBenchToEight: boolean
+  hpBonusValue: number
+  retreatCostDelta: number
+  setsZeroRetreatWhenNoEnergy: boolean
+  passiveDamageTakenDelta: number
+  passiveDamageDealtDelta: number
+  hasLockItemsPassive: boolean
+  hasLockAbilitiesPassive: boolean
+  protectsBenchFromDamage: boolean
   hasAbilityFlag: boolean
 }
 
@@ -178,7 +188,9 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
         break
       }
       if (
-        (act.actionType === 'USE_ABILITY' || act.sourceType === 'ABILITY_PASSIVE') &&
+        (act.actionType === 'USE_ABILITY' ||
+          act.actionType === 'PASSIVE_ABILITY' ||
+          act.sourceType === 'ABILITY_PASSIVE') &&
         /festival_lead|fete_battante|fête battante|attack_twice|deux fois|2 fois/i.test(
           `${act.actionId} ${act.label}`,
         )
@@ -209,10 +221,107 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
     normCombinedName.includes('abime zero') ||
     normCombinedName.includes('area zero')
 
+  const isJammingTowerStadium =
+    card.cardId === 'sv06-153' ||
+    normCombinedName.includes('tour de brouillage') ||
+    normCombinedName.includes('jamming tower')
+
+  let expandsBenchToEight = isAreaZeroStadium
+  let hpBonusValue = 0
+  let retreatCostDelta = 0
+  let setsZeroRetreatWhenNoEnergy = false
+  let passiveDamageTakenDelta = 0
+  let passiveDamageDealtDelta = 0
+  let hasLockItemsPassive = false
+  let hasLockAbilitiesPassive = false
+  let protectsBenchFromDamage = false
+
+  if (Array.isArray(card.playableActions)) {
+    for (const act of card.playableActions) {
+      const isPassiveOrPlay =
+        act.actionType === 'PASSIVE_ABILITY' ||
+        act.actionType === 'PLAY_FROM_HAND' ||
+        act.sourceType === 'ABILITY_PASSIVE'
+      if (!isPassiveOrPlay) continue
+
+      for (const eff of act.effects || []) {
+        if (eff.primitive === 'EXPAND_BENCH') {
+          expandsBenchToEight = true
+        } else if (eff.primitive === 'MODIFY_HP' && typeof eff.value === 'number' && eff.value > 0) {
+          if (card.subCategory === 'TOOL' || act.actionType === 'PASSIVE_ABILITY') {
+            hpBonusValue = Math.max(hpBonusValue, eff.value)
+          }
+        } else if (eff.primitive === 'MODIFY_RETREAT_COST') {
+          if (eff.target === 'SELF' || eff.target === 'OWN_ACTIVE' || eff.target === 'OWN_POKEMON_ANY') {
+            if (typeof eff.value === 'number' && eff.value < 0) {
+              retreatCostDelta += eff.value
+            } else if (eff.value === 0) {
+              if (
+                (act.preconditions || []).some((p) =>
+                  /NO_ATTACHED_ENERGY|SELF_NO_ATTACHED_ENERGY/i.test(p),
+                )
+              ) {
+                setsZeroRetreatWhenNoEnergy = true
+              } else if (card.subCategory === 'TOOL') {
+                retreatCostDelta -= 1
+              }
+            }
+          }
+        } else if (eff.primitive === 'MODIFY_DAMAGE_TAKEN' && typeof eff.value === 'number') {
+          if (card.subCategory === 'TOOL' || act.actionType === 'PASSIVE_ABILITY') {
+            if (eff.target === 'SELF' || eff.target === 'OWN_ACTIVE' || eff.target === 'OWN_POKEMON_ANY') {
+              passiveDamageTakenDelta += eff.value
+            }
+          }
+        } else if (
+          eff.primitive === 'DAMAGE_ACTIVE' &&
+          act.actionType === 'PASSIVE_ABILITY' &&
+          typeof eff.value === 'number' &&
+          eff.value < 0
+        ) {
+          passiveDamageTakenDelta += eff.value
+        } else if (
+          eff.primitive === 'MODIFY_DAMAGE_DEALT' &&
+          typeof eff.value === 'number' &&
+          eff.value > 0 &&
+          eff.filter !== 'SPECIAL_RULE_EFFECT' &&
+          !(typeof eff.filter === 'string' && eff.filter.startsWith('EFFECT:'))
+        ) {
+          if (card.subCategory === 'TOOL' || act.actionType === 'PASSIVE_ABILITY') {
+            passiveDamageDealtDelta += eff.value
+          }
+        } else if (eff.primitive === 'LOCK_ITEMS' && act.actionType === 'PASSIVE_ABILITY') {
+          hasLockItemsPassive = true
+        } else if (
+          eff.primitive === 'LOCK_ABILITIES' &&
+          !isJammingTowerStadium &&
+          (act.actionType === 'PASSIVE_ABILITY' || card.subCategory === 'STADIUM')
+        ) {
+          hasLockAbilitiesPassive = true
+        } else if (
+          eff.primitive === 'PREVENT_DAMAGE_OR_EFFECTS' &&
+          act.actionType === 'PASSIVE_ABILITY' &&
+          (eff.target === 'OWN_BENCH_ALL' || eff.target === 'OWN_ALL_POKEMON')
+        ) {
+          protectsBenchFromDamage = true
+        }
+      }
+    }
+  }
+
+  if (isBraveryCharm && hpBonusValue === 0) {
+    hpBonusValue = 50
+  }
+
   const hasAbilityFlag = Boolean(
     card.pokemonStats?.hasAbility ||
       (Array.isArray(card.playableActions) &&
-        card.playableActions.some((a) => a.actionType === 'USE_ABILITY')),
+        card.playableActions.some(
+          (a) =>
+            a.actionType === 'USE_ABILITY' ||
+            a.actionType === 'TRIGGERED_ABILITY' ||
+            a.actionType === 'PASSIVE_ABILITY',
+        )),
   )
 
   const meta: CardFastMeta = {
@@ -228,6 +337,16 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
     canAttackTwiceStatic,
     isBraveryCharm,
     isAreaZeroStadium,
+    isJammingTowerStadium,
+    expandsBenchToEight,
+    hpBonusValue,
+    retreatCostDelta,
+    setsZeroRetreatWhenNoEnergy,
+    passiveDamageTakenDelta,
+    passiveDamageDealtDelta,
+    hasLockItemsPassive,
+    hasLockAbilitiesPassive,
+    protectsBenchFromDamage,
     hasAbilityFlag,
   }
 
@@ -290,6 +409,9 @@ const NAME_SYNONYMS: Record<string, string> = {
   'arven': 'sv01-166',
   'attrape riposte': 'sv04-160',
   'counter catcher': 'sv04-160',
+  'attrape ultime': 'sv05-157',
+  'attrape supreme': 'sv05-157',
+  'prime catcher': 'sv05-157',
   'mew ex': '30th-066',
 }
 
@@ -480,14 +602,38 @@ const cardFilterCache = new WeakMap<CardFilter, WeakMap<EngineCardModel, boolean
 
 const TYPE_ALIASES_MAP: Record<string, string[]> = {
   feu: ['fire', 'feu'],
+  fire: ['fire', 'feu'],
+  r: ['fire', 'feu'],
   plante: ['grass', 'plante'],
+  grass: ['grass', 'plante'],
+  g: ['grass', 'plante'],
   eau: ['water', 'eau'],
+  water: ['water', 'eau'],
+  w: ['water', 'eau'],
   electrique: ['lightning', 'electrik', 'electrique'],
+  electrik: ['lightning', 'electrik', 'electrique'],
+  lightning: ['lightning', 'electrik', 'electrique'],
+  l: ['lightning', 'electrik', 'electrique'],
   psy: ['psychic', 'psy'],
+  psychic: ['psychic', 'psy'],
+  p: ['psychic', 'psy'],
   combat: ['fighting', 'combat'],
+  fighting: ['fighting', 'combat'],
+  f: ['fighting', 'combat'],
   obscurite: ['darkness', 'obscurite'],
+  darkness: ['darkness', 'obscurite'],
+  dark: ['darkness', 'obscurite'],
+  d: ['darkness', 'obscurite'],
   metal: ['metal'],
+  m: ['metal'],
   fee: ['fairy', 'fee'],
+  fairy: ['fairy', 'fee'],
+  y: ['fairy', 'fee'],
+  dragon: ['dragon'],
+  n: ['dragon'],
+  incolore: ['colorless', 'incolore'],
+  colorless: ['colorless', 'incolore'],
+  c: ['colorless', 'incolore'],
 }
 
 function evaluateMatchesCardFilter(card: EngineCardModel, filter: CardFilter): boolean {
@@ -524,7 +670,8 @@ function evaluateMatchesCardFilter(card: EngineCardModel, filter: CardFilter): b
           }
         }
       } else if (card.pokemonStats) {
-        if (!meta.normPokeTypes.includes(reqType)) {
+        const targetAliases = TYPE_ALIASES_MAP[reqType] || [reqType]
+        if (!targetAliases.some((al) => meta.normPokeTypes.includes(al))) {
           return false
         }
       }
