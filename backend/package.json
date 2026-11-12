@@ -13,6 +13,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
+    "seed": "npm run seed:cards && npm run seed:meta-decks",
     "seed:cards": "tsx src/scripts/seedCards.ts",
     "seed:meta-decks": "tsx src/scripts/seedMetaDecks.ts",
     "test": "vitest run"
