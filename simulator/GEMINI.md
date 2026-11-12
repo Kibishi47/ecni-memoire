@@ -9,15 +9,16 @@ Ce document définit l'architecture, les conventions de développement, les inva
 1. **Commit systématique à chaque tâche terminée** :
    - Toujours effectuer un commit Git propre et atomique dès qu'une fonctionnalité, correction ou refactorisation est terminée et validée.
    - Utiliser des messages de commit clairs (ex. `feat: ...`, `fix: ...`, `refactor: ...`, `docs: ...`).
-   - Ne jamais commiter `simulator/src/data/cards_database.json` ni `dist/` ou `node_modules/` (ignorés dans `.gitignore`).
+   - Ne jamais réintroduire de base locale `simulator/src/data/cards_database.json` ni commiter `dist/` ou `node_modules/` (ignorés dans `.gitignore`).
 2. **Validation obligatoire avant tout commit** :
    ```bash
-   npm --prefix simulator run build   # Exécute sync-cards + vue-tsc + vite build
-   npm --prefix simulator run test    # Exécute sync-cards + vitest run (toutes les suites + benchmark 3-ply)
+   npm --prefix simulator run build   # Exécute vue-tsc + vite build
+   npm --prefix simulator run test    # Exécute vitest run (toutes les suites + benchmark 3-ply)
    ```
-3. **Commandes de développement** :
-   - `npm --prefix simulator run dev` : serveur Vite accessible sur le réseau local avec affichage d'un QR code terminal (`qrcode-terminal`) pour tester sur mobile (`?debug=true` active l'Inspecteur Debug et l'onglet Modèle IA dans le zoom carte).
-   - `npm --prefix simulator run sync-cards` : synchronise et normalise `card-compiler/data/cards_database.json` (3 509 cartes Standard) vers `simulator/src/data/cards_database.json`.
+3. **Commandes de développement & configuration API** :
+   - `npm --prefix simulator run dev` : serveur Vite accessible sur le réseau local avec proxy `/api` et `/health` vers le backend Fastify (`VITE_API_PROXY_TARGET`, défaut `http://localhost:3000`) et affichage d'un QR code terminal (`?debug=true` active l'Inspecteur Debug et l'onglet Modèle IA dans le zoom carte).
+   - `VITE_API_URL` (optionnel en build/prod, voir `.env.example` et `Dockerfile`) : URL de base du backend REST quand l'API n'est pas servie sur le même domaine.
+   - En tests unitaires (`vitest run`), `vitest.setup.ts` hydrate dynamiquement `UNIFIED_CARD_REGISTRY` depuis `../card-compiler/data/cards_database.json` afin d'isoler l'exécution sans bundler de JSON dans le client.
 
 ---
 
@@ -28,11 +29,11 @@ Ce document définit l'architecture, les conventions de développement, les inva
   - `ActionType` : `'PLAY_FROM_HAND' | 'EVOLVE' | 'USE_ABILITY' | 'TRIGGERED_ABILITY' | 'PASSIVE_ABILITY' | 'ATTACH_ENERGY' | 'RETREAT' | 'ATTACK'`.
   - `EffectPrimitive` : 29 primitives strictes (aucune conversion silencieuse autorisée).
   - Typage fort de `CoinFlipMode`, `ScalingOperator`, `ScalingMetric`, `EffectTarget`, `EffectZoneType` et `SpecialConditionType`.
-- **`scripts/syncCardDatabase.mjs` & `src/data/cardNormalizer.ts`** :
-  - Normalisent les modèles compilés sans perte de champs (`sourceZone`, `destinationZone`, `zone`, `specialCondition`, `coinFlipMode`, `coinCount`, `scalingOperator`, `scalingMetric`, `bonusValue`, `preconditions`).
+- **`src/data/cardNormalizer.ts` & `src/services/apiClient.ts`** :
+  - Client REST typé (`fetchMetaDecks`, `searchCatalogCards`, `fetchCardsBatch`, `resolveCardsFromApi`, `fetchAlternativesFromApi`, `submitBugReport`) normalisant à la volée les `EngineCardModel` reçus du backend sans perte de champs (`sourceZone`, `destinationZone`, `zone`, `specialCondition`, `coinFlipMode`, `coinCount`, `scalingOperator`, `scalingMetric`, `bonusValue`, `preconditions`).
   - **Invariant critique** : ne jamais convertir une primitive inconnue vers `DRAW_CARDS` ou un autre effet par défaut ; les primitives réellement inconnues doivent être filtrées/rejetées proprement.
 - **`src/data/cardCatalog.ts` & `src/core/filterDsl.ts`** :
-  - Catalogue unifié `UNIFIED_CARD_REGISTRY` alimenté uniquement par `cards_database.json` + énergies de base natives (`src/utils/energy.ts`).
+  - Catalogue dynamique `UNIFIED_CARD_REGISTRY` hydraté à la demande via `registerCompiledCard` / `registerCompiledCards` / `registerCardIdAlias` (plus énergies de base natives `src/utils/energy.ts`). Aucune base JSON locale n'est embarquée dans le bundle navigateur ou les Web Workers.
   - `getCardFastMeta(card)` pré-calcule en `WeakMap` O(1) les drapeaux tactiques (`numericId`, `energyUnitKind`, `expandsBenchToEight`, `hasLockItemsPassive`, `hasLockAbilitiesPassive`, `protectsBenchFromDamage`, `hasFairyZonePassive`, `hasOnPlayFromHandTrigger`, `hasAbilityFlag`, etc.).
 
 ### Moteur de Règles & Hachage Rapide
@@ -60,9 +61,9 @@ Ce document définit l'architecture, les conventions de développement, les inva
 
 ### Parseur PTCGL, i18n & Interface UI
 - **`src/utils/ptcglParser.ts` & `src/utils/ptcglExporter.ts`** :
-  - Import/export PTCGL et validation réglementaire : 60 cartes, au moins 1 Pokémon de Base, 100 % résolues dans `cards_database.json`, légalité Standard (G, H, I + Énergies de base), max 1 ACE SPEC, max 1 Pokémon Radieux, max 4 exemplaires par nom (hors Énergies de base).
-- **`src/utils/i18n.ts`, `src/utils/debugModelHelper.ts`, `src/utils/cardImage.ts`** :
-  - Support complet Français / Anglais (interface, noms de cartes, effets et lecteur lisible du modèle IA dans `CardZoomModal.vue` sans champs `null`).
+  - Import/export PTCGL (`parsePtcglDecklistWithApi` + `POST /api/cards/resolve`) et validation réglementaire : 60 cartes, au moins 1 Pokémon de Base, 100 % résolues dans le catalogue API, légalité Standard (G, H, I + Énergies de base), max 1 ACE SPEC, max 1 Pokémon Radieux, max 4 exemplaires par nom (hors Énergies de base).
+- **`src/services/metaDeckAdapter.ts`, `src/services/useBugReport.ts`, `src/utils/i18n.ts`, `src/utils/debugModelHelper.ts`, `src/utils/cardImage.ts`** :
+  - Mapping des decks adverses depuis `GET /api/decks/meta`, recherche catalogue (`GET /api/cards`), alternatives (`POST /api/cards/alternatives`), signalements de bugs (`POST /api/reports`), support complet Français / Anglais et lecteur lisible du modèle IA dans `CardZoomModal.vue` sans champs `null`.
 - **`src/App.vue` & `src/components/*.vue`** :
   - Wizard 3 étapes (`Step1DeckImport.vue`, `Step2SimConfig.vue`, `Step3DashboardAndComparator.vue`), historique complet des versions du deck, export PTCGL direct de la version active, `CardZoomModal.vue`, `DebugInspectorPanel.vue`.
 - **`Dockerfile` & `nginx.conf`** :

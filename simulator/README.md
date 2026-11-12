@@ -4,7 +4,7 @@ Simulateur complet de Pokémon TCG unifiant :
 - **Design Wizard & Comparateur A/B ("Clean Light Mode" éditorial)** des `poc-1` et `poc-2` (`bg-slate-50`, `bg-white`, `border-slate-200`, `Inter` + `font-mono`).
 - **Exécution multi-threads par Pool de Web Workers** & **PRNG déterministe Mulberry32** du `poc-4`.
 - **Parseur & Exporteur PTCGL (`tcgdex`)** du `poc-5`.
-- **Modèles déclaratifs `EngineCardModel`** (`identity`, `pokemonStats`, `playableActions`, `strategicEvaluator`) issus de `cards_database.json` + `fallbackCardModels.ts`.
+- **Modèles déclaratifs `EngineCardModel`** (`identity`, `pokemonStats`, `playableActions`, `strategicEvaluator`) chargés à la demande depuis l'API backend (sans aucune base JSON locale embarquée).
 
 ## Architecture Cœur
 
