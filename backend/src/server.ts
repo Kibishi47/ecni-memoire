@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import compress from '@fastify/compress'
 import cors from '@fastify/cors'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
@@ -28,6 +29,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   const app = Fastify({
     logger: options.logger ?? env.NODE_ENV !== 'test',
     trustProxy: true,
+  })
+
+  await app.register(compress, {
+    global: true,
+    threshold: 1024,
   })
 
   await app.register(cors, {
