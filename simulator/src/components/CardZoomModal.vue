@@ -13,6 +13,7 @@ import {
   getHumanReadableTimingPhase,
 } from '../utils/debugModelHelper'
 import { useI18n } from '../utils/i18n'
+import { useBugReport } from '../services/useBugReport'
 
 const props = withDefaults(
   defineProps<{
@@ -34,14 +35,28 @@ const { t, currentLang, getLocalizedCardName, getLocalizedSubCategory, getLocali
 type ModalTab = 'rules' | 'model'
 const activeTab = ref<ModalTab>('rules')
 const showRawJson = ref(false)
+const bugReport = useBugReport()
 
 watch(
   () => props.card,
   () => {
     activeTab.value = 'rules'
     showRawJson.value = false
+    bugReport.reset()
   },
 )
+
+function submitCardIssue() {
+  const resolvedId =
+    cardModel.value?.cardId ||
+    (props.card && 'cardId' in props.card ? props.card.cardId : '')
+  if (!resolvedId) return
+  void bugReport.submit({
+    type: 'CARD_MODEL_ERROR',
+    cardId: resolvedId,
+    matchLogs: null,
+  })
+}
 
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.isOpen) {
@@ -418,8 +433,76 @@ function getActionBadgeClass(type: string): string {
           </div>
         </div>
 
-        <!-- Bouton Fermer inférieur -->
-        <div class="mt-6 border-t border-slate-800 pt-4">
+        <!-- Bouton Signalement & Bouton Fermer inférieur -->
+        <div class="mt-6 space-y-3 border-t border-slate-800 pt-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              @click="bugReport.togglePanel()"
+              class="rounded-lg border border-rose-500/40 bg-rose-950/40 px-3 py-1.5 text-xs font-semibold text-rose-200 transition hover:bg-rose-900/50"
+            >
+              {{ t('reportCardIssueBtn') }}
+            </button>
+          </div>
+
+          <div
+            v-if="bugReport.isPanelOpen.value"
+            class="space-y-2.5 rounded-xl border border-slate-700 bg-slate-950/90 p-3.5 text-xs"
+          >
+            <div class="font-bold text-slate-200">
+              {{ t('reportTitleCard', { cardId: cardModel?.cardId || (card && 'cardId' in card ? card.cardId : '') }) }}
+            </div>
+
+            <textarea
+              v-model="bugReport.comment.value"
+              rows="3"
+              maxlength="1000"
+              :placeholder="t('reportCommentPlaceholder')"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
+            ></textarea>
+
+            <div
+              v-if="bugReport.error.value"
+              class="rounded-lg border border-rose-500/50 bg-rose-950/60 px-2.5 py-1.5 text-xs text-rose-200"
+            >
+              {{ bugReport.error.value }}
+            </div>
+
+            <div
+              v-if="bugReport.successResult.value"
+              class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/50 bg-emerald-950/60 px-2.5 py-1.5 text-xs text-emerald-200"
+            >
+              <span>{{ t('reportSuccessMsg', { id: bugReport.successResult.value.reportId }) }}</span>
+              <a
+                v-if="bugReport.successResult.value.issueUrl"
+                :href="bugReport.successResult.value.issueUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-bold underline hover:text-emerald-100"
+              >
+                {{ t('reportIssueLink') }}
+              </a>
+            </div>
+
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                @click="bugReport.togglePanel()"
+                class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+              >
+                {{ t('reportCancelBtn') }}
+              </button>
+              <button
+                type="button"
+                :disabled="bugReport.isSubmitting.value"
+                @click="submitCardIssue"
+                class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 disabled:opacity-50"
+              >
+                {{ bugReport.isSubmitting.value ? t('reportSubmitting') : t('reportSubmitBtn') }}
+              </button>
+            </div>
+          </div>
+
           <button
             type="button"
             @click="emit('close')"
