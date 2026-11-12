@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { SimulationConfig } from '../types/simulator'
-import type { ParsedDeck } from '../types/deck'
+import type { MetaOpponentDeck, ParsedDeck } from '../types/deck'
 import type { MaxBranchesSetting } from '../core/evaluator'
-import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { useI18n } from '../utils/i18n'
 
 const props = defineProps<{
@@ -11,6 +10,9 @@ const props = defineProps<{
   deck: ParsedDeck
   isDebugMode: boolean
   maxHardwareWorkers: number
+  metaOpponents: MetaOpponentDeck[]
+  metaLoading?: boolean
+  metaError?: string | null
   isSimulating?: boolean
   progressPercent?: number
 }>()
@@ -20,6 +22,7 @@ const emit = defineEmits<{
   (e: 'back-step1'): void
   (e: 'launch-simulation'): void
   (e: 'cancel-simulation'): void
+  (e: 'retry-meta-decks'): void
 }>()
 
 const { t, currentLang } = useI18n()
@@ -125,7 +128,7 @@ function toggleOpponent(oppId: string) {
 }
 
 function selectAllOpponents() {
-  patchConfig({ selectedOpponentIds: META_OPPONENT_DECKS.map((d) => d.id) })
+  patchConfig({ selectedOpponentIds: props.metaOpponents.map((d) => d.id) })
 }
 
 const launchButtonState = computed(() => {
@@ -348,9 +351,41 @@ const launchButtonState = computed(() => {
         </button>
       </div>
 
-      <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div
+        v-if="metaLoading"
+        class="mt-4 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-5 text-xs font-medium text-slate-600"
+      >
+        <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-700 border-t-transparent"></span>
+        <span>{{ t('loadingMetaDecks') }}</span>
+      </div>
+
+      <div
+        v-else-if="metaError"
+        class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-xs text-red-900"
+      >
+        <div>
+          <div class="font-bold">{{ t('metaDecksErrorTitle') }}</div>
+          <div class="mt-0.5 text-red-800">{{ metaError }}</div>
+        </div>
+        <button
+          type="button"
+          @click="emit('retry-meta-decks')"
+          class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-900 shadow-2xs hover:bg-red-100"
+        >
+          {{ t('retryButton') }}
+        </button>
+      </div>
+
+      <div
+        v-else-if="metaOpponents.length === 0"
+        class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"
+      >
+        {{ t('noMetaDecksAvailable') }}
+      </div>
+
+      <div v-else class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div
-          v-for="opp in META_OPPONENT_DECKS"
+          v-for="opp in metaOpponents"
           :key="opp.id"
           @click="toggleOpponent(opp.id)"
           class="group relative flex cursor-pointer flex-col justify-between rounded-xl border p-5 transition"

@@ -11,6 +11,7 @@ import { inferFormat, isCardLine, isSectionLine, isTotalLine, splitCardTokens } 
 import { detectBasicEnergy, isEnergyCardName } from './energy'
 import { lookupSetMapping } from '../data/ptcglSetMapping'
 import { hasCompiledCardData, matchesCardFilter, normalizeCardNameForMatch, resolveCardModel } from '../data/cardCatalog'
+import { resolveCardsFromApi, type ResolveCardItemInput } from '../services/apiClient'
 
 export function padLocalNumber(rawNumber: string): string {
   const trimmed = rawNumber.trim()
@@ -161,7 +162,7 @@ export function buildDeckEntryFromTokens(input: {
   const isResolved = source === 'compiled_db' || source === 'native_basic_energy'
   const unresolvedReason = isResolved
     ? undefined
-    : `Modèle compilé introuvable pour "${input.rawName}" (${cardId}) dans cards_database.json`
+    : `Modèle compilé introuvable pour "${input.rawName}" (${cardId}) dans le catalogue API`
 
   return {
     uid: `${cardId}_${input.line}`,
@@ -407,11 +408,11 @@ export function computeDeckSummary(
   }
   if (!isDatabaseLoaded) {
     warnings.push({
-      message: `Simulation impossible : la base de données cards_database.json ne contient aucune carte compilée. Synchronisez les modèles de cartes pour autoriser le lancement.`,
+      message: `Simulation impossible : aucun modèle de carte n'a encore été chargé depuis l'API. Veuillez valider le deck pour résoudre les cartes.`,
     })
   } else if (!isFullyResolved) {
     warnings.push({
-      message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans la base de données cards_database.json.`,
+      message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans le catalogue API.`,
     })
   }
 
@@ -501,4 +502,55 @@ export function computeDeckSummary(
     copyLimitViolations,
     isStandardLegal,
   }
+}
+
+/**
+ * Extrait les entrées non encore résolues d'un deck parsé pour les envoyer vers `POST /api/cards/resolve`.
+ */
+export function extractUnresolvedResolveItems(parsedDeck: ParsedDeck): ResolveCardItemInput[] {
+  const byKey = new Map<string, ResolveCardItemInput>()
+  for (const entry of parsedDeck.unresolvedCards) {
+    const key = entry.cardId
+    if (byKey.has(key)) continue
+    const lastDash = entry.cardId.lastIndexOf('-')
+    const normalizedSetId =
+      lastDash > 0 ? entry.cardId.slice(0, lastDash) : entry.setCode.trim().toLowerCase()
+    const rawSetLower = entry.setCode.trim().toLowerCase()
+    const padded = padLocalNumber(entry.number)
+    const stripped = stripLeadingZeros(entry.number)
+    const candidateIds = Array.from(
+      new Set([
+        entry.cardId,
+        `${normalizedSetId}-${stripped}`,
+        `${normalizedSetId}-${padded}`,
+        ...(rawSetLower ? [`${rawSetLower}-${stripped}`, `${rawSetLower}-${padded}`] : []),
+      ]),
+    )
+    byKey.set(key, {
+      key,
+      candidateIds,
+      ...(entry.name ? { name: entry.name } : {}),
+    })
+  }
+  return Array.from(byKey.values())
+}
+
+/**
+ * Version asynchrone de `parsePtcglDecklist` qui résout d'abord les cartes inconnues
+ * via `POST /api/cards/resolve`, hydrate le registre local puis recalcule le deck complet.
+ */
+export async function parsePtcglDecklistWithApi(
+  text: string,
+  signal?: AbortSignal,
+): Promise<ParsedDeck> {
+  const initialParsed = parsePtcglDecklist(text)
+  if (!text.trim() || initialParsed.unresolvedCards.length === 0) {
+    return initialParsed
+  }
+  const items = extractUnresolvedResolveItems(initialParsed)
+  if (items.length === 0) {
+    return initialParsed
+  }
+  await resolveCardsFromApi(items, signal)
+  return parsePtcglDecklist(text)
 }
