@@ -33,6 +33,16 @@ export default defineConfig({
   plugins: [vue(), qrcodeMobilePlugin()],
   server: {
     host: true,
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
   },
   resolve: {
     alias: {

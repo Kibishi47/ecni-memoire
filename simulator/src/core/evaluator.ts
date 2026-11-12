@@ -16,6 +16,7 @@ import {
   canPayEnergyCost,
   canPokemonAttackTwice,
   computeAttackDamageToActive,
+  endTurnAndAdvance,
   fastCloneState,
   getActiveBoard,
   getEffectiveAttackCost,
@@ -1202,6 +1203,46 @@ function fastGreedySingleTurnRollout(
 
     if (bestAction.endsTurnImmediately) {
       break
+    }
+  }
+
+  // Si la boucle greedy a consommé maxActions en Phase Principale sans encore déclarer d'attaque,
+  // exécuter la meilleure attaque légale disponible, sinon clore explicitement le tour.
+  if (state.winner === null && state.activePlayerIndex === actingPlayerIdx) {
+    const postLoopActions = getLegalActions(state)
+    const attackActions = postLoopActions.filter((a) => a.type === 'DECLARE_ATTACK')
+    let attacked = false
+    if (attackActions.length > 0) {
+      let bestAttack = attackActions[0]!
+      let bestAttackScore = scoreAtomicActionHeuristic(state, bestAttack)
+      for (let i = 1; i < attackActions.length; i++) {
+        const atk = attackActions[i]!
+        const s = scoreAtomicActionHeuristic(state, atk)
+        if (s > bestAttackScore) {
+          bestAttackScore = s
+          bestAttack = atk
+        }
+      }
+      const passAct = postLoopActions.find((a) => a.type === 'PASS_TURN')
+      const passScore = passAct ? scoreAtomicActionHeuristic(state, passAct) : 0
+      if (bestAttackScore > passScore) {
+        applyAction(state, bestAttack, false, true)
+        if (needActionsList) {
+          actionsTaken.push(bestAttack)
+        }
+        attacked = true
+      }
+    }
+    if (!attacked && state.winner === null && state.activePlayerIndex === actingPlayerIdx) {
+      const passAct = postLoopActions.find((a) => a.type === 'PASS_TURN')
+      if (passAct) {
+        applyAction(state, passAct, false, true)
+        if (needActionsList) {
+          actionsTaken.push(passAct)
+        }
+      } else {
+        endTurnAndAdvance(state)
+      }
     }
   }
 

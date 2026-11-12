@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, toRaw } from 'vue'
 import type { EngineCardModel } from './types/cardModel'
-import type { ParsedDeck, ParsedDeckEntry } from './types/deck'
-import type { SimulationConfig, SimulationMetricsSummary } from './types/simulator'
-import { META_OPPONENT_DECKS } from './data/metaDecks'
+import type { MetaOpponentDeck, ParsedDeck, ParsedDeckEntry } from './types/deck'
+import type {
+  SimulationConfig,
+  SimulationMetricsSummary,
+} from './types/simulator'
+import type { OpponentDeckDescriptor } from './core/gameLoop'
+import { fetchMetaDecks } from './services/apiClient'
+import { mapApiMetaDecks } from './services/metaDeckAdapter'
 import {
   buildDeckEntryFromModel,
   computeDeckSummary,
   parsePtcglDecklist,
+  parsePtcglDecklistWithApi,
 } from './utils/ptcglParser'
 import { SimulationWorkerPool } from './worker/workerPool'
 import { useI18n } from './utils/i18n'
@@ -37,11 +43,18 @@ const editableDeck = ref<ParsedDeck>(parsePtcglDecklist(''))
 const deckVersions = ref<DeckVersionEntry[]>([])
 const activeVersionId = ref<string>('')
 
+const metaOpponents = ref<MetaOpponentDeck[]>([])
+const metaOpponentDescriptors = ref<OpponentDeckDescriptor[]>([])
+const metaLoading = ref<boolean>(false)
+const metaError = ref<string | null>(null)
+const isResolvingDeck = ref<boolean>(false)
+const deckResolveError = ref<string | null>(null)
+
 const simConfig = ref<SimulationConfig>({
   iterations: 300,
   maxTurns: 15,
   maxBranches: 20,
-  selectedOpponentIds: META_OPPONENT_DECKS.map((d) => d.id),
+  selectedOpponentIds: [],
   firstPlayerMode: 'RANDOM',
   debugMode: false,
   workerCount: Math.min(4, maxHardwareWorkers),
@@ -94,8 +107,28 @@ function detectDebugModeFromUrl() {
   simConfig.value.debugMode = debugActive
 }
 
+async function loadMetaDecks() {
+  metaLoading.value = true
+  metaError.value = null
+  try {
+    const apiDecks = await fetchMetaDecks()
+    const mapped = mapApiMetaDecks(apiDecks)
+    metaOpponents.value = mapped.map((m) => m.metaDeck)
+    metaOpponentDescriptors.value = mapped.map((m) => m.descriptor)
+    const availableIds = new Set(metaOpponents.value.map((d) => d.id))
+    const preserved = simConfig.value.selectedOpponentIds.filter((id) => availableIds.has(id))
+    simConfig.value.selectedOpponentIds =
+      preserved.length > 0 ? preserved : metaOpponents.value.map((d) => d.id)
+  } catch (err) {
+    metaError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    metaLoading.value = false
+  }
+}
+
 onMounted(() => {
   detectDebugModeFromUrl()
+  void loadMetaDecks()
   if (typeof window !== 'undefined') {
     window.addEventListener('popstate', detectDebugModeFromUrl)
   }
@@ -116,25 +149,41 @@ const canGoStep2 = computed(
 )
 const canGoStep3 = computed(() => currentSummary.value !== null || isSimulating.value)
 
-function handleValidateDeck(newRawText: string) {
-  rawDeckText.value = newRawText
-  const parsed = parsePtcglDecklist(newRawText)
-  baselineDeck.value = parsed
-  editableDeck.value = parsePtcglDecklist(newRawText)
-  baselineSummary.value = null
-  currentSummary.value = null
+let resolveDeckSeq = 0
 
-  const v1: DeckVersionEntry = {
-    id: 'v1',
-    versionNumber: 1,
-    label: 'Version 1 (Initiale)',
-    deck: parsePtcglDecklist(newRawText),
-    summary: null,
-    timestamp: Date.now(),
-    isBaseline: true,
+async function handleValidateDeck(newRawText: string) {
+  rawDeckText.value = newRawText
+  deckResolveError.value = null
+  isResolvingDeck.value = true
+  const seq = ++resolveDeckSeq
+
+  try {
+    const parsed = await parsePtcglDecklistWithApi(newRawText)
+    if (seq !== resolveDeckSeq) return
+    baselineDeck.value = parsed
+    editableDeck.value = parsePtcglDecklist(newRawText)
+    baselineSummary.value = null
+    currentSummary.value = null
+
+    const v1: DeckVersionEntry = {
+      id: 'v1',
+      versionNumber: 1,
+      label: 'Version 1 (Initiale)',
+      deck: parsePtcglDecklist(newRawText),
+      summary: null,
+      timestamp: Date.now(),
+      isBaseline: true,
+    }
+    deckVersions.value = [v1]
+    activeVersionId.value = 'v1'
+  } catch (err) {
+    if (seq !== resolveDeckSeq) return
+    deckResolveError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    if (seq === resolveDeckSeq) {
+      isResolvingDeck.value = false
+    }
   }
-  deckVersions.value = [v1]
-  activeVersionId.value = 'v1'
 }
 
 function handleSelectStep(step: 1 | 2 | 3) {
@@ -160,8 +209,15 @@ async function executeInitialSimulation() {
   progressElapsedMs.value = 0
 
   try {
+    if (metaOpponentDescriptors.value.length === 0) {
+      await loadMetaDecks()
+    }
+    if (metaError.value || metaOpponentDescriptors.value.length === 0) {
+      throw new Error(metaError.value || t('noMetaDecksAvailable'))
+    }
     const rawDeck = toRaw(baselineDeck.value)
     const rawConfig = toRaw(simConfig.value)
+    const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
       JSON.parse(JSON.stringify(rawConfig)),
@@ -170,6 +226,7 @@ async function executeInitialSimulation() {
         progressTotal.value = total
         progressElapsedMs.value = elapsed
       },
+      JSON.parse(JSON.stringify(rawOpponents)),
     )
     baselineSummary.value = summary
     currentSummary.value = summary
@@ -241,8 +298,15 @@ async function executeComparisonSimulation() {
   progressElapsedMs.value = 0
 
   try {
+    if (metaOpponentDescriptors.value.length === 0) {
+      await loadMetaDecks()
+    }
+    if (metaError.value || metaOpponentDescriptors.value.length === 0) {
+      throw new Error(metaError.value || t('noMetaDecksAvailable'))
+    }
     const rawDeck = toRaw(editableDeck.value)
     const rawConfig = toRaw(simConfig.value)
+    const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
       JSON.parse(JSON.stringify(rawConfig)),
@@ -251,6 +315,7 @@ async function executeComparisonSimulation() {
         progressTotal.value = total
         progressElapsedMs.value = elapsed
       },
+      JSON.parse(JSON.stringify(rawOpponents)),
     )
     if (!baselineSummary.value) {
       baselineSummary.value = summary
@@ -509,6 +574,8 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :raw-deck-text="rawDeckText"
         :validated-deck="baselineDeck"
         :is-debug-mode="isDebugMode"
+        :is-resolving="isResolvingDeck"
+        :resolve-error="deckResolveError"
         @validate-deck="handleValidateDeck"
         @proceed-step2="currentStep = 2"
       />
@@ -519,12 +586,16 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :deck="baselineDeck"
         :is-debug-mode="isDebugMode"
         :max-hardware-workers="maxHardwareWorkers"
+        :meta-opponents="metaOpponents"
+        :meta-loading="metaLoading"
+        :meta-error="metaError"
         :is-simulating="isSimulating"
         :progress-percent="progressPercent"
         @update-config="handleUpdateConfig"
         @back-step1="currentStep = 1"
         @launch-simulation="executeInitialSimulation"
         @cancel-simulation="handleCancelSimulation"
+        @retry-meta-decks="loadMetaDecks"
       />
 
       <Step3DashboardAndComparator

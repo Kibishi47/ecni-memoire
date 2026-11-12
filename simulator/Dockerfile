@@ -12,7 +12,11 @@ RUN npm ci
 # Copie du code source complet du simulateur
 COPY . .
 
-# Synchronisation des cartes et compilation de production
+# URL publique du backend injectee au moment du build Vite (vide = meme origine / proxy)
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+
+# Compilation de production (catalogue charge dynamiquement via l'API backend)
 RUN npm run build
 
 # ==============================================================================

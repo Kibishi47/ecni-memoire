@@ -1,10 +1,9 @@
 /**
- * Table de résolution et catalogue unifié des cartes (`cardCatalog.ts`).
- * Chargeur universel supportant Array (EngineCardModel[]) et Record ({ cards: { ... } }),
- * avec normalisation déterministe, alias d'extensions et résolution intelligente.
+ * Table de résolution et catalogue dynamique des cartes (`cardCatalog.ts`).
+ * Registre en mémoire alimenté à la volée par l'API backend (ou par le setup Vitest en tests),
+ * avec normalisation déterministe v2, alias d'extensions et résolution intelligente.
  */
 
-import rawDatabase from './cards_database.json'
 import type {
   CardCategory,
   CardFilter,
@@ -14,23 +13,7 @@ import type {
 import { normalizeCardModel } from './cardNormalizer'
 import { BASIC_ENERGIES, createNativeBasicEnergyModel, detectBasicEnergy, isEnergyCardName } from '../utils/energy'
 
-// Chargeur universel : gère aussi bien un tableau JSON qu'un objet avec clé `cards`
-const rawList: any[] = Array.isArray(rawDatabase)
-  ? (rawDatabase as any[])
-  : rawDatabase && typeof rawDatabase === 'object' && 'cards' in rawDatabase && (rawDatabase as any).cards
-  ? Object.values((rawDatabase as any).cards)
-  : []
-
 const compiledCards: Record<string, EngineCardModel> = {}
-
-for (const rawCard of rawList) {
-  try {
-    const normalized = normalizeCardModel(rawCard)
-    compiledCards[normalized.cardId] = normalized
-  } catch (err) {
-    console.warn(`[cardCatalog] Impossible de normaliser la carte:`, err)
-  }
-}
 
 export function getCompiledCardsCount(): number {
   return Object.keys(compiledCards).length
@@ -389,13 +372,11 @@ export function getCardFastMeta(card: EngineCardModel): CardFastMeta {
   return meta
 }
 
-// Catalogue consolidé : la SEULE source de vérité autorisée est `cards_database.json`
-export const UNIFIED_CARD_REGISTRY: Record<string, EngineCardModel> = {
-  ...compiledCards,
-}
+// Catalogue dynamique alimenté par l'API (ou le setup Vitest en mode test)
+export const UNIFIED_CARD_REGISTRY: Record<string, EngineCardModel> = compiledCards
 
-// Alias d'identifiants fréquents vers les modèles compilés de cards_database.json
-const CARD_ID_ALIASES: Record<string, string> = {
+// Alias d'identifiants fréquents vers les modèles compilés du catalogue
+export const CARD_ID_ALIASES: Record<string, string> = {
   'sv01-191': 'sv04-125', // Super Bonbon SVI 191 -> Modèle compilé sv04-125
   'svp-056': 'sv03-125', // Dracaufeu-ex Promo -> sv03-125
   'sv04.5-054': 'sv03-125', // Dracaufeu-ex PAF -> sv03-125
@@ -408,19 +389,8 @@ const CARD_ID_ALIASES: Record<string, string> = {
 
 const byNormalizedName = new Map<string, { model: EngineCardModel; source: 'compiled_db' }>()
 
-for (const model of Object.values(compiledCards)) {
-  const normFr = normalizeCardNameForMatch(model.identity.nameFr)
-  byNormalizedName.set(normFr, { model, source: 'compiled_db' })
-  if (model.identity.nameEn) {
-    byNormalizedName.set(normalizeCardNameForMatch(model.identity.nameEn), {
-      model,
-      source: 'compiled_db',
-    })
-  }
-}
-
 // Synonymes bilingues courants ciblant les modèles compilés
-const NAME_SYNONYMS: Record<string, string> = {
+export const NAME_SYNONYMS: Record<string, string> = {
   'poffin pote pote': 'sv05-144',
   'poffin copain copain': 'sv05-144',
   'buddy buddy poffin': 'sv05-144',
@@ -450,6 +420,66 @@ const NAME_SYNONYMS: Record<string, string> = {
   'mew ex': '30th-066',
 }
 
+/**
+ * Normalise et enregistre un modèle de carte brut dans le registre mémoire dynamique.
+ */
+export function registerCompiledCard(rawCard: unknown): EngineCardModel | null {
+  if (!rawCard || typeof rawCard !== 'object') return null
+  try {
+    const normalized = normalizeCardModel(rawCard)
+    compiledCards[normalized.cardId] = normalized
+    const normFr = normalizeCardNameForMatch(normalized.identity.nameFr)
+    if (normFr) {
+      byNormalizedName.set(normFr, { model: normalized, source: 'compiled_db' })
+    }
+    if (normalized.identity.nameEn) {
+      const normEn = normalizeCardNameForMatch(normalized.identity.nameEn)
+      if (normEn) {
+        byNormalizedName.set(normEn, { model: normalized, source: 'compiled_db' })
+      }
+    }
+    return normalized
+  } catch (err) {
+    console.warn('[cardCatalog] Impossible de normaliser la carte reçue:', err)
+    return null
+  }
+}
+
+/**
+ * Normalise et enregistre un lot de modèles de cartes dans le registre mémoire dynamique.
+ */
+export function registerCompiledCards(rawCards: unknown[]): EngineCardModel[] {
+  const registered: EngineCardModel[] = []
+  for (const rawCard of rawCards) {
+    const model = registerCompiledCard(rawCard)
+    if (model) {
+      registered.push(model)
+    }
+  }
+  return registered
+}
+
+/**
+ * Enregistre un alias d'identifiant (ex. réédition ou clé de requête API) vers un cardId canonique.
+ */
+export function registerCardIdAlias(aliasId: string, canonicalCardId: string): void {
+  const trimmedAlias = aliasId.trim()
+  const trimmedCanonical = canonicalCardId.trim()
+  if (trimmedAlias && trimmedCanonical && trimmedAlias !== trimmedCanonical) {
+    CARD_ID_ALIASES[trimmedAlias] = trimmedCanonical
+  }
+}
+
+/**
+ * Réinitialise le registre dynamique (utile pour les tests unitaires).
+ */
+export function clearCompiledCards(): void {
+  for (const key of Object.keys(compiledCards)) {
+    delete compiledCards[key]
+  }
+  byNormalizedName.clear()
+}
+
 export function resolveCardModel(params: {
   cardId: string
   unpaddedCardId?: string
@@ -465,7 +495,7 @@ export function resolveCardModel(params: {
 } {
   const { cardId, unpaddedCardId, rawName } = params
 
-  // 1. Exception native absolue pour les Énergies de Base (pas besoin d'être dans cards_database.json)
+  // 1. Exception native absolue pour les Énergies de Base (pas besoin d'appel API)
   const basicEnergy = detectBasicEnergy(rawName, params.localId)
   if (basicEnergy || (params.categoryHint === 'energy' && detectBasicEnergy(rawName))) {
     const nativeModel = compiledCards[cardId]
@@ -474,23 +504,26 @@ export function resolveCardModel(params: {
     return { model: nativeModel, source: 'native_basic_energy' }
   }
 
-  // 2. Correspondance directe par ID dans `cards_database.json`
+  // 2. Correspondance directe par ID ou ID non-paddé dans le registre
   if (compiledCards[cardId]) {
     return { model: structuredClone(compiledCards[cardId]!), source: 'compiled_db' }
+  }
+  if (unpaddedCardId && compiledCards[unpaddedCardId]) {
+    return { model: structuredClone(compiledCards[unpaddedCardId]!), source: 'compiled_db' }
   }
   const aliasedId = CARD_ID_ALIASES[cardId] || (unpaddedCardId ? CARD_ID_ALIASES[unpaddedCardId] : undefined)
   if (aliasedId && compiledCards[aliasedId]) {
     return { model: structuredClone(compiledCards[aliasedId]!), source: 'compiled_db' }
   }
 
-  // 3. Recherche par synonyme direct dans cards_database.json
+  // 3. Recherche par synonyme direct dans le registre
   const normName = normalizeCardNameForMatch(rawName)
   const synTargetId = NAME_SYNONYMS[normName]
   if (synTargetId && compiledCards[synTargetId]) {
     return { model: structuredClone(compiledCards[synTargetId]!), source: 'compiled_db' }
   }
 
-  // 4. Recherche par nom FR / EN normalisé dans cards_database.json
+  // 4. Recherche par nom FR / EN normalisé dans le registre
   const byNameHit = byNormalizedName.get(normName)
   if (byNameHit) {
     return { model: structuredClone(byNameHit.model), source: 'compiled_db' }
