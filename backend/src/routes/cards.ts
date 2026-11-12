@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { z } from 'zod'
 import { getPool } from '../db/pool.js'
+import { AlternativesService, CardCatalogCache } from '../services/alternativesService.js'
 import {
   SQL_ACCENT_SOURCE,
   SQL_ACCENT_TARGET,
@@ -12,6 +13,8 @@ import { parseWithZod } from './validation.js'
 
 export interface CardRouteOptions {
   pool?: Pool
+  catalogCache?: CardCatalogCache
+  alternativesService?: AlternativesService
 }
 
 const optionalTrimmedString = z
@@ -61,6 +64,15 @@ const resolveModeBSchema = z
 
 const resolveCardsBodySchema = z.union([resolveModeASchema, resolveModeBSchema])
 
+const alternativesBodySchema = z.object({
+  cardIds: z
+    .array(z.string().trim().min(1, 'Chaque cardId doit être une chaîne non vide').max(32))
+    .min(1, 'cardIds doit contenir au moins 1 identifiant')
+    .max(60, 'cardIds ne peut pas dépasser 60 identifiants par requête'),
+  excludeCardIds: z.array(z.string().trim().min(1).max(32)).max(120).optional(),
+  limitPerCard: z.coerce.number().int().min(1).max(30).default(10),
+})
+
 const cardIdParamsSchema = z.object({
   cardId: z.string().trim().min(1).max(32),
 })
@@ -89,6 +101,9 @@ export async function registerCardRoutes(
   options: CardRouteOptions = {},
 ): Promise<void> {
   const pool = options.pool ?? getPool()
+  const alternativesService =
+    options.alternativesService ??
+    new AlternativesService(options.catalogCache ?? new CardCatalogCache({ pool }))
 
   app.get('/api/cards', async (request, reply) => {
     const query = parseWithZod(searchCardsQuerySchema, request.query, reply)
@@ -198,6 +213,19 @@ export async function registerCardRoutes(
         : await resolvePtcglDeckText(pool, parsed.ptcglText)
 
     return reply.status(200).send(result)
+  })
+
+  app.post('/api/cards/alternatives', async (request, reply) => {
+    const parsed = parseWithZod(alternativesBodySchema, request.body, reply)
+    if (!parsed) return
+
+    const results = await alternativesService.findAlternativesForCards({
+      cardIds: parsed.cardIds,
+      excludeCardIds: parsed.excludeCardIds,
+      limitPerCard: parsed.limitPerCard,
+    })
+
+    return reply.status(200).send({ results })
   })
 
   app.get('/api/cards/:cardId', async (request, reply) => {
