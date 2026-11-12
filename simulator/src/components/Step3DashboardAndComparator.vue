@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { EngineCardModel } from '../types/cardModel'
 import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
 import type {
@@ -7,11 +7,8 @@ import type {
   DeckCardContributionItem,
   SimulationMetricsSummary,
 } from '../types/simulator'
-import {
-  findAlternativesForCard,
-  type SmartAlternativeSuggestion,
-} from '../core/alternativesFinder'
-import { getAllCatalogModels, normalizeCardNameForMatch } from '../data/cardCatalog'
+import type { SmartAlternativeSuggestion } from '../core/alternativesFinder'
+import { ApiError, fetchAlternativesFromApi, searchCatalogCards } from '../services/apiClient'
 import { exportDeckToPtcgl } from '../utils/ptcglExporter'
 import { getCardImageUrl } from '../utils/cardImage'
 import { useI18n } from '../utils/i18n'
@@ -68,26 +65,85 @@ type Step3Tab = 'overview' | 'detailed' | 'audit'
 const activeTab = ref<Step3Tab>('overview')
 
 const catalogSearchQuery = ref('')
+const searchResults = ref<EngineCardModel[]>([])
+const searchTotal = ref(0)
+const searchLoading = ref(false)
+const searchError = ref<string | null>(null)
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let searchAbortController: AbortController | null = null
+
 const showExportModal = ref(false)
 const exportLang = ref<'fr' | 'en'>(currentLang.value)
 const copiedFeedback = ref(false)
 const replacedCardFeedback = ref<string | null>(null)
 const zoomedCard = ref<ParsedDeckEntry | EngineCardModel | null>(null)
 
-const allCatalogModels = getAllCatalogModels()
+async function executeCatalogSearch(query: string) {
+  if (searchAbortController) {
+    searchAbortController.abort()
+  }
+  const trimmed = query.trim()
+  if (trimmed.length < 2) {
+    searchResults.value = []
+    searchTotal.value = 0
+    searchLoading.value = false
+    searchError.value = null
+    return
+  }
 
-const filteredCatalogModels = computed<EngineCardModel[]>(() => {
-  const q = normalizeCardNameForMatch(catalogSearchQuery.value)
-  if (!q) return allCatalogModels.slice(0, 8)
-  return allCatalogModels
-    .filter((m) => {
-      const hay = normalizeCardNameForMatch(
-        `${m.identity.nameFr} ${m.identity.nameEn || ''} ${m.cardId} ${m.subCategory}`,
-      )
-      return hay.includes(q)
+  const controller = new AbortController()
+  searchAbortController = controller
+  searchLoading.value = true
+  searchError.value = null
+
+  try {
+    const res = await searchCatalogCards({
+      q: trimmed,
+      limit: 15,
+      offset: 0,
+      signal: controller.signal,
     })
-    .slice(0, 10)
+    if (searchAbortController !== controller) return
+    searchResults.value = res.items
+    searchTotal.value = res.total
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return
+    if (searchAbortController !== controller) return
+    searchResults.value = []
+    searchTotal.value = 0
+    searchError.value = err instanceof ApiError ? err.message : t('searchCatalogError')
+  } finally {
+    if (searchAbortController === controller) {
+      searchLoading.value = false
+    }
+  }
+}
+
+watch(catalogSearchQuery, (newVal) => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+  const trimmed = newVal.trim()
+  if (trimmed.length < 2) {
+    if (searchAbortController) {
+      searchAbortController.abort()
+      searchAbortController = null
+    }
+    searchResults.value = []
+    searchTotal.value = 0
+    searchLoading.value = false
+    searchError.value = null
+    return
+  }
+  searchLoading.value = true
+  searchError.value = null
+  searchDebounceTimer = setTimeout(() => {
+    void executeCatalogSearch(trimmed)
+  }, 260)
 })
+
+const filteredCatalogModels = computed<EngineCardModel[]>(() => searchResults.value)
 
 const progressPercent = computed(() => {
   if (props.progressTotal <= 0) return 0
@@ -171,10 +227,79 @@ const selectedCardEntry = computed<ParsedDeckEntry | null>(() => {
   )
 })
 
-// Alternatives suggérées pour la carte sélectionnée
+// Alternatives suggérées via POST /api/cards/alternatives (cache client par cardId)
+const alternativesByCardId = ref<Record<string, SmartAlternativeSuggestion[]>>({})
+const alternativesLoading = ref(false)
+const alternativesError = ref<string | null>(null)
+let alternativesAbortController: AbortController | null = null
+
+const deckUniqueCardIds = computed<string[]>(() => {
+  const seen = new Set<string>()
+  for (const entry of props.editableDeck.cards) {
+    if (entry.cardId) seen.add(entry.cardId)
+  }
+  return Array.from(seen).sort()
+})
+
+async function loadAlternativesForDeck(forceReload = false) {
+  const allIds = deckUniqueCardIds.value
+  const missingIds = forceReload
+    ? allIds
+    : allIds.filter((id) => !Object.prototype.hasOwnProperty.call(alternativesByCardId.value, id))
+
+  if (missingIds.length === 0) {
+    alternativesError.value = null
+    return
+  }
+
+  if (alternativesAbortController) {
+    alternativesAbortController.abort()
+  }
+  const controller = new AbortController()
+  alternativesAbortController = controller
+  alternativesLoading.value = true
+  alternativesError.value = null
+
+  try {
+    const res = await fetchAlternativesFromApi({
+      cardIds: missingIds,
+      limitPerCard: 10,
+      signal: controller.signal,
+    })
+    if (alternativesAbortController !== controller) return
+    const nextCache = { ...alternativesByCardId.value }
+    for (const id of missingIds) {
+      nextCache[id] = res[id] ?? []
+    }
+    alternativesByCardId.value = nextCache
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return
+    if (alternativesAbortController !== controller) return
+    alternativesError.value = err instanceof ApiError ? err.message : t('alternativesError')
+  } finally {
+    if (alternativesAbortController === controller) {
+      alternativesLoading.value = false
+    }
+  }
+}
+
+watch(
+  () => deckUniqueCardIds.value.join(','),
+  () => {
+    void loadAlternativesForDeck(false)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  if (searchAbortController) searchAbortController.abort()
+  if (alternativesAbortController) alternativesAbortController.abort()
+})
+
 const selectedCardAlternatives = computed<SmartAlternativeSuggestion[]>(() => {
   if (!selectedCardEntry.value) return []
-  return findAlternativesForCard(selectedCardEntry.value.model, allCatalogModels)
+  return alternativesByCardId.value[selectedCardEntry.value.cardId] ?? []
 })
 
 // Dictionnaire du nombre d'alternatives disponibles pour chaque carte du deck
@@ -182,8 +307,7 @@ const cardAlternativesCountMap = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   for (const entry of props.editableDeck.cards) {
     if (!map[entry.cardId]) {
-      const alts = findAlternativesForCard(entry.model, allCatalogModels)
-      map[entry.cardId] = alts.length
+      map[entry.cardId] = (alternativesByCardId.value[entry.cardId] ?? []).length
     }
   }
   return map
@@ -716,7 +840,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             </div>
           </div>
 
-          <!-- Recherche et ajout d'une nouvelle carte -->
+          <!-- Recherche et ajout d'une nouvelle carte (GET /api/cards) -->
           <div class="mt-4 border-t border-slate-100 pt-3">
             <input
               v-model="catalogSearchQuery"
@@ -725,7 +849,42 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               class="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-slate-900 focus:bg-white focus:outline-none"
             />
 
-            <div v-if="catalogSearchQuery.trim()" class="mt-2 max-h-40 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+            <div
+              v-if="catalogSearchQuery.trim().length === 1"
+              class="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500"
+            >
+              {{ t('searchCatalogPrompt') }}
+            </div>
+
+            <div
+              v-else-if="catalogSearchQuery.trim().length >= 2 && searchLoading"
+              class="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600"
+            >
+              <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-700 border-t-transparent"></span>
+              <span>{{ t('searchCatalogLoading') }}</span>
+            </div>
+
+            <div
+              v-else-if="catalogSearchQuery.trim().length >= 2 && searchError"
+              class="mt-2 flex items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+            >
+              <span class="truncate">{{ searchError }}</span>
+              <button
+                type="button"
+                @click="executeCatalogSearch(catalogSearchQuery)"
+                class="shrink-0 rounded border border-red-300 bg-white px-2 py-0.5 text-[11px] font-bold text-red-900 hover:bg-red-100"
+              >
+                {{ t('retryButton') }}
+              </button>
+            </div>
+
+            <div
+              v-else-if="catalogSearchQuery.trim().length >= 2 && filteredCatalogModels.length > 0"
+              class="mt-2 max-h-48 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white"
+            >
+              <div class="bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                {{ t('searchCatalogCount', { n: filteredCatalogModels.length, total: searchTotal }) }}
+              </div>
               <div
                 v-for="model in filteredCatalogModels"
                 :key="model.cardId"
@@ -800,8 +959,30 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             </div>
           </div>
 
-          <!-- Liste des alternatives recommandées (AFFICHE RIEN si aucune alternative selon la demande utilisateur) -->
-          <div v-if="selectedCardAlternatives.length > 0">
+          <!-- Liste des alternatives recommandées via API -->
+          <div
+            v-if="alternativesLoading && selectedCardAlternatives.length === 0"
+            class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600"
+          >
+            <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-700 border-t-transparent"></span>
+            <span>{{ t('alternativesLoading') }}</span>
+          </div>
+
+          <div
+            v-else-if="alternativesError && selectedCardAlternatives.length === 0"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-900"
+          >
+            <span>{{ alternativesError }}</span>
+            <button
+              type="button"
+              @click="loadAlternativesForDeck(true)"
+              class="rounded border border-red-300 bg-white px-2.5 py-1 text-xs font-bold text-red-900 hover:bg-red-100"
+            >
+              {{ t('retryButton') }}
+            </button>
+          </div>
+
+          <div v-else-if="selectedCardAlternatives.length > 0">
             <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">
               {{ t('suggestedAlternatives') }}
             </h4>
