@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { TracedBoardSnapshot, TracedGameRecord, TracedTurnRecord } from '../types/simulator'
+import { useI18n } from '../utils/i18n'
+import { useBugReport } from '../services/useBugReport'
 
 const props = defineProps<{
   tracedGames: TracedGameRecord[]
 }>()
+
+const { t } = useI18n()
+const engineReport = useBugReport()
 
 const outcomeFilter = ref<'ALL' | 'PLAYER' | 'OPPONENT' | 'DRAW'>('ALL')
 const opponentFilter = ref<string>('ALL')
@@ -49,6 +54,7 @@ const activeGame = computed<TracedGameRecord | null>(() => {
 
 watch(activeGame, () => {
   selectedTurnIndex.value = 0
+  engineReport.reset()
 })
 
 const activeTurn = computed<TracedTurnRecord | null>(() => {
@@ -188,6 +194,74 @@ function formatWinReason(reason: string | null): string {
             <span>Prizes gagnés : <strong>{{ activeGame.playerPrizesWon }} - {{ activeGame.opponentPrizesWon }}</strong></span>
             <span>•</span>
             <span>Mulligans : <strong>J:{{ activeGame.playerMulligans }} / Adv:{{ activeGame.opponentMulligans }}</strong></span>
+            <button
+              type="button"
+              @click="engineReport.togglePanel()"
+              class="ml-auto rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1 font-sans text-xs font-bold text-rose-800 transition hover:bg-rose-100"
+            >
+              {{ t('reportEngineIssueBtn') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Formulaire de signalement de bug moteur / règle -->
+        <div
+          v-if="engineReport.isPanelOpen.value"
+          class="mt-3 space-y-2.5 rounded-lg border border-rose-200 bg-white p-3.5 text-xs text-slate-800"
+        >
+          <div class="font-bold text-rose-900">
+            {{ t('reportTitleEngine', { seed: activeGame.seed }) }}
+          </div>
+          <textarea
+            v-model="engineReport.comment.value"
+            rows="2"
+            maxlength="1000"
+            :placeholder="t('reportCommentPlaceholder')"
+            class="w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs text-slate-900 placeholder-slate-400 focus:border-slate-900 focus:bg-white focus:outline-none"
+          ></textarea>
+          <div
+            v-if="engineReport.error.value"
+            class="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-900"
+          >
+            {{ engineReport.error.value }}
+          </div>
+          <div
+            v-if="engineReport.successResult.value"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900"
+          >
+            <span>{{ t('reportSuccessMsg', { id: engineReport.successResult.value.reportId }) }}</span>
+            <a
+              v-if="engineReport.successResult.value.issueUrl"
+              :href="engineReport.successResult.value.issueUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-bold underline hover:text-emerald-700"
+            >
+              {{ t('reportIssueLink') }}
+            </a>
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              @click="engineReport.togglePanel()"
+              class="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              {{ t('reportCancelBtn') }}
+            </button>
+            <button
+              type="button"
+              :disabled="engineReport.isSubmitting.value"
+              @click="
+                engineReport.submit({
+                  type: 'ENGINE_RULE_ERROR',
+                  cardId: null,
+                  matchLogs: JSON.parse(JSON.stringify(activeGame)),
+                })
+              "
+              class="rounded-lg bg-rose-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-rose-700 disabled:opacity-50"
+            >
+              {{ engineReport.isSubmitting.value ? t('reportSubmitting') : t('reportSubmitBtn') }}
+            </button>
           </div>
         </div>
 
