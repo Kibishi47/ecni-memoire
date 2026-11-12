@@ -102,6 +102,7 @@ cd backend
 npm install
 docker compose up -d --wait
 npm run db:migrate
+npm run seed              # Exécute seed:cards puis seed:meta-decks
 npm run seed:cards
 npm run seed:meta-decks
 

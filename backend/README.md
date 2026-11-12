@@ -53,6 +53,10 @@ npm run db:migrate
 ### 4. Synchroniser les cartes et importer les decks méta (scripts locaux uniquement)
 
 ```bash
+# Exécute seed:cards puis seed:meta-decks en une seule commande
+npm run seed
+
+# Ou séparément :
 npm run seed:cards
 npm run seed:meta-decks
 ```
