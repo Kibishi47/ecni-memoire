@@ -13,11 +13,13 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
+    "seed": "npm run seed:cards && npm run seed:meta-decks",
     "seed:cards": "tsx src/scripts/seedCards.ts",
     "seed:meta-decks": "tsx src/scripts/seedMetaDecks.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/compress": "^9.3.0",
     "@fastify/cors": "^11.0.1",
     "@octokit/rest": "^21.1.1",
     "dotenv": "^16.4.7",

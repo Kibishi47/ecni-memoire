@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import compress from '@fastify/compress'
 import cors from '@fastify/cors'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
@@ -9,6 +10,7 @@ import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerReportRoutes } from './routes/reports.js'
+import type { AlternativesService, CardCatalogCache } from './services/alternativesService.js'
 import type { GitHubIssueCreator } from './services/githubService.js'
 import type { InMemoryRateLimiter } from './services/rateLimiter.js'
 
@@ -17,6 +19,8 @@ export interface BuildServerOptions {
   logger?: boolean
   githubService?: GitHubIssueCreator
   reportRateLimiter?: InMemoryRateLimiter
+  catalogCache?: CardCatalogCache
+  alternativesService?: AlternativesService
 }
 
 /**
@@ -30,13 +34,22 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     trustProxy: true,
   })
 
+  await app.register(compress, {
+    global: true,
+    threshold: 1024,
+  })
+
   await app.register(cors, {
     origin: env.CORS_ORIGIN ? env.CORS_ORIGIN.split(',').map((o) => o.trim()) : true,
   })
 
   await registerHealthRoutes(app, { pool })
   await registerDeckRoutes(app, { pool })
-  await registerCardRoutes(app, { pool })
+  await registerCardRoutes(app, {
+    pool,
+    catalogCache: options.catalogCache,
+    alternativesService: options.alternativesService,
+  })
   await registerReportRoutes(app, {
     pool,
     githubService: options.githubService,
