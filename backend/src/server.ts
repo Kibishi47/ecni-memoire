@@ -10,6 +10,7 @@ import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerReportRoutes } from './routes/reports.js'
+import type { AlternativesService, CardCatalogCache } from './services/alternativesService.js'
 import type { GitHubIssueCreator } from './services/githubService.js'
 import type { InMemoryRateLimiter } from './services/rateLimiter.js'
 
@@ -18,6 +19,8 @@ export interface BuildServerOptions {
   logger?: boolean
   githubService?: GitHubIssueCreator
   reportRateLimiter?: InMemoryRateLimiter
+  catalogCache?: CardCatalogCache
+  alternativesService?: AlternativesService
 }
 
 /**
@@ -42,7 +45,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   await registerHealthRoutes(app, { pool })
   await registerDeckRoutes(app, { pool })
-  await registerCardRoutes(app, { pool })
+  await registerCardRoutes(app, {
+    pool,
+    catalogCache: options.catalogCache,
+    alternativesService: options.alternativesService,
+  })
   await registerReportRoutes(app, {
     pool,
     githubService: options.githubService,
