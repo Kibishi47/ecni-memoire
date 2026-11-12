@@ -296,6 +296,8 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
             self.assertEqual(engine.temperature, 1.0)
             self.assertEqual(engine.top_p, 0.95)
             self.assertEqual(engine.top_k, 64)
+            self.assertAlmostEqual(engine.repetition_penalty, 1.08)
+            self.assertEqual(engine.repetition_context_size, 128)
             self.assertTrue(engine.enable_thinking)
 
             fake_tok = MagicMock()
@@ -308,15 +310,40 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
             chunk_mock.generation_tokens = 12
             chunk_mock.finish_reason = "stop"
 
+            fake_proc = MagicMock()
             with patch("mlx_lm.sample_utils.make_sampler", return_value=MagicMock()) as mock_sampler, patch(
+                "mlx_lm.sample_utils.make_logits_processors", return_value=[fake_proc]
+            ) as mock_lp, patch(
                 "mlx_lm.stream_generate", return_value=[chunk_mock]
             ) as mock_stream:
                 rec = engine.generate_reasoning(make_test_bundle())
                 mock_sampler.assert_called_once_with(temp=1.0, top_p=0.95, top_k=64)
+                mock_lp.assert_called_once_with(repetition_penalty=1.08, repetition_context_size=128)
                 _, stream_kwargs = mock_stream.call_args
                 self.assertEqual(stream_kwargs["max_tokens"], 8192)
+                self.assertEqual(stream_kwargs["logits_processors"], [fake_proc])
                 self.assertEqual(rec.finishReason, "stop")
                 self.assertFalse(rec.wasTruncated)
+
+    def test_mlx_logits_processors_and_reasoning_prompt_anti_loop(self) -> None:
+        from compiler.mlx_utils import build_mlx_logits_processors
+        from compiler.reasoning_engine import REASONING_SYSTEM_PROMPT
+
+        self.assertIsNone(build_mlx_logits_processors(None))
+        self.assertIsNone(build_mlx_logits_processors(1.0))
+        procs = build_mlx_logits_processors(1.08, 128)
+        self.assertIsNotNone(procs)
+        self.assertEqual(len(procs), 1)
+
+        for needle in (
+            "RÈGLE DE CLÔTURE",
+            "SHUFFLE_DECK",
+            "canUseTurn1GoingFirst",
+            "DECK_NOT_EMPTY",
+            "HAND_NOT_EMPTY",
+            "IS_POKEMON_EX",
+        ):
+            self.assertIn(needle, REASONING_SYSTEM_PROMPT)
 
     def test_truncation_detection(self) -> None:
         from compiler.reasoning_engine import detect_reasoning_truncation
@@ -391,14 +418,19 @@ class TestReasoningEngineAndRecords(unittest.TestCase):
                 self.closed = True
 
         fake_gen = FakeBatchGen()
+        fake_proc = MagicMock()
         with patch("mlx_lm.sample_utils.make_sampler", return_value=MagicMock()), patch(
+            "mlx_lm.sample_utils.make_logits_processors", return_value=[fake_proc]
+        ) as mock_lp, patch(
             "mlx_lm.generate.BatchGenerator", return_value=fake_gen
         ) as mock_bg_cls:
             records, stats = engine.generate_reasoning_batch([b1, b2], batch_size=2)
             mock_bg_cls.assert_called_once()
+            mock_lp.assert_called_once_with(repetition_penalty=1.08, repetition_context_size=128)
             _, bg_kwargs = mock_bg_cls.call_args
             self.assertEqual(bg_kwargs["completion_batch_size"], 2)
             self.assertEqual(bg_kwargs["max_tokens"], 8192)
+            self.assertEqual(bg_kwargs["logits_processors"], [fake_proc])
             # Vérifie que add_special_tokens=False est utilisé quand le template commence par <bos>
             for _, enc_kwargs in fake_tok.encode.call_args_list:
                 self.assertIs(enc_kwargs.get("add_special_tokens"), False)

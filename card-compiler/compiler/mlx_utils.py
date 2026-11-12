@@ -73,6 +73,30 @@ def build_mlx_sampler(
         return make_sampler(temp=float(temperature))
 
 
+def build_mlx_logits_processors(
+    repetition_penalty: Optional[float] = None,
+    repetition_context_size: int = 128,
+) -> Optional[List[Any]]:
+    """Construit les processeurs de logits MLX (ex: `repetition_penalty`) si configurés (> 1.0)."""
+    if repetition_penalty is None:
+        return None
+    penalty = float(repetition_penalty)
+    if penalty <= 1.0:
+        return None
+
+    try:
+        from mlx_lm.sample_utils import make_logits_processors
+
+        processors = make_logits_processors(
+            repetition_penalty=penalty,
+            repetition_context_size=max(16, int(repetition_context_size)),
+        )
+    except (ImportError, TypeError):
+        return None
+
+    return list(processors) if processors else None
+
+
 def clear_mlx_memory_cache() -> None:
     """Force la collecte Python et vide le cache Metal MLX."""
     gc.collect()
@@ -121,6 +145,7 @@ def run_mlx_continuous_batch(
     sampler: Any,
     batch_size: int = DEFAULT_MLX_BATCH_SIZE,
     on_item_complete: Optional[Callable[[MLXBatchItemResult], None]] = None,
+    logits_processors: Optional[Sequence[Any]] = None,
 ) -> Tuple[List[MLXBatchItemResult], MLXBatchRunStats]:
     """Exécute un lot de prompts en parallélisme continu via `mlx_lm.generate.BatchGenerator`.
 
@@ -135,14 +160,17 @@ def run_mlx_continuous_batch(
     BatchGenerator = mlx_generate.BatchGenerator
 
     stop_tokens = resolve_stop_token_ids(tokenizer)
-    gen = BatchGenerator(
-        model,
-        max_tokens=max_tokens,
-        stop_tokens=stop_tokens,
-        sampler=sampler,
-        prefill_batch_size=min(eff_batch, len(prompts_tokens)),
-        completion_batch_size=eff_batch,
-    )
+    bg_kwargs: Dict[str, Any] = {
+        "max_tokens": max_tokens,
+        "stop_tokens": stop_tokens,
+        "sampler": sampler,
+        "prefill_batch_size": min(eff_batch, len(prompts_tokens)),
+        "completion_batch_size": eff_batch,
+    }
+    if logits_processors:
+        bg_kwargs["logits_processors"] = list(logits_processors)
+
+    gen = BatchGenerator(model, **bg_kwargs)
 
     t_batch_start = time.perf_counter()
     uids = list(gen.insert(list(prompts_tokens), max_tokens=[max_tokens] * len(prompts_tokens)))
