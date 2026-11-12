@@ -105,6 +105,7 @@ export class SimulationWorkerPool {
     playerDeck: ParsedDeck,
     config: SimulationConfig,
     onProgress?: (completedGames: number, totalGames: number, elapsedMs: number) => void,
+    providedOpponents?: OpponentDeckDescriptor[],
   ): Promise<SimulationMetricsSummary> {
     if (this.isRunning) {
       this.terminateAll()
@@ -125,7 +126,7 @@ export class SimulationWorkerPool {
       this.status = 'ERROR'
       this.isRunning = false
       throw new Error(
-        'Simulation impossible : la base de données cards_database.json est vide. Synchronisez les modèles de cartes avec npm run sync-cards.',
+        'Simulation impossible : aucune carte compilée n’est chargée en mémoire. Vérifiez la connexion au serveur API et revalidez votre deck.',
       )
     }
 
@@ -133,13 +134,18 @@ export class SimulationWorkerPool {
       this.status = 'ERROR'
       this.isRunning = false
       throw new Error(
-        `Simulation bloquée : ${playerDeck.unresolvedCount} carte(s) absente(s) de cards_database.json`,
+        `Simulation bloquée : ${playerDeck.unresolvedCount} carte(s) absente(s) du catalogue API.`,
       )
     }
 
     const playerDeckModels = expandParsedDeckToModels(playerDeck)
-    const opponentDecks = resolveOpponentDescriptors(config.selectedOpponentIds)
+    const opponentDecks =
+      providedOpponents && providedOpponents.length > 0
+        ? providedOpponents.filter((opp) => config.selectedOpponentIds.includes(opp.id))
+        : resolveOpponentDescriptors(config.selectedOpponentIds)
     if (opponentDecks.length === 0) {
+      this.status = 'ERROR'
+      this.isRunning = false
       throw new Error('Au moins 1 deck adverse doit être sélectionné.')
     }
 

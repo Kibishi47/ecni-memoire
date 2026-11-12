@@ -9,6 +9,8 @@ const props = defineProps<{
   rawDeckText: string
   validatedDeck: ParsedDeck
   isDebugMode?: boolean
+  isResolving?: boolean
+  resolveError?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -38,7 +40,7 @@ function onInputTextChange() {
 }
 
 function handleValidateClick() {
-  if (!localText.value.trim()) return
+  if (!localText.value.trim() || props.isResolving) return
   emit('validate-deck', localText.value)
   hasValidatedCurrentInput.value = true
 }
@@ -46,6 +48,8 @@ function handleValidateClick() {
 const isReadyToProceed = computed(() => {
   return (
     hasValidatedCurrentInput.value &&
+    !props.isResolving &&
+    !props.resolveError &&
     props.validatedDeck.isValid60 &&
     props.validatedDeck.isFullyResolved &&
     props.validatedDeck.cards.length > 0
@@ -146,12 +150,16 @@ function closeCardZoom() {
           <button
             v-if="!isReadyToProceed"
             type="button"
-            :disabled="!localText.trim()"
+            :disabled="!localText.trim() || Boolean(isResolving)"
             @click="handleValidateClick"
             class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
           >
-            <span>{{ t('importButton') }}</span>
-            <span v-if="localText.trim()" class="rounded bg-white/20 px-2 py-0.5 text-xs">
+            <span
+              v-if="isResolving"
+              class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+            ></span>
+            <span>{{ isResolving ? t('resolvingDeckApi') : t('importButton') }}</span>
+            <span v-if="!isResolving && localText.trim()" class="rounded bg-white/20 px-2 py-0.5 text-xs">
               {{ validatedDeck.totalCards }} / 60
             </span>
           </button>
@@ -170,6 +178,25 @@ function closeCardZoom() {
 
       <!-- Colonne Droite : Statut de validation et diagnostic -->
       <div class="space-y-4 lg:col-span-7">
+        <!-- Bannière d'erreur API (résolution de cartes) -->
+        <div
+          v-if="resolveError"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs text-red-900 shadow-xs"
+        >
+          <div>
+            <div class="font-bold">{{ t('apiResolveErrorTitle') }}</div>
+            <div class="mt-0.5 text-red-800">{{ resolveError }}</div>
+          </div>
+          <button
+            type="button"
+            :disabled="Boolean(isResolving) || !localText.trim()"
+            @click="handleValidateClick"
+            class="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-900 shadow-2xs hover:bg-red-100 disabled:opacity-50"
+          >
+            {{ t('retryButton') }}
+          </button>
+        </div>
+
         <!-- Bannière d'état du deck -->
         <div
           class="rounded-2xl border p-5 transition"
