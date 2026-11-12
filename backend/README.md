@@ -11,7 +11,7 @@ backend/
 │   ├── db/              # Pool PostgreSQL et exécuteur de migrations
 │   ├── migrations/      # Migrations SQL versionnées
 │   ├── routes/          # Endpoints API (health, cards, decks, reports)
-│   ├── services/        # Logique métier (githubService, deckParserService)
+│   ├── services/        # Logique métier (alternativesService, cardResolutionService, githubService, deckParserService)
 │   ├── scripts/         # Scripts CLI d'administration locale (seedCards, seedMetaDecks)
 │   └── server.ts        # Point d'entrée Fastify
 ├── meta_decks/          # Decklists méta .txt au format PTCGL
@@ -72,7 +72,10 @@ npm start
 
 - `GET /health` : Vérifie la connectivité PostgreSQL (`{ status: "ok", timestamp }`).
 - `GET /api/decks/meta` : Retourne tous les decks méta actifs avec leurs cartes et modèles `EngineCardModel`.
-- `POST /api/cards/batch` : Retourne un dictionnaire `{ [cardId]: EngineCardModel }` pour 1 à 100 `cardIds`.
+- `GET /api/cards` : Recherche paginée dans le catalogue (`q`, `category`, `subCategory`, `limit` 1..50, `offset` >= 0) avec `{ items, total, limit, offset }`.
+- `POST /api/cards/batch` : Retourne un dictionnaire `{ [cardId]: EngineCardModel }` pour 1 à 300 `cardIds`.
+- `POST /api/cards/resolve` : Résout de manière tolérante des cartes (`items` ou `ptcglText`) via `card_id`, `CARD_ID_ALIASES` et repli sur nom FR/EN normalisé (`resolved` / `unresolved`).
+- `POST /api/cards/alternatives` : Calcule côté serveur les suggestions d'alternatives intelligentes (`cardIds` 1..60, `excludeCardIds`, `limitPerCard` 1..30) à l'aide d'un cache catalogue en mémoire.
 - `GET /api/cards/:cardId` : Retourne le modèle JSON `EngineCardModel` d'une carte.
 - `POST /api/reports` : Enregistre un signalement de bug (`CARD_MODEL_ERROR` ou `ENGINE_RULE_ERROR`), applique le rate-limiting IP, et crée une issue GitHub si configuré.
 

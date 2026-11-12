@@ -7,7 +7,7 @@ Guide de référence technique et consignes d'ingénierie pour l'API REST backen
 Le dossier `./backend/` est un package Node.js isolé écrit en **TypeScript strict (ESM `NodeNext`)**.
 
 - **Runtime :** Node.js 20+ (`"type": "module"`)
-- **Framework HTTP :** Fastify 5 (`fastify`, `@fastify/cors`)
+- **Framework HTTP :** Fastify 5 (`fastify`, `@fastify/cors`, `@fastify/compress`)
 - **Base de données :** PostgreSQL (`pg` + migrations SQL brutes versionnées)
 - **Validation :** Zod (`zod`) pour la configuration `.env` et les payloads HTTP
 - **Intégration GitHub :** `@octokit/rest` (création automatique d'issues lors des signalements)
@@ -29,9 +29,11 @@ backend/
 │   │   ├── validation.ts          # Helper parseWithZod pour réponses 400 uniformes
 │   │   ├── health.ts              # GET /health (ping PostgreSQL)
 │   │   ├── decks.ts               # GET /api/decks/meta (decks actifs + 60 cartes + data JSONB)
-│   │   ├── cards.ts               # POST /api/cards/batch et GET /api/cards/:cardId
+│   │   ├── cards.ts               # GET /api/cards, POST /batch, POST /resolve, POST /alternatives, GET /:cardId
 │   │   └── reports.ts             # POST /api/reports (validation, rate-limit IP, DB + GitHub issue)
 │   ├── services/
+│   │   ├── alternativesService.ts # Cache catalogue mémoire (CardCatalogCache) + alternatives intelligentes
+│   │   ├── cardResolutionService.ts # Résolution tolérante (card_id -> alias_id -> nom normalisé/synonymes)
 │   │   ├── deckParserService.ts   # Parseur PTCGL/Limitless aligné sur poc-5 et simulator
 │   │   ├── githubService.ts       # Service Octokit (titres, labels, corps Markdown dépliable)
 │   │   └── rateLimiter.ts         # Store mémoire sliding-window par IP (InMemoryRateLimiter)
@@ -73,7 +75,10 @@ Les scripts dans `src/scripts/` sont strictement réservés à l'exécution loca
 
 - `GET /health` → `200 { status: "ok", timestamp }` (ou `503` si PostgreSQL est injoignable).
 - `GET /api/decks/meta` → Liste des decks avec `is_active = TRUE`, `totalCards`, et le tableau `cards` (`cardId`, `count`, `data`).
-- `POST /api/cards/batch` → Payload Zod `{ cardIds: string[] }` (`1..100`), retourne `{ [cardId]: EngineCardModel }`.
+- `GET /api/cards` → Recherche paginée (`q`, `category`, `subCategory`, `limit` 1..50 défaut 20, `offset` >= 0 défaut 0). Recherche insensible à la casse/aux accents (`TRANSLATE`) avec tri par pertinence exacte/préfixe puis `name_fr ASC, card_id ASC`. Retourne `{ items, total, limit, offset }`.
+- `POST /api/cards/batch` → Payload Zod `{ cardIds: string[] }` (`1..300`), retourne `{ [cardId]: EngineCardModel }`.
+- `POST /api/cards/resolve` → Résolution tolérante pour `{ items: [{ key, candidateIds (1..10), name? }] }` (`1..100`) ou `{ ptcglText }`. Applique l'ordre `card_id` -> `CARD_ID_ALIASES` (`alias_id`) -> nom FR/EN normalisé et `NAME_SYNONYMS` (`name`), et retourne `{ resolved, unresolved }`.
+- `POST /api/cards/alternatives` → Payload Zod `{ cardIds (1..60), excludeCardIds?, limitPerCard (1..30, défaut 10) }`. Calcule côté serveur les suggestions d'alternatives via `AlternativesService` et `CardCatalogCache` (aligné sur `simulator/src/core/alternativesFinder.ts`) et retourne `{ results }`.
 - `GET /api/cards/:cardId` → Retourne le JSON `EngineCardModel` ou `404`.
 - `POST /api/reports` :
   - Rate-limiting mémoire par IP (`RATE_LIMIT_MAX_REPORTS_PER_HOUR`, défaut `5/heure`, réponse `429` avec `Retry-After`).
@@ -86,7 +91,8 @@ Les scripts dans `src/scripts/` sont strictement réservés à l'exécution loca
 ## 6. Conventions de développement
 
 - **Imports ESM :** Toujours utiliser l'extension `.js` dans les imports TypeScript relatifs (ex. `import { env } from '../config/env.js'`) pour satisfaire `moduleResolution: "NodeNext"`.
-- **Testabilité :** `buildServer(options)` accepte des dépendances injectables (`pool`, `githubService`, `reportRateLimiter`) afin de tester les routes Fastify via `app.inject()` sans dépendre d'appels réseau externes.
+- **Testabilité :** `buildServer(options)` accepte des dépendances injectables (`pool`, `githubService`, `reportRateLimiter`, `catalogCache`, `alternativesService`) afin de tester les routes Fastify via `app.inject()` sans dépendre d'appels réseau ou PostgreSQL externes.
+- **Compression :** `@fastify/compress` compresse automatiquement les réponses HTTP JSON (>= 1 Ko) quand le client envoie `Accept-Encoding: gzip`.
 - **Sécurité :** Ne jamais commiter `.env`. Garder `.env.example` synchronisé avec `envSchema` dans `src/config/env.ts`.
 
 ## 7. Commandes usuelles
