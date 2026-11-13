@@ -45,6 +45,7 @@ export interface SynergyAuditItem {
   cardNameEn?: string
   requirement: SynergyRequirement
   matchingCountInDeck: number
+  matchedCardIds?: string[]
   satisfied: boolean
   criticalZeroValue: boolean
   description: string
@@ -92,6 +93,7 @@ export interface MetaOpponentDeck {
   descriptionEn?: string
   keyThreats: string[]
   keyThreatsEn?: string[]
+  keyThreatCards?: EngineCardModel[]
   badgeColor: string
   ptcglText: string
 }

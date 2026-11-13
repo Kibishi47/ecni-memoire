@@ -79,6 +79,8 @@ describe('metaDeckAdapter & async PTCGL resolution', () => {
     expect(mapped[0]!.metaDeck.archetypeBadge).toBe('Lanssorien')
     expect(mapped[0]!.metaDeck.badgeColor).toBe('purple')
     expect(mapped[0]!.metaDeck.keyThreats).toContain(sampleCard.identity.nameFr)
+    expect(mapped[0]!.metaDeck.keyThreatCards).toHaveLength(1)
+    expect(mapped[0]!.metaDeck.keyThreatCards![0]!.cardId).toBe(sampleCard.cardId)
     expect(mapped[0]!.descriptor.models).toHaveLength(4)
     expect(mapped[0]!.descriptor.id).toBe('meta_api_7')
   })

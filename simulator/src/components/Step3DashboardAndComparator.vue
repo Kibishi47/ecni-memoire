@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { EngineCardModel } from '../types/cardModel'
-import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
+import type { CardCategory, CardSubCategory, EngineCardModel } from '../types/cardModel'
+import type { MetaOpponentDeck, ParsedDeck, ParsedDeckEntry } from '../types/deck'
 import type {
   CardUsageMetrics,
+  ConditionalComboStatRecord,
   DeckCardContributionItem,
   SimulationMetricsSummary,
 } from '../types/simulator'
 import type { SmartAlternativeSuggestion } from '../core/alternativesFinder'
+import { UNIFIED_CARD_REGISTRY } from '../data/cardCatalog'
 import { ApiError, fetchAlternativesFromApi, searchCatalogCards } from '../services/apiClient'
 import { exportDeckToPtcgl } from '../utils/ptcglExporter'
 import { getCardImageUrl } from '../utils/cardImage'
 import { useI18n } from '../utils/i18n'
+import CardFanThumbnail from './CardFanThumbnail.vue'
 import CardZoomModal from './CardZoomModal.vue'
 
 export interface DeckVersionEntry {
@@ -36,10 +39,12 @@ const props = withDefaults(
     progressElapsedMs: number
     deckVersions?: DeckVersionEntry[]
     activeVersionId?: string
+    metaOpponents?: MetaOpponentDeck[]
   }>(),
   {
     deckVersions: () => [],
     activeVersionId: '',
+    metaOpponents: () => [],
   },
 )
 
@@ -75,6 +80,8 @@ const exportLang = ref<'fr' | 'en'>(currentLang.value)
 const copiedFeedback = ref(false)
 const replacedCardFeedback = ref<string | null>(null)
 const zoomedCard = ref<ParsedDeckEntry | EngineCardModel | null>(null)
+const zoomedCards = ref<Array<ParsedDeckEntry | EngineCardModel>>([])
+const zoomInitialIndex = ref<number>(0)
 
 async function executeCatalogSearch(query: string) {
   if (searchAbortController) {
@@ -406,12 +413,118 @@ function handleImgError(event: Event) {
   }
 }
 
+function openZoomList(
+  cards: Array<ParsedDeckEntry | EngineCardModel>,
+  initialIndex = 0,
+) {
+  const clean = cards.filter(Boolean)
+  if (clean.length === 0) return
+  zoomedCards.value = clean
+  zoomInitialIndex.value = Math.max(0, Math.min(initialIndex, clean.length - 1))
+  zoomedCard.value = clean[zoomInitialIndex.value] ?? null
+}
+
 function openZoom(card: ParsedDeckEntry | EngineCardModel) {
-  zoomedCard.value = card
+  openZoomList([card], 0)
 }
 
 function closeZoom() {
   zoomedCard.value = null
+  zoomedCards.value = []
+  zoomInitialIndex.value = 0
+}
+
+function resolveCardById(cardId: string): ParsedDeckEntry | EngineCardModel | null {
+  if (!cardId) return null
+  const inEditable = props.editableDeck.cards.find((c) => c.cardId === cardId)
+  if (inEditable) return inEditable
+  const inBaseline = props.baselineDeck.cards.find((c) => c.cardId === cardId)
+  if (inBaseline) return inBaseline
+  return UNIFIED_CARD_REGISTRY[cardId] ?? null
+}
+
+function getComboCards(combo: ConditionalComboStatRecord): Array<ParsedDeckEntry | EngineCardModel> {
+  const list: Array<ParsedDeckEntry | EngineCardModel> = []
+  const pushCard = (c: ParsedDeckEntry | EngineCardModel | null) => {
+    if (!c) return
+    const cid = c.cardId
+    if (!list.some((x) => x.cardId === cid)) {
+      list.push(c)
+    }
+  }
+
+  pushCard(resolveCardById(combo.cardId))
+  for (const relId of combo.relatedCardIds || []) {
+    pushCard(resolveCardById(relId))
+  }
+
+  // Repli sur l'audit de synergies ou l'évolution du deck si relatedCardIds n'était pas rempli
+  if (list.length < 2) {
+    const auditMatch = props.editableDeck.synergyAudit.find((a) => a.cardId === combo.cardId)
+    for (const mid of auditMatch?.matchedCardIds || []) {
+      pushCard(resolveCardById(mid))
+    }
+  }
+
+  return list
+}
+
+function getTelemetryCardItem(item: CardUsageMetrics): ParsedDeckEntry | EngineCardModel {
+  const resolved = resolveCardById(item.cardId)
+  if (resolved) return resolved
+  const cat = (item.category || 'TRAINER') as CardCategory
+  const subCat = (item.subCategory || 'ITEM') as CardSubCategory
+  return {
+    cardId: item.cardId,
+    category: cat,
+    subCategory: subCat,
+    identity: {
+      cardId: item.cardId,
+      nameFr: item.nameFr,
+      nameEn: item.nameEn || item.nameFr,
+      setId: item.cardId.split('-')[0] || '',
+      localId: item.cardId.split('-')[1] || '',
+      category: cat,
+      subCategory: subCat,
+      isRuleBox: false,
+      prizeCardsGiven: 1,
+      isAceSpec: false,
+      isAncient: false,
+      isFuture: false,
+      isTera: false,
+      legalStandard: true,
+      legalExpanded: true,
+    },
+    pokemonStats: null,
+    playableActions: [],
+    strategicEvaluator: {
+      aiRole: 'CONSISTENCY_BOOSTER',
+      turnPhaseWeights: { turn1: 0.5, turn2: 0.5, turn3: 0.5, turn4Plus: 0.5 },
+      decklistSynergyRequirements: [],
+    },
+  }
+}
+
+const sortedTelemetryCards = computed<Array<ParsedDeckEntry | EngineCardModel>>(() =>
+  sortedCardTelemetry.value.map((item) => getTelemetryCardItem(item)),
+)
+
+function openTelemetryZoom(index: number) {
+  openZoomList(sortedTelemetryCards.value, index)
+}
+
+function openAlternativeZoom(altIndex: number) {
+  const alts = selectedCardAlternatives.value.slice(0, 4).map((a) => a.alternativeModel)
+  if (selectedCardEntry.value) {
+    openZoomList([selectedCardEntry.value, ...alts], altIndex + 1)
+  } else {
+    openZoomList(alts, altIndex)
+  }
+}
+
+function getMatchupThreatCards(opponentId: string): EngineCardModel[] {
+  const found = props.metaOpponents.find((opp) => opp.id === opponentId)
+  return found?.keyThreatCards || []
 }
 
 const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
@@ -626,9 +739,17 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           </span>
         </div>
 
-        <h3 class="mt-2 text-base font-bold text-slate-900 truncate">
-          {{ currentLang === 'en' && m.opponentNameEn ? m.opponentNameEn : m.opponentName }}
-        </h3>
+        <div class="mt-2 flex items-center justify-between gap-2">
+          <h3 class="text-base font-bold text-slate-900 truncate">
+            {{ currentLang === 'en' && m.opponentNameEn ? m.opponentNameEn : m.opponentName }}
+          </h3>
+          <CardFanThumbnail
+            v-if="getMatchupThreatCards(m.opponentId).length > 0"
+            :cards="getMatchupThreatCards(m.opponentId)"
+            size="sm"
+            @select="openZoomList(getMatchupThreatCards(m.opponentId), 0)"
+          />
+        </div>
 
         <div class="mt-3 flex items-baseline justify-between">
           <span class="text-2xl font-black" :class="m.winRate >= 50 ? 'text-emerald-700' : 'text-amber-800'">
@@ -764,7 +885,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- Liste des cartes avec indicateur visuel d'alternatives disponibles -->
           <div class="max-h-[560px] space-y-2 overflow-y-auto pr-1">
             <div
-              v-for="card in editableDeck.cards"
+              v-for="(card, cIdx) in editableDeck.cards"
               :key="card.uid"
               @click="selectCardForInspection(card.cardId)"
               class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-2.5 transition"
@@ -776,23 +897,11 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             >
               <div class="flex items-center gap-2.5 min-w-0">
                 <!-- Miniature de la carte avec zoom au clic -->
-                <img
-                  v-if="getCardImageUrl(card)"
-                  :src="getCardImageUrl(card)!"
-                  :alt="getLocalizedCardName(card)"
-                  loading="lazy"
-                  @error="handleImgError"
-                  @click.stop="openZoom(card)"
-                  class="h-12 w-8 shrink-0 rounded object-cover shadow-2xs border cursor-zoom-in hover:opacity-90 transition"
-                  :class="selectedCardId === card.cardId ? 'border-white/30' : 'border-slate-200'"
-                  :title="t('clickToEnlarge')"
+                <CardFanThumbnail
+                  :cards="[card]"
+                  size="sm"
+                  @select="openZoomList(editableDeck.cards, cIdx)"
                 />
-                <div
-                  v-else
-                  class="flex h-12 w-8 shrink-0 items-center justify-center rounded bg-slate-200 text-[10px] font-bold text-slate-600"
-                >
-                  {{ card.category.slice(0, 3).toUpperCase() }}
-                </div>
 
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
@@ -894,21 +1003,23 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 {{ t('searchCatalogCount', { n: filteredCatalogModels.length, total: searchTotal }) }}
               </div>
               <div
-                v-for="model in filteredCatalogModels"
+                v-for="(model, mIdx) in filteredCatalogModels"
                 :key="model.cardId"
                 class="flex items-center justify-between p-2 text-xs hover:bg-slate-50"
               >
-                <div class="flex items-center gap-2 truncate">
-                  <img
-                    v-if="getCardImageUrl(model)"
-                    :src="getCardImageUrl(model)!"
-                    :alt="getLocalizedCardName(model)"
-                    loading="lazy"
-                    @error="handleImgError"
-                    @click.stop="openZoom(model)"
-                    class="h-8 w-6 shrink-0 rounded object-cover cursor-zoom-in"
+                <div class="flex items-center gap-2.5 truncate">
+                  <CardFanThumbnail
+                    :cards="[model]"
+                    size="sm"
+                    @select="openZoomList(filteredCatalogModels, mIdx)"
                   />
-                  <span class="truncate font-semibold text-slate-800">{{ getLocalizedCardName(model) }}</span>
+                  <button
+                    type="button"
+                    @click.stop="openZoomList(filteredCatalogModels, mIdx)"
+                    class="truncate text-left font-semibold text-slate-800 hover:text-indigo-700"
+                  >
+                    {{ getLocalizedCardName(model) }}
+                  </button>
                 </div>
                 <button
                   type="button"
@@ -939,7 +1050,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             />
             <div
               v-else
-              class="flex h-28 w-20 shrink-0 items-center justify-center rounded-lg bg-slate-200 font-bold text-slate-500 text-xs"
+              @click="openZoom(selectedCardEntry)"
+              class="flex h-28 w-20 shrink-0 cursor-zoom-in items-center justify-center rounded-lg bg-slate-200 font-bold text-slate-500 text-xs transition hover:bg-slate-300"
+              :title="t('clickToEnlarge')"
             >
               CARTE
             </div>
@@ -997,28 +1110,17 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
 
             <div class="mt-3 space-y-3">
               <div
-                v-for="alt in selectedCardAlternatives.slice(0, 4)"
+                v-for="(alt, aIdx) in selectedCardAlternatives.slice(0, 4)"
                 :key="alt.alternativeCardId"
                 class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs transition hover:border-slate-300"
               >
                 <div class="flex items-center gap-3 min-w-0">
                   <!-- Miniature alternative avec zoom au clic -->
-                  <img
-                    v-if="getCardImageUrl(alt.alternativeModel)"
-                    :src="getCardImageUrl(alt.alternativeModel)!"
-                    :alt="getLocalizedCardName(alt.alternativeModel)"
-                    loading="lazy"
-                    @error="handleImgError"
-                    @click="openZoom(alt.alternativeModel)"
-                    class="h-16 w-11 shrink-0 rounded object-cover shadow-2xs border border-slate-200 cursor-zoom-in hover:opacity-90 transition"
-                    :title="t('clickToEnlarge')"
+                  <CardFanThumbnail
+                    :cards="[alt.alternativeModel]"
+                    size="md"
+                    @select="openAlternativeZoom(aIdx)"
                   />
-                  <div
-                    v-else
-                    class="flex h-16 w-11 shrink-0 items-center justify-center rounded bg-slate-200 font-bold text-slate-500 text-[10px]"
-                  >
-                    ALT
-                  </div>
 
                   <div class="min-w-0">
                     <div class="flex items-center gap-2">
@@ -1184,9 +1286,23 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               <tr
                 v-for="combo in currentSummary.conditionalComboStats"
                 :key="combo.comboId"
-                class="hover:bg-slate-50/80"
+                class="hover:bg-slate-50/80 transition"
               >
-                <td class="px-3.5 py-2.5 font-bold text-slate-900">{{ combo.label }}</td>
+                <td class="px-3.5 py-2.5 font-bold text-slate-900">
+                  <div
+                    @click="getComboCards(combo).length > 0 && openZoomList(getComboCards(combo), 0)"
+                    class="flex items-center gap-3"
+                    :class="getComboCards(combo).length > 0 ? 'cursor-pointer group' : ''"
+                  >
+                    <CardFanThumbnail
+                      v-if="getComboCards(combo).length > 0"
+                      :cards="getComboCards(combo)"
+                      size="md"
+                      @select="openZoomList(getComboCards(combo), 0)"
+                    />
+                    <span class="group-hover:text-indigo-700 transition">{{ combo.label }}</span>
+                  </div>
+                </td>
                 <td class="px-3.5 py-2.5">
                   <span class="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
                     {{ combo.conditionSummary }}
@@ -1232,18 +1348,26 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr
-                v-for="item in sortedCardTelemetry"
+                v-for="(item, tIdx) in sortedCardTelemetry"
                 :key="item.cardId"
                 class="hover:bg-slate-50/80 transition"
               >
                 <!-- Carte -->
                 <td class="px-3.5 py-3">
-                  <div class="flex items-center gap-2">
-                    <span class="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
+                  <div
+                    @click="openTelemetryZoom(tIdx)"
+                    class="group flex cursor-pointer items-center gap-3"
+                  >
+                    <CardFanThumbnail
+                      :cards="[getTelemetryCardItem(item)]"
+                      size="sm"
+                      @select="openTelemetryZoom(tIdx)"
+                    />
+                    <span class="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white shrink-0">
                       {{ item.quantityInDeck }}×
                     </span>
                     <div>
-                      <div class="font-bold text-slate-900">{{ getLocalizedCardName(item) }}</div>
+                      <div class="font-bold text-slate-900 group-hover:text-indigo-700 transition">{{ getLocalizedCardName(item) }}</div>
                       <div class="font-mono text-[10px] text-slate-400">
                         {{ item.cardId }} • {{ getLocalizedSubCategory(item.subCategory) }}
                       </div>
@@ -1395,7 +1519,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
     <!-- MODAL DE ZOOM SUR CARTE (LIGHTBOX HAUTE RÉSOLUTION) -->
     <CardZoomModal
       :card="zoomedCard"
-      :is-open="zoomedCard !== null"
+      :cards="zoomedCards"
+      :initial-index="zoomInitialIndex"
+      :is-open="zoomedCards.length > 0 || zoomedCard !== null"
       @close="closeZoom"
     />
   </div>

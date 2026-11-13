@@ -63,11 +63,8 @@ function buildPtcglTextFromApiCards(cards: ApiMetaDeck['cards']): string {
   return sections.join('\n\n')
 }
 
-function extractKeyThreats(
-  cards: ApiMetaDeck['cards'],
-  lang: 'fr' | 'en',
-): string[] {
-  const pokemonEntries = cards
+function getSortedThreatEntries(cards: ApiMetaDeck['cards']): ApiMetaDeck['cards'] {
+  return cards
     .filter((c) => c.model.category === 'POKEMON')
     .sort((a, b) => {
       const aRule = a.model.pokemonStats?.isRuleBox ? 1 : 0
@@ -78,6 +75,13 @@ function extractKeyThreats(
       if (bHp !== aHp) return bHp - aHp
       return b.count - a.count
     })
+}
+
+function extractKeyThreats(
+  cards: ApiMetaDeck['cards'],
+  lang: 'fr' | 'en',
+): string[] {
+  const pokemonEntries = getSortedThreatEntries(cards)
 
   const seen = new Set<string>()
   const threats: string[] = []
@@ -92,6 +96,22 @@ function extractKeyThreats(
   return threats
 }
 
+function extractKeyThreatCards(cards: ApiMetaDeck['cards']): EngineCardModel[] {
+  const pokemonEntries = getSortedThreatEntries(cards)
+  const seen = new Set<string>()
+  const threatCards: EngineCardModel[] = []
+  for (const entry of pokemonEntries) {
+    const key = entry.model.cardId
+    const nameKey = (entry.model.identity.nameFr || entry.model.identity.nameEn || key).toLowerCase()
+    if (!seen.has(nameKey)) {
+      seen.add(nameKey)
+      threatCards.push(entry.model)
+    }
+    if (threatCards.length >= 3) break
+  }
+  return threatCards
+}
+
 export function mapApiMetaDecks(apiDecks: ApiMetaDeck[]): MappedMetaOpponent[] {
   return apiDecks.map((apiDeck, idx) => {
     const id = `meta_api_${apiDeck.id}`
@@ -99,6 +119,7 @@ export function mapApiMetaDecks(apiDecks: ApiMetaDeck[]): MappedMetaOpponent[] {
     const archetypeBadge = apiDeck.archetype?.trim() || 'Meta Standard'
     const keyThreats = extractKeyThreats(apiDeck.cards, 'fr')
     const keyThreatsEn = extractKeyThreats(apiDeck.cards, 'en')
+    const keyThreatCards = extractKeyThreatCards(apiDeck.cards)
 
     const models: EngineCardModel[] = []
     for (const entry of apiDeck.cards) {
@@ -128,6 +149,7 @@ export function mapApiMetaDecks(apiDecks: ApiMetaDeck[]): MappedMetaOpponent[] {
       descriptionEn: subtitleEn,
       keyThreats,
       keyThreatsEn,
+      keyThreatCards,
       badgeColor,
       ptcglText: buildPtcglTextFromApiCards(apiDeck.cards),
     }
