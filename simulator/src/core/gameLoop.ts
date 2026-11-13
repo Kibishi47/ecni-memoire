@@ -982,7 +982,6 @@ export function mergeSimulationShards(
   config: SimulationConfig,
   baseSeed: number,
   totalDurationMs: number,
-  earlyStopped = false,
 ): SimulationMetricsSummary {
   const allOutcomes: SingleGameOutcome[] = []
   const mergedCardCounters: Record<string, ShardCardCounter> = {}
@@ -1363,6 +1362,5 @@ export function mergeSimulationShards(
     configUsed: config,
     baseSeedUsed: baseSeed,
     marginOfErrorPct,
-    earlyStopped,
   }
 }

@@ -8,7 +8,6 @@ import type {
 
 export type FirstPlayerMode = 'PLAYER' | 'OPPONENT' | 'RANDOM'
 export type WorkerSchedulingMode = 'STATIC_SHARDS' | 'DYNAMIC_BATCHES'
-export type EarlyStoppingMargin = 0 | 1.5 | 2.5 | 4.0
 
 export interface SimulationConfig {
   iterations: number
@@ -32,7 +31,6 @@ export interface SimulationConfig {
   workerSchedulingMode?: WorkerSchedulingMode
   batchSize?: number
   collectDetailedTelemetry?: boolean
-  earlyStoppingMargin?: EarlyStoppingMargin
 }
 
 export interface CardUsageMetrics {
@@ -230,7 +228,6 @@ export interface SimulationMetricsSummary {
   configUsed: SimulationConfig
   baseSeedUsed: number
   marginOfErrorPct?: number
-  earlyStopped?: boolean
 }
 
 export interface DeckCardContributionItem {
