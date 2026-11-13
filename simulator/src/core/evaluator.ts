@@ -40,6 +40,33 @@ import {
 import { computeNumericStateHash } from './fastState'
 
 export type MaxBranchesSetting = 8 | 20 | 50 | 'INFINITE'
+export type LookaheadPly = 1 | 2 | 3
+export type AiTemperament = 'BALANCED' | 'AGGRESSIVE' | 'CONSERVATIVE'
+
+export interface EvaluatorOptions {
+  maxActionDepth?: number
+  beamWidth?: number
+  topKCandidates?: number
+  lookaheadPly?: LookaheadPly
+  rolloutMaxActions?: number
+  aiTemperament?: AiTemperament
+}
+
+function resolvePlyWeights(temperament: AiTemperament = 'BALANCED'): {
+  wT: number
+  wAdv: number
+  wRebound: number
+} {
+  switch (temperament) {
+    case 'AGGRESSIVE':
+      return { wT: 0.45, wAdv: 0.25, wRebound: 0.3 }
+    case 'CONSERVATIVE':
+      return { wT: 0.25, wAdv: 0.45, wRebound: 0.3 }
+    case 'BALANCED':
+    default:
+      return { wT: 0.35, wAdv: 0.3, wRebound: 0.35 }
+  }
+}
 
 export interface EvaluatedBranchTrace {
   branchId: string
@@ -1001,7 +1028,8 @@ export function exploreTurnBranches(
     }
   }
 
-  const numericLimit = maxBranches === 'INFINITE' ? 12 : Math.min(Number(maxBranches), 12)
+  // Permet jusqu'à 60 branches explorées (mode 'INFINITE' ou réglages avancés) tout en conservant le Beam par défaut rapide si customBeamWidth n'est pas fourni
+  const numericLimit = maxBranches === 'INFINITE' ? 60 : Math.min(Math.max(1, Number(maxBranches)), 60)
   const perStepBeamWidth = customBeamWidth ?? Math.min(numericLimit, 8)
   const maxActionsPerNode = Math.max(perStepBeamWidth + 3, 7)
 
@@ -1148,6 +1176,7 @@ function summarizeActionSequence(actions: GameAction[]): string {
 function fastGreedySingleTurnRollout(
   postPreviousTurnState: MatchState,
   needActionsList = false,
+  maxActions = 8,
 ): { bestEndState: MatchState; bestActions: GameAction[]; bestPerspectiveScore: number } {
   if (postPreviousTurnState.winner !== null) {
     const pIdx = postPreviousTurnState.activePlayerIndex
@@ -1171,9 +1200,9 @@ function fastGreedySingleTurnRollout(
   }
 
   const actionsTaken: GameAction[] = []
-  const maxActions = 8
+  const rolloutStepCap = Math.max(1, maxActions)
 
-  for (let step = 0; step < maxActions; step++) {
+  for (let step = 0; step < rolloutStepCap; step++) {
     if (state.winner !== null || state.activePlayerIndex !== actingPlayerIdx) {
       break
     }
@@ -1266,13 +1295,24 @@ export function selectBestTurnBranch(
   turnStartState: MatchState,
   maxBranches: MaxBranchesSetting,
   recordTrace = false,
+  options?: EvaluatorOptions,
 ): TurnBranchDecision {
   const perspectiveIndex = turnStartState.activePlayerIndex
+  const maxActionDepth = Math.max(1, options?.maxActionDepth ?? 8)
+  const topKCandidates = Math.max(1, options?.topKCandidates ?? 3)
+  const lookaheadPly: LookaheadPly = options?.lookaheadPly ?? 3
+  const rolloutMaxActions = Math.max(1, options?.rolloutMaxActions ?? 8)
+  const aiTemperament: AiTemperament = options?.aiTemperament ?? 'BALANCED'
+  const weights = resolvePlyWeights(aiTemperament)
 
-  const { completedBranches, totalExplored } = exploreTurnBranches(turnStartState, maxBranches, 8)
+  const { completedBranches, totalExplored } = exploreTurnBranches(
+    turnStartState,
+    maxBranches,
+    maxActionDepth,
+    options?.beamWidth,
+  )
 
-  // Sélection stricte des Top-3 (K = 3) meilleures feuilles du tour T
-  const candidatesToEvaluate = completedBranches.slice(0, 3)
+  const candidatesToEvaluate = completedBranches.slice(0, topKCandidates)
 
   // Fast-path Monte Carlo : si une seule branche unique existe et qu'on n'enregistre pas de trace UI,
   // inutile de projeter T_adv et T+1 puisque l'unique branche sera nécessairement choisie !
@@ -1349,52 +1389,66 @@ export function selectBestTurnBranch(
       continue
     }
 
-    const stateTHash = computeNumericStateHash(stateT)
-    const cachedRollout = rolloutTranspositionTable.get(stateTHash)
+    let scoreTAdv = 0
+    let scoreTPlus1 = 0
+    let opponentReactionSummary = ''
+    let reboundSummary = ''
 
-    let scoreTAdv: number
-    let scoreTPlus1: number
-    let opponentReactionSummary: string
-    let reboundSummary: string
+    if (lookaheadPly >= 2) {
+      const stateTHash = computeNumericStateHash(stateT)
+      const cachedRollout = rolloutTranspositionTable.get(stateTHash)
 
-    if (cachedRollout) {
-      scoreTAdv = cachedRollout.scoreTAdv
-      scoreTPlus1 = cachedRollout.scoreTPlus1
-      opponentReactionSummary = cachedRollout.opponentReactionSummary
-      reboundSummary = cachedRollout.reboundSummary
-    } else {
-      // Étape 2 : Projection rapide du tour adverse T_adv (Rollout glouton W = 1 en place)
-      const advRollout = fastGreedySingleTurnRollout(stateT, recordTrace)
-      const stateTAdv = advRollout.bestEndState
-      scoreTAdv = advRollout.bestPerspectiveScore
-      opponentReactionSummary = recordTrace ? summarizeActionSequence(advRollout.bestActions) : ''
-
-      // Étape 3 : Projection rapide du rebond Joueur T+1 (Rollout glouton W = 1 en place)
-      if (stateTAdv.winner !== null) {
-        scoreTPlus1 = evaluateState(stateTAdv, perspectiveIndex)
-        reboundSummary = recordTrace
-          ? stateTAdv.winner === myWinnerLabel
-            ? 'Victoire sur épuisement adverse'
-            : 'Défaite subie lors de la riposte adverse (T_adv)'
-          : ''
+      if (cachedRollout) {
+        scoreTAdv = cachedRollout.scoreTAdv
+        scoreTPlus1 = cachedRollout.scoreTPlus1
+        opponentReactionSummary = cachedRollout.opponentReactionSummary
+        reboundSummary = cachedRollout.reboundSummary
       } else {
-        const reboundRollout = fastGreedySingleTurnRollout(stateTAdv, recordTrace)
-        scoreTPlus1 = reboundRollout.bestPerspectiveScore
-        reboundSummary = recordTrace ? summarizeActionSequence(reboundRollout.bestActions) : ''
-      }
+        // Étape 2 : Projection rapide du tour adverse T_adv (Rollout glouton W = 1 en place)
+        const advRollout = fastGreedySingleTurnRollout(stateT, recordTrace, rolloutMaxActions)
+        const stateTAdv = advRollout.bestEndState
+        scoreTAdv = advRollout.bestPerspectiveScore
+        opponentReactionSummary = recordTrace ? summarizeActionSequence(advRollout.bestActions) : ''
 
-      rolloutTranspositionTable.set(stateTHash, {
-        scoreTAdv,
-        scoreTPlus1,
-        opponentReactionSummary,
-        reboundSummary,
-      })
+        // Étape 3 : Projection rapide du rebond Joueur T+1 si lookaheadPly === 3
+        if (lookaheadPly === 3) {
+          if (stateTAdv.winner !== null) {
+            scoreTPlus1 = evaluateState(stateTAdv, perspectiveIndex)
+            reboundSummary = recordTrace
+              ? stateTAdv.winner === myWinnerLabel
+                ? 'Victoire sur épuisement adverse'
+                : 'Défaite subie lors de la riposte adverse (T_adv)'
+              : ''
+          } else {
+            const reboundRollout = fastGreedySingleTurnRollout(
+              stateTAdv,
+              recordTrace,
+              rolloutMaxActions,
+            )
+            scoreTPlus1 = reboundRollout.bestPerspectiveScore
+            reboundSummary = recordTrace ? summarizeActionSequence(reboundRollout.bestActions) : ''
+          }
+        }
+
+        rolloutTranspositionTable.set(stateTHash, {
+          scoreTAdv,
+          scoreTPlus1,
+          opponentReactionSummary,
+          reboundSummary,
+        })
+      }
     }
 
-    // Formule officielle de pondération 3-Ply :
-    // Score(B) = 0.35 * V(S_T) - 0.30 * V_adv(S_{T_adv}) + 0.35 * V(S_{T+1})
-    const totalScore =
-      Math.round((0.35 * scoreT - 0.3 * scoreTAdv + 0.35 * scoreTPlus1) * 10) / 10
+    let rawTotalScore: number
+    if (lookaheadPly === 1) {
+      rawTotalScore = scoreT
+    } else if (lookaheadPly === 2) {
+      const denom = weights.wT + weights.wAdv
+      rawTotalScore = (weights.wT * scoreT - weights.wAdv * scoreTAdv) / (denom > 0 ? denom : 1)
+    } else {
+      rawTotalScore = weights.wT * scoreT - weights.wAdv * scoreTAdv + weights.wRebound * scoreTPlus1
+    }
+    const totalScore = Math.round(rawTotalScore * 10) / 10
 
     evaluatedResults.push({
       node: candidate,

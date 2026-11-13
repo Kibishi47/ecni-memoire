@@ -20,15 +20,17 @@ Simulateur complet de Pokémon TCG unifiant :
    - Anticipation sur 3 demi-tours :
      $$\text{Score}(B) = 0.35 \cdot V(S_T) - 0.30 \cdot V_{\text{adv}}(S_{T_{\text{adv}}}) + 0.35 \cdot V(S_{T+1})$$
 
-3. **`src/core/gameLoop.ts` & `src/worker/workerPool.ts`** :
+3. **`src/core/gameLoop.ts`, `src/worker/workerPool.ts` & `src/services/hardwareBenchmark.ts`** :
    - Boucle de partie complète jusqu'au K.O. final / 6 Récompenses prises ou `maxTurns`.
-   - Calcul des **8 indicateurs obligatoires** et enregistrement des traces détaillées pour le mode `?debug=true`.
+   - Calcul des **8 indicateurs obligatoires**, télémétrie carte par carte et intervalle de confiance statistique.
+   - Calibration matérielle CPU, ordonnancement dynamique Work-Stealing et arrêt précoce configurable.
+   - 3 sélecteurs rapides (Allocation CPU, Volume Statistique, Intelligence IA) + tiroir de paramètres avancés (14 contrôles).
 
 ## Commandes
 
 ```bash
 npm install
-npm run dev      # Serveur de développement Vite (http://localhost:5173 et http://localhost:5173/?debug=true)
+npm run dev      # Serveur de développement Vite (http://localhost:5173)
 npm test         # Exécution des tests unitaires Vitest
 npm run build    # Vérification TypeScript (vue-tsc) et build de production Vite
 ```

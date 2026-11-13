@@ -6,7 +6,6 @@ defineProps<{
   currentStep: 1 | 2 | 3
   canGoStep2: boolean
   canGoStep3: boolean
-  isDebugMode: boolean
   deckTotalCards: number
 }>()
 
@@ -37,14 +36,6 @@ const navSteps = computed(() => [
           <div class="flex items-center gap-2">
             <span class="text-base font-bold tracking-tight text-slate-900 sm:text-lg">
               {{ t('appTitle') }}
-            </span>
-            <span
-              v-if="isDebugMode"
-              class="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-800"
-              title="Mode debug actif via ?debug=true"
-            >
-              <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-              {{ t('debugModeBadge') }}
             </span>
           </div>
           <p class="text-xs text-slate-500">
