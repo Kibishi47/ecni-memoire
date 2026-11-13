@@ -6,7 +6,10 @@ import type {
   SimulationConfig,
   WorkerSchedulingMode,
 } from '../types/simulator'
+import type { EngineCardModel } from '../types/cardModel'
 import type { MetaOpponentDeck, ParsedDeck } from '../types/deck'
+import CardFanThumbnail from './CardFanThumbnail.vue'
+import CardZoomModal from './CardZoomModal.vue'
 import {
   computeAiIntelligence,
   computeHardwareAllocation,
@@ -43,6 +46,16 @@ const emit = defineEmits<{
 const { t, currentLang } = useI18n()
 
 const activeConfigTab = ref<'quick' | 'advanced'>('quick')
+const zoomedOpponentCards = ref<EngineCardModel[]>([])
+
+function openOpponentCardsZoom(cards: EngineCardModel[] | undefined) {
+  if (!cards || cards.length === 0) return
+  zoomedOpponentCards.value = cards
+}
+
+function closeOpponentCardsZoom() {
+  zoomedOpponentCards.value = []
+}
 
 const recommendedPresets = computed(() =>
   getRecommendedPresetsForProfile(props.hardwareProfile),
@@ -954,11 +967,23 @@ const launchButtonState = computed(() => {
             </p>
           </div>
 
-          <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+          <div class="mt-4 flex items-center justify-between gap-2.5 border-t border-slate-100 pt-3 text-xs text-slate-500">
+            <CardFanThumbnail
+              v-if="opp.keyThreatCards && opp.keyThreatCards.length > 0"
+              :cards="opp.keyThreatCards"
+              size="sm"
+              @select="openOpponentCardsZoom(opp.keyThreatCards)"
+            />
             <span class="truncate">{{ t('threatsLabel') }} : {{ (currentLang === 'en' && opp.keyThreatsEn ? opp.keyThreatsEn : opp.keyThreats).slice(0, 2).join(', ') }}</span>
           </div>
         </div>
       </div>
     </div>
+
+    <CardZoomModal
+      :cards="zoomedOpponentCards"
+      :is-open="zoomedOpponentCards.length > 0"
+      @close="closeOpponentCardsZoom"
+    />
   </div>
 </template>
