@@ -727,7 +727,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             </p>
           </div>
 
-          <!-- KPI 4 : Flexibilité Ordres du Boss -->
+          <!-- KPI 4 : Flexibilité Supporter -->
           <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             <div class="text-xs font-bold text-slate-600">{{ t('kpiBossFlexibility') }}</div>
             <div class="mt-2 text-2xl font-black text-slate-900">

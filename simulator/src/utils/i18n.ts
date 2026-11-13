@@ -224,8 +224,9 @@ export const translations: Record<Language, Record<string, string>> = {
     kpiAttackStreamingDesc: 'Capacité à riposter immédiatement après avoir subi un KO.',
     kpiDisruptionResilience: 'Résilience aux Perturbations',
     kpiDisruptionResilienceDesc: 'Taux de reprise après une carte comme Mashynn ou Tampon Injuste.',
-    kpiBossFlexibility: 'Flexibilité Ordres du Boss',
-    kpiBossFlexibilityDesc: 'Attaquer et cibler le banc sans bloquer sa propre pioche.',
+    kpiBossFlexibility: 'Flexibilité Supporter',
+    kpiBossFlexibilityDesc:
+      'Attaquer sans consommer le Supporter du tour, libérant un Supporter offensif (Ordres du Boss, etc.).',
 
     // Detailed Stats
     turnOrderHeader: 'Ordre du Tour & Pression T1',
@@ -563,8 +564,9 @@ export const translations: Record<Language, Record<string, string>> = {
     kpiAttackStreamingDesc: 'Ability to revenge attack immediately after suffering a KO.',
     kpiDisruptionResilience: 'Disruption Resilience',
     kpiDisruptionResilienceDesc: 'Recovery rate after opponent plays Iono or Unfair Stamp.',
-    kpiBossFlexibility: 'Boss\'s Orders Flexibility',
-    kpiBossFlexibilityDesc: 'Attack and target the bench without stalling your draw engine.',
+    kpiBossFlexibility: 'Supporter Flexibility',
+    kpiBossFlexibilityDesc:
+      'Attack without spending your Supporter for the turn, leaving room for offensive Supporters.',
 
     // Detailed Stats
     turnOrderHeader: 'Turn Order & T1 Pressure',
