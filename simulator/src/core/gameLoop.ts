@@ -132,7 +132,6 @@ export interface SimulationShardInput {
 export interface SimulationShardResult {
   shardId: number
   outcomes: SingleGameOutcome[]
-  tracedGames: TracedGameRecord[]
   telemetry?: ShardTelemetryAccumulator
 }
 
@@ -898,7 +897,6 @@ export function runSimulationShard(
   onProgress?: (completedCountInShard: number) => void,
 ): SimulationShardResult {
   const outcomes: SingleGameOutcome[] = []
-  const tracedGames: TracedGameRecord[] = []
   const oppCount = Math.max(1, input.opponentDecks.length)
   const telemetry = createShardTelemetryAccumulator(input.playerDeckModels)
 
@@ -906,7 +904,6 @@ export function runSimulationShard(
     const globalGameIdx = input.startGameIndex + i
     const oppDeck = input.opponentDecks[globalGameIdx % oppCount]!
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
-    const shouldTrace = Boolean(input.config.debugMode) && globalGameIdx < MAX_TRACED_GAMES
 
     try {
       const outcome = playFullGame(
@@ -915,14 +912,11 @@ export function runSimulationShard(
         globalGameIdx,
         gameSeed,
         input.config,
-        shouldTrace,
+        false,
         telemetry,
       )
 
       outcomes.push(outcome)
-      if (outcome.tracedGame) {
-        tracedGames.push(outcome.tracedGame)
-      }
     } catch (err) {
       console.error(
         `[gameLoop] Exception in game #${globalGameIdx + 1} (Seed: ${gameSeed}) vs ${oppDeck.name}:`,
@@ -950,14 +944,13 @@ export function runSimulationShard(
   return {
     shardId: input.shardId,
     outcomes,
-    tracedGames,
     telemetry,
   }
 }
 
 /**
- * Fusionne les résultats de tous les Shards Web Workers pour produire les 8 KPIs obligatoires,
- * les 6 familles d'analyses tactiques compétitives et les parties tracées pour l'Inspecteur Debug.
+ * Fusionne les résultats de tous les Shards Web Workers pour produire les 8 KPIs obligatoires
+ * et les 6 familles d'analyses tactiques compétitives.
  */
 export function mergeSimulationShards(
   shards: SimulationShardResult[],
@@ -967,13 +960,11 @@ export function mergeSimulationShards(
   totalDurationMs: number,
 ): SimulationMetricsSummary {
   const allOutcomes: SingleGameOutcome[] = []
-  const allTraced: TracedGameRecord[] = []
   const mergedCardCounters: Record<string, ShardCardCounter> = {}
   const mergedComboCounters: Record<string, ShardComboCounter> = {}
 
   for (const shard of shards) {
     allOutcomes.push(...shard.outcomes)
-    allTraced.push(...shard.tracedGames)
 
     if (shard.telemetry) {
       for (const [cardId, c] of Object.entries(shard.telemetry.cardCounters)) {
@@ -1006,7 +997,6 @@ export function mergeSimulationShards(
   }
 
   allOutcomes.sort((a, b) => a.gameIndex - b.gameIndex)
-  allTraced.sort((a, b) => a.gameIndex - b.gameIndex)
 
   const totalGames = allOutcomes.length
   let wins = 0
@@ -1341,6 +1331,5 @@ export function mergeSimulationShards(
     turnOrderSplitStats,
     configUsed: config,
     baseSeedUsed: baseSeed,
-    tracedGames: allTraced.slice(0, MAX_TRACED_GAMES),
   }
 }
