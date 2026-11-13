@@ -40,10 +40,6 @@ const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
 const maxHardwareWorkers = computed(() => hardwareProfile.value.workerThreadsMax)
 const initialPresets = getRecommendedPresetsForProfile(hardwareProfile.value)
 
-function handleRecalibrateHardware() {
-  hardwareProfile.value = calibrateHardwareProfile(true)
-}
-
 const rawDeckText = ref<string>('')
 
 const initialParsed = parsePtcglDecklist('')
@@ -588,7 +584,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :is-simulating="isSimulating"
         :progress-percent="progressPercent"
         @update-config="handleUpdateConfig"
-        @recalibrate-hardware="handleRecalibrateHardware"
         @back-step1="currentStep = 1"
         @launch-simulation="executeInitialSimulation"
         @cancel-simulation="handleCancelSimulation"
