@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildHumanReadableAiBreakdown,
   extractCleanAiTranscriptions,
+  formatHumanCardFilter,
   getHumanReadableActionType,
   getHumanReadableAiRole,
   getHumanReadableEffectDetails,
@@ -185,5 +187,78 @@ describe('debugModelHelper — AI Model Clean Extraction & Human-Readable Format
     expect(detailsFr.some((d) => d.value.includes('×50'))).toBe(true)
     expect(detailsFr.some((d) => d.value === 'Deck')).toBe(true)
     expect(detailsFr.some((d) => d.value === 'Main')).toBe(true)
+  })
+
+  it('builds a clear non-developer AI summary without raw JSON or [object Object] leaks', () => {
+    const model: EngineCardModel = {
+      cardId: 'sv01-166',
+      category: 'TRAINER',
+      subCategory: 'ITEM',
+      identity: {
+        cardId: 'sv01-166',
+        nameFr: 'Faiblo Ball',
+        nameEn: 'Nest Ball',
+        setId: 'sv01',
+        category: 'TRAINER',
+        subCategory: 'ITEM',
+        isRuleBox: false,
+        prizeCardsGiven: 1,
+        isAceSpec: false,
+        isAncient: false,
+        isFuture: false,
+        isTera: false,
+        legalStandard: true,
+        legalExpanded: true,
+      },
+      pokemonStats: null,
+      strategicEvaluator: {
+        aiRole: 'CONSISTENCY_BOOSTER',
+        turnPhaseWeights: { turn1: 0.95, turn2: 0.7, turn3: 0.4, turn4Plus: 0.2 },
+        decklistSynergyRequirements: ['requires_energy_type:Feu'],
+        holdForNextTurnBonus: 0.1,
+        discardPriorityWhenDead: 8,
+      },
+      playableActions: [
+        {
+          actionId: 'play_nest_ball',
+          label: 'Jouer Faiblo Ball',
+          actionType: 'PLAY_FROM_HAND',
+          timingPhase: 'MAIN_PHASE_1',
+          canUseTurn1GoingFirst: true,
+          canUseTurn1GoingSecond: true,
+          cost: {},
+          preconditions: [
+            'BENCH_HAS_EMPTY_SLOT',
+            { type: 'ZONE_HAS_MATCHING_CARD', zone: 'DECK', minCount: 1, targetFilter: { subCategory: 'BASIC', maxHp: 70 } } as any,
+          ],
+          effects: [
+            {
+              primitive: 'SEARCH_DECK',
+              count: 1,
+              upTo: true,
+              sourceZone: 'DECK',
+              destinationZone: 'BENCH',
+              filter: { subCategory: 'BASIC' } as any,
+            },
+          ],
+          deadCardCondition: null,
+        },
+      ],
+    }
+
+    expect(formatHumanCardFilter({ subCategory: 'BASIC', maxHp: 70 }, 'fr')).toBe('Pokémon de Base • 70 PV ou moins')
+
+    const breakdownFr = buildHumanReadableAiBreakdown(model, 'fr')
+    expect(breakdownFr).not.toBeNull()
+    expect(breakdownFr?.roleLabel).toBe('Stabilisateur de Consistance')
+    expect(breakdownFr?.phasePriorities[0]?.pct).toBe(95)
+    expect(breakdownFr?.actions[0]?.effectSentences[0]).toContain('Cherche')
+    expect(breakdownFr?.actions[0]?.effectSentences[0]).not.toContain('[object Object]')
+    expect(breakdownFr?.actions[0]?.preconditions[1]).toContain('Pokémon de Base')
+    expect(breakdownFr?.synergies[0]?.text).toContain('Feu')
+
+    const breakdownEn = buildHumanReadableAiBreakdown(model, 'en')
+    expect(breakdownEn?.roleLabel).toBe('Consistency Booster')
+    expect(breakdownEn?.actions[0]?.effectSentences[0]).toContain('Searches')
   })
 })

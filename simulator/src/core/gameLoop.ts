@@ -22,7 +22,7 @@ import type {
   TracedTurnRecord,
   TurnOrderSplitStats,
 } from '../types/simulator'
-import { normalizeCardNameForMatch } from '../data/cardCatalog'
+import { matchesCardFilter, normalizeCardNameForMatch } from '../data/cardCatalog'
 import {
   applyDebugPerturbationIfConfigured,
   createInitialMatchState,
@@ -76,6 +76,7 @@ export interface ShardComboCounter {
   label: string
   cardId: string
   cardNameFr: string
+  relatedCardIds?: string[]
   conditionSummary: string
   sourceType: PlayableAction['sourceType']
   actionId: string
@@ -249,11 +250,132 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
   return 'Condition tactique spécifique'
 }
 
+function resolveComboRelatedCardIds(
+  model: EngineCardModel,
+  action: PlayableAction,
+  uniqueDeckModels: EngineCardModel[],
+): string[] {
+  const related: string[] = []
+  const pushId = (cid: string) => {
+    if (cid && cid !== model.cardId && !related.includes(cid)) {
+      related.push(cid)
+    }
+  }
+
+  for (const rawPre of action.preconditions || []) {
+    const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
+    if (preType === 'HAS_TERA_POKEMON_IN_PLAY') {
+      const tera = uniqueDeckModels.find((m) => m.identity.isTera || m.pokemonStats?.isTera)
+      if (tera) pushId(tera.cardId)
+    } else if (preType === 'STADIUM_IN_PLAY') {
+      const stadium = uniqueDeckModels.find((m) => m.subCategory === 'STADIUM')
+      if (stadium) pushId(stadium.cardId)
+    } else if (preType === 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION') {
+      const scCard = uniqueDeckModels.find((m) =>
+        m.playableActions.some((a) => a.effects.some((e) => e.primitive === 'APPLY_SPECIAL_CONDITION')),
+      )
+      if (scCard) pushId(scCard.cardId)
+    }
+  }
+
+  if (model.subCategory === 'STAGE_2') {
+    const rareCandy = uniqueDeckModels.find(
+      (m) =>
+        m.subCategory === 'ITEM' &&
+        m.playableActions.some((a) => a.effects.some((e) => e.primitive === 'EVOLVE_POKEMON')),
+    )
+    if (rareCandy) pushId(rareCandy.cardId)
+  }
+  if (model.subCategory === 'STAGE_2' || model.subCategory === 'STAGE_1') {
+    const preEvoName = normalizeCardNameForMatch(model.pokemonStats?.evolvesFrom || '')
+    const rootBasicName = normalizeCardNameForMatch(model.pokemonStats?.rootBasicName || '')
+    const preEvoCard = uniqueDeckModels.find((m) => {
+      if (m.category !== 'POKEMON') return false
+      const candidateName = normalizeCardNameForMatch(m.identity.nameFr || m.identity.nameEn || '')
+      return Boolean((preEvoName && candidateName === preEvoName) || (rootBasicName && candidateName === rootBasicName))
+    })
+    if (preEvoCard) pushId(preEvoCard.cardId)
+  }
+
+  for (const rawReq of model.strategicEvaluator?.decklistSynergyRequirements || []) {
+    if (typeof rawReq === 'string') {
+      if (rawReq.startsWith('requires_energy_type:')) {
+        const energyType = normalizeCardNameForMatch(rawReq.replace('requires_energy_type:', ''))
+        if (energyType && energyType !== 'incolore' && energyType !== 'colorless') {
+          const energyCard = uniqueDeckModels.find(
+            (m) =>
+              m.category === 'ENERGY' &&
+              ((m.pokemonStats?.types || []).some((t) => normalizeCardNameForMatch(t) === energyType) ||
+                normalizeCardNameForMatch(m.identity.nameFr).includes(energyType) ||
+                normalizeCardNameForMatch(m.identity.nameEn || '').includes(energyType)),
+          )
+          if (energyCard) pushId(energyCard.cardId)
+        }
+      } else if (rawReq.startsWith('requires_evolution_line:')) {
+        const evoName = normalizeCardNameForMatch(rawReq.replace('requires_evolution_line:', ''))
+        const evoCard = uniqueDeckModels.find(
+          (m) =>
+            normalizeCardNameForMatch(m.identity.nameFr).includes(evoName) ||
+            normalizeCardNameForMatch(m.identity.nameEn || '').includes(evoName),
+        )
+        if (evoCard) pushId(evoCard.cardId)
+      }
+    } else if ((rawReq as any)?.requiredFilter) {
+      const reqEnergy = normalizeCardNameForMatch((rawReq as any).requiredFilter?.energyType || '')
+      if (reqEnergy !== 'incolore' && reqEnergy !== 'colorless') {
+        const matched = uniqueDeckModels.find((m) => matchesCardFilter(m, (rawReq as any).requiredFilter))
+        if (matched) pushId(matched.cardId)
+      }
+    }
+  }
+
+  if (action.cost && typeof action.cost === 'object' && !Array.isArray(action.cost)) {
+    for (const energyKey of Object.keys(action.cost)) {
+      const normKey = normalizeCardNameForMatch(energyKey)
+      if (!normKey || normKey === 'incolore' || normKey === 'colorless' || normKey === 'any') continue
+      const energyCard = uniqueDeckModels.find(
+        (m) =>
+          m.category === 'ENERGY' &&
+          ((m.pokemonStats?.types || []).some((t) => normalizeCardNameForMatch(t) === normKey) ||
+            normalizeCardNameForMatch(m.identity.nameFr).includes(normKey) ||
+            normalizeCardNameForMatch(m.identity.nameEn || '').includes(normKey)),
+      )
+      if (energyCard) {
+        pushId(energyCard.cardId)
+        break
+      }
+    }
+  }
+
+  if (
+    related.length === 0 &&
+    (model.category === 'TRAINER' ||
+      model.strategicEvaluator?.aiRole === 'ENERGY_ACCELERATOR' ||
+      model.strategicEvaluator?.aiRole === 'DRAW_ENGINE')
+  ) {
+    const mainAttacker = uniqueDeckModels.find(
+      (m) => m.category === 'POKEMON' && (m.strategicEvaluator?.aiRole === 'MAIN_ATTACKER' || m.identity.isRuleBox),
+    )
+    if (mainAttacker) pushId(mainAttacker.cardId)
+  }
+
+  return related.slice(0, 3)
+}
+
 export function createShardTelemetryAccumulator(
   playerDeckModels: EngineCardModel[],
 ): ShardTelemetryAccumulator {
   const cardCounters: Record<string, ShardCardCounter> = {}
   const comboCounters: Record<string, ShardComboCounter> = {}
+
+  const uniqueDeckModels: EngineCardModel[] = []
+  const seenUniqueIds = new Set<string>()
+  for (const m of playerDeckModels) {
+    if (!seenUniqueIds.has(m.cardId)) {
+      seenUniqueIds.add(m.cardId)
+      uniqueDeckModels.push(m)
+    }
+  }
 
   for (const model of playerDeckModels) {
     const existing = cardCounters[model.cardId]
@@ -278,8 +400,7 @@ export function createShardTelemetryAccumulator(
     }
   }
 
-  for (const cardId of Object.keys(cardCounters)) {
-    const sampleModel = playerDeckModels.find((m) => m.cardId === cardId)!
+  for (const sampleModel of uniqueDeckModels) {
     for (const pAction of sampleModel.playableActions) {
       const hasNonTrivialPrecondition = pAction.preconditions.some((p) => {
         const pType = typeof p === 'string' ? p : (p as any).type
@@ -311,6 +432,7 @@ export function createShardTelemetryAccumulator(
             label: `${sampleModel.identity.nameFr} — ${pAction.label}`,
             cardId: sampleModel.cardId,
             cardNameFr: sampleModel.identity.nameFr,
+            relatedCardIds: resolveComboRelatedCardIds(sampleModel, pAction, uniqueDeckModels),
             conditionSummary: describeComboCondition(sampleModel, pAction),
             sourceType: (pAction.actionType || pAction.sourceType) as any,
             actionId: pAction.actionId,
@@ -1282,6 +1404,7 @@ export function mergeSimulationShards(
       label: cb.label,
       cardId: cb.cardId,
       cardNameFr: cb.cardNameFr,
+      relatedCardIds: cb.relatedCardIds,
       conditionSummary: cb.conditionSummary,
       gamesTriggered: cb.gamesTriggered,
       totalTriggersCount: cb.totalTriggersCount,

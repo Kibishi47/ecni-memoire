@@ -602,6 +602,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :progress-elapsed-ms="progressElapsedMs"
         :deck-versions="deckVersions"
         :active-version-id="activeVersionId"
+        :meta-opponents="metaOpponents"
         @adjust-card-qty="handleAdjustCardQty"
         @remove-card="handleRemoveCard"
         @add-catalog-card="handleAddCatalogCard"

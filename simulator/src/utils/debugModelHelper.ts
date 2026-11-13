@@ -479,10 +479,11 @@ export function getHumanReadableEffectDetails(
     })
   }
 
-  if (effect.filter) {
+  const rawFilter = effect.filter ?? effect.targetFilter
+  if (rawFilter) {
     details.push({
       label: lang === 'en' ? 'Filter' : 'Filtre de recherche',
-      value: String(effect.filter),
+      value: typeof rawFilter === 'string' ? rawFilter : formatHumanCardFilter(rawFilter, lang),
     })
   }
 
@@ -622,4 +623,718 @@ export function extractCleanAiTranscriptions(
   }
 
   return stripNullAndEmpty(rawStructure) || null
+}
+
+// ============================================================================
+// INTERPRÉTEUR PÉDAGOGIQUE POUR UTILISATEUR NON-DÉVELOPPEUR (ONGLET MODÈLE IA)
+// ============================================================================
+
+export interface HumanReadableAiPhasePriority {
+  key: 'turn1' | 'turn2' | 'turn3' | 'turn4Plus'
+  label: string
+  pct: number
+  tier: 'high' | 'medium' | 'low'
+  badge: string
+}
+
+export interface HumanReadableAiActionSummary {
+  actionId: string
+  title: string
+  actionTypeLabel: string
+  timingLabel: string
+  turn1Hints: string[]
+  costs: string[]
+  preconditions: string[]
+  effectSentences: string[]
+  deadConditionNote: string | null
+}
+
+export interface HumanReadableAiBreakdown {
+  roleLabel: string
+  roleDescription: string
+  traitBadges: string[]
+  evolutionChainText: string | null
+  retreatText: string | null
+  phasePriorities: HumanReadableAiPhasePriority[]
+  behaviorInsights: string[]
+  synergies: Array<{ text: string; critical: boolean }>
+  deadConditions: string[]
+  actions: HumanReadableAiActionSummary[]
+}
+
+export function formatHumanCardFilter(filter: unknown, lang: Language = 'fr'): string {
+  if (!filter) return lang === 'en' ? 'Any card' : "N'importe quelle carte"
+  if (typeof filter === 'string') return filter
+  if (typeof filter !== 'object') return String(filter)
+
+  const f = filter as Record<string, any>
+  const parts: string[] = []
+
+  if (f.specificCardName) {
+    parts.push(lang === 'en' ? `Card named "${f.specificCardName}"` : `Carte « ${f.specificCardName} »`)
+  } else if (f.subCategory) {
+    const subFr: Record<string, string> = {
+      BASIC: 'Pokémon de Base',
+      STAGE_1: 'Pokémon Niveau 1',
+      STAGE_2: 'Pokémon Niveau 2',
+      ITEM: 'Objet',
+      SUPPORTER: 'Supporter',
+      TOOL: 'Outil Pokémon',
+      STADIUM: 'Stade',
+      BASIC_ENERGY: 'Énergie de Base',
+      SPECIAL_ENERGY: 'Énergie Spéciale',
+    }
+    const subEn: Record<string, string> = {
+      BASIC: 'Basic Pokémon',
+      STAGE_1: 'Stage 1 Pokémon',
+      STAGE_2: 'Stage 2 Pokémon',
+      ITEM: 'Item card',
+      SUPPORTER: 'Supporter card',
+      TOOL: 'Pokémon Tool',
+      STADIUM: 'Stadium card',
+      BASIC_ENERGY: 'Basic Energy',
+      SPECIAL_ENERGY: 'Special Energy',
+    }
+    const up = String(f.subCategory).toUpperCase()
+    parts.push((lang === 'en' ? subEn[up] : subFr[up]) || f.subCategory)
+  } else if (f.category) {
+    const catFr: Record<string, string> = { POKEMON: 'Pokémon', TRAINER: 'Dresseur', ENERGY: 'Énergie' }
+    const catEn: Record<string, string> = { POKEMON: 'Pokémon', TRAINER: 'Trainer', ENERGY: 'Energy' }
+    const up = String(f.category).toUpperCase()
+    parts.push((lang === 'en' ? catEn[up] : catFr[up]) || f.category)
+  }
+
+  if (f.energyType) {
+    parts.push(lang === 'en' ? `Type: ${f.energyType}` : `Type ${f.energyType}`)
+  }
+  if (typeof f.maxHp === 'number') {
+    parts.push(lang === 'en' ? `${f.maxHp} HP or less` : `${f.maxHp} PV ou moins`)
+  }
+  if (typeof f.minHp === 'number') {
+    parts.push(lang === 'en' ? `${f.minHp} HP or more` : `${f.minHp} PV ou plus`)
+  }
+  if (f.isEvolution === true) parts.push(lang === 'en' ? 'Evolution Pokémon' : 'Pokémon Évolutif')
+  if (f.isRuleBox === true) parts.push(lang === 'en' ? 'Rule Box (ex/V)' : 'Pokémon à Règle (ex)')
+  if (f.isRuleBox === false) parts.push(lang === 'en' ? 'Without Rule Box' : 'Sans encadré Règle')
+  if (f.isTera === true) parts.push(lang === 'en' ? 'Tera Pokémon' : 'Téracristal')
+  if (f.isAncient === true) parts.push(lang === 'en' ? 'Ancient' : 'Temps Passé')
+  if (f.isFuture === true) parts.push(lang === 'en' ? 'Future' : 'Temps Futur')
+  if (f.hasAbility === true) parts.push(lang === 'en' ? 'With an Ability' : 'Possédant un Talent')
+  if (typeof f.maxRetreatCost === 'number') {
+    parts.push(lang === 'en' ? `Retreat ≤ ${f.maxRetreatCost}` : `Retraite ≤ ${f.maxRetreatCost}`)
+  }
+
+  if (parts.length > 0) return parts.join(' • ')
+  return lang === 'en' ? 'Matching cards' : 'Cartes compatibles'
+}
+
+export function formatHumanPreconditionItem(rawPre: unknown, lang: Language = 'fr'): string {
+  if (!rawPre) return ''
+  if (typeof rawPre === 'string') {
+    return getHumanReadablePrecondition(rawPre, lang)
+  }
+  if (typeof rawPre === 'object') {
+    const obj = rawPre as Record<string, any>
+    const baseType = String(obj.type || '')
+    if (baseType === 'ZONE_HAS_MATCHING_CARD') {
+      const zoneStr = obj.zone ? formatHumanZone(obj.zone, lang) : lang === 'en' ? 'Deck' : 'Deck'
+      const filterStr = obj.targetFilter ? formatHumanCardFilter(obj.targetFilter, lang) : ''
+      const min = obj.minCount ?? 1
+      return lang === 'en'
+        ? `At least ${min} matching card (${filterStr || 'compatible'}) in ${zoneStr}`
+        : `Au moins ${min} carte compatible (${filterStr || 'ciblée'}) dans : ${zoneStr}`
+    }
+    if (baseType === 'HAND_MIN_OTHER_CARDS') {
+      const min = obj.minCount ?? 1
+      return lang === 'en'
+        ? `Requires at least ${min} other card(s) in hand`
+        : `Nécessite au moins ${min} autre(s) carte(s) en main`
+    }
+    if (baseType === 'OPPONENT_PRIZES_EXACT_COUNT') {
+      const count = obj.minCount ?? 1
+      return lang === 'en'
+        ? `Opponent must have exactly ${count} Prize card(s) left`
+        : `L'adversaire doit avoir exactement ${count} Récompense(s) restante(s)`
+    }
+    return getHumanReadablePrecondition(baseType, lang)
+  }
+  return String(rawPre)
+}
+
+export function getAiRoleDescription(role: string | null | undefined, lang: Language = 'fr'): string {
+  const up = (role || '').toUpperCase().trim()
+  const descFr: Record<string, string> = {
+    MAIN_ATTACKER: 'Pièce maîtresse offensive : l’IA cherche en priorité à poser, faire évoluer et charger ce Pokémon pour prendre des Récompenses.',
+    SECONDARY_ATTACKER: 'Attaquant de soutien ou de relance : l’IA l’utilise pour finir un K.O., contourner un blocage ou punir certains matchups.',
+    DRAW_ENGINE: 'Moteur de pioche : sa présence en jeu augmente fortement la régularité et les options disponibles à chaque tour.',
+    ENERGY_ACCELERATOR: 'Accélérateur d’Énergie : permet d’attacher plusieurs Énergies en un tour et de maintenir la pression offensive.',
+    GUEST_TECH: 'Carte technique situationnelle : l’IA la garde pour répondre à une menace précise du métagame ou saisir une ouverture tactique.',
+    DISRUPTION: 'Perturbation et contrôle : sert à ralentir le plan de jeu adverse (dérégler la main, piéger l’Actif ou bloquer les Objets).',
+    CONSISTENCY_BOOSTER: 'Accélérateur de stabilité : fluidifie la sortie de début de partie et permet de trouver rapidement les Pokémon ou Ressources clés.',
+  }
+  const descEn: Record<string, string> = {
+    MAIN_ATTACKER: 'Primary win condition: the AI prioritizes getting this Pokémon set up and powered with Energy to take Prize cards.',
+    SECONDARY_ATTACKER: 'Backup attacker: deployed to finish KOs, answer specific threats, or keep pressure while conserving resources.',
+    DRAW_ENGINE: 'Consistency engine: keeping this card active provides reliable card flow and better branching choices each turn.',
+    ENERGY_ACCELERATOR: 'Energy acceleration: enables multi-attachment turns so your attackers stay online right on curve.',
+    GUEST_TECH: 'Situational tech card: held by the AI to counter specific board states or swing critical prize trades.',
+    DISRUPTION: 'Disruption & control: played to shrink the opponent’s options, trap a weak Active, or lock key trainers.',
+    CONSISTENCY_BOOSTER: 'Setup & consistency card: smooths out early turns to locate essential Pokémon and resources reliably.',
+  }
+  const map = lang === 'en' ? descEn : descFr
+  return (
+    map[up] ||
+    (lang === 'en'
+      ? 'Evaluated dynamically according to board state and prize race progression.'
+      : 'Évaluée dynamiquement selon la situation du plateau et la course aux Récompenses.')
+  )
+}
+
+export function formatHumanActionCosts(action: PlayableAction, lang: Language = 'fr'): string[] {
+  const pills: string[] = []
+
+  if (action.cost && typeof action.cost === 'object' && !Array.isArray(action.cost)) {
+    const entries = Object.entries(action.cost).filter(([, v]) => Number(v) > 0)
+    if (entries.length > 0) {
+      const energyStr = entries.map(([k, v]) => `${v}× ${k}`).join(', ')
+      pills.push(lang === 'en' ? `Energy: ${energyStr}` : `Énergie : ${energyStr}`)
+    }
+  } else if (Array.isArray(action.energyCost) && action.energyCost.length > 0) {
+    pills.push(
+      lang === 'en'
+        ? `Energy: ${action.energyCost.join(', ')}`
+        : `Énergie : ${action.energyCost.join(', ')}`,
+    )
+  }
+
+  if (Array.isArray(action.costs)) {
+    for (const c of action.costs) {
+      if (!c) continue
+      const cType = String(c.type || '').toUpperCase()
+      const cnt = c.count ?? 1
+      const filterDesc = c.targetFilter ? ` (${formatHumanCardFilter(c.targetFilter, lang)})` : ''
+      if (cType.includes('DISCARD')) {
+        pills.push(
+          lang === 'en'
+            ? `Discard ${cnt} card(s)${filterDesc}`
+            : `Défausser ${cnt} carte(s)${filterDesc}`,
+        )
+      } else if (cType.includes('SHUFFLE')) {
+        pills.push(
+          lang === 'en'
+            ? `Shuffle ${cnt} card(s) into deck`
+            : `Remélanger ${cnt} carte(s) dans le deck`,
+        )
+      } else if (cnt > 0 && cType) {
+        pills.push(`${cType}: ${cnt}`)
+      }
+    }
+  }
+
+  if (pills.length === 0 && (action.actionType === 'ATTACK' || action.sourceType === 'ATTACK')) {
+    pills.push(lang === 'en' ? '0 Energy' : '0 Énergie')
+  }
+
+  return pills
+}
+
+export function describePlainAtomicEffect(effect: AtomicEffect, lang: Language = 'fr'): string {
+  const prim = String(effect.primitive || '').toUpperCase()
+  const dmg = effect.value ?? effect.baseDamage ?? 0
+  const count = effect.count ?? 1
+  const upToText = effect.upTo ? (lang === 'en' ? 'up to ' : "jusqu'à ") : ''
+  const targetDetail = getHumanReadableEffectDetails(effect, lang).find((d) => d.label === 'Target' || d.label === 'Cible')?.value
+  const srcZone = effect.sourceZone ? formatHumanZone(effect.sourceZone, lang) : null
+  const dstZone = effect.destinationZone || effect.zone ? formatHumanZone((effect.destinationZone || effect.zone)!, lang) : null
+  const filterRaw = effect.filter ?? effect.targetFilter
+  const filterTxt = filterRaw
+    ? typeof filterRaw === 'string'
+      ? filterRaw
+      : formatHumanCardFilter(filterRaw, lang)
+    : null
+
+  let core = ''
+  switch (prim) {
+    case 'DAMAGE_ACTIVE':
+      core =
+        lang === 'en'
+          ? `Deals ${dmg} damage to ${targetDetail || "Opponent's Active Pokémon"}`
+          : `Inflige ${dmg} dégâts à : ${targetDetail || 'Pokémon Actif Adverse'}`
+      break
+    case 'DAMAGE_BENCH':
+      core =
+        lang === 'en'
+          ? `Deals ${dmg} bench damage to ${targetDetail || 'Opponent Benched Pokémon'}`
+          : `Inflige ${dmg} dégâts de banc sur : ${targetDetail || 'Banc Adverse'}`
+      break
+    case 'PLACE_DAMAGE_COUNTERS':
+      core =
+        lang === 'en'
+          ? `Places ${dmg} damage value (${Math.round(dmg / 10)} counters) on ${targetDetail || 'Opponent Pokémon'}`
+          : `Place ${dmg} dégâts en marqueurs (${Math.round(dmg / 10)} marqueur(s)) sur : ${targetDetail || 'Pokémon Adverse'}`
+      break
+    case 'MOVE_DAMAGE_COUNTERS':
+      core =
+        lang === 'en'
+          ? `Moves damage counters between Pokémon (${targetDetail || 'board'})`
+          : `Déplace des marqueurs de dégâts sur le plateau`
+      break
+    case 'SEARCH_DECK':
+      core =
+        lang === 'en'
+          ? `Searches ${srcZone || 'Deck'} for ${upToText}${count} ${filterTxt || 'card(s)'} and puts them into ${dstZone || 'Hand'}`
+          : `Cherche ${upToText}${count} carte(s)${filterTxt ? ` (${filterTxt})` : ''} dans ${srcZone || 'le Deck'} vers ${dstZone || 'la Main'}`
+      break
+    case 'DRAW_CARDS':
+      core =
+        lang === 'en'
+          ? `Draws ${upToText}${count} card(s)`
+          : `Pioche ${upToText}${count} carte(s)`
+      break
+    case 'SHUFFLE_HAND_DRAW':
+      core =
+        lang === 'en'
+          ? `Shuffles hand into deck, then draws ${count} card(s)`
+          : `Remélange la main dans le deck puis pioche ${count} carte(s)`
+      break
+    case 'ATTACH_ENERGY':
+      core =
+        lang === 'en'
+          ? `Attaches ${upToText}${count} Energy card(s)${filterTxt ? ` (${filterTxt})` : ''} from ${srcZone || 'Hand/Deck'} to ${targetDetail || 'your Pokémon'}`
+          : `Attache ${upToText}${count} Énergie(s)${filterTxt ? ` (${filterTxt})` : ''} depuis ${srcZone || 'Main/Deck'} sur ${targetDetail || 'vos Pokémon'}`
+      break
+    case 'RECOVER_FROM_DISCARD':
+      core =
+        lang === 'en'
+          ? `Recovers ${upToText}${count} ${filterTxt || 'card(s)'} from Discard Pile to ${dstZone || 'Hand/Deck'}`
+          : `Récupère ${upToText}${count} carte(s)${filterTxt ? ` (${filterTxt})` : ''} depuis la Défausse vers ${dstZone || 'Main/Deck'}`
+      break
+    case 'DISCARD_CARDS':
+      core =
+        lang === 'en'
+          ? `Discards ${upToText}${count} card(s)${filterTxt ? ` (${filterTxt})` : ''}${srcZone ? ` from ${srcZone}` : ''}`
+          : `Défausse ${upToText}${count} carte(s)${filterTxt ? ` (${filterTxt})` : ''}${srcZone ? ` depuis ${srcZone}` : ''}`
+      break
+    case 'SWITCH_ACTIVE':
+      if (String(effect.target || '').toUpperCase().includes('OPPONENT')) {
+        core =
+          lang === 'en'
+            ? "Switches Opponent's Active Pokémon with a Benched Pokémon (Gust)"
+            : 'Envoie un Pokémon du Banc Adverse sur son Poste Actif (Rafale)'
+      } else {
+        core =
+          lang === 'en'
+            ? 'Switches your Active Pokémon with a Benched Pokémon'
+            : 'Échange votre Pokémon Actif avec un Pokémon de votre Banc'
+      }
+      break
+    case 'EVOLVE_POKEMON':
+      core =
+        lang === 'en'
+          ? 'Evolves a Pokémon directly in play (e.g. skipping Stage 1 via Rare Candy)'
+          : 'Fait évoluer un Pokémon en jeu directement (saut vers Niveau 2 possible)'
+      break
+    case 'HEAL':
+      core =
+        lang === 'en'
+          ? `Heals ${dmg} damage from ${targetDetail || 'Pokémon'}`
+          : `Soigne ${dmg} PV sur : ${targetDetail || 'Pokémon'}`
+      break
+    case 'APPLY_SPECIAL_CONDITION':
+      core =
+        lang === 'en'
+          ? `Applies a Special Condition to ${targetDetail || "Opponent's Active"}`
+          : `Inflige un État Spécial à : ${targetDetail || 'Pokémon Actif Adverse'}`
+      break
+    case 'MOVE_ENERGY':
+      core =
+        lang === 'en'
+          ? `Moves ${upToText}${count} attached Energy card(s) to another Pokémon`
+          : `Déplace ${upToText}${count} Énergie(s) attachée(s) vers un autre Pokémon`
+      break
+    case 'LOCK_ITEMS':
+      core =
+        lang === 'en'
+          ? 'Prevents Opponent from playing Item cards next turn'
+          : "Bloque les cartes Objet de l'adversaire au prochain tour"
+      break
+    case 'LOCK_ABILITIES':
+      core =
+        lang === 'en'
+          ? 'Shuts off targeted Pokémon Abilities'
+          : 'Neutralise les Talents des Pokémon ciblés'
+      break
+    case 'LOCK_NEXT_TURN_ATTACK':
+      core =
+        lang === 'en'
+          ? 'Blocks the defending Pokémon or self from attacking next turn'
+          : "Empêche d'attaquer au prochain tour"
+      break
+    case 'LOCK_RETREAT':
+      core =
+        lang === 'en'
+          ? "Prevents Opponent's Active Pokémon from retreating"
+          : "Empêche le Pokémon Actif Adverse de battre en retraite"
+      break
+    case 'MODIFY_DAMAGE_DEALT':
+      core =
+        lang === 'en'
+          ? `Increases damage dealt by ${dmg}`
+          : `Augmente les dégâts infligés (+${dmg})`
+      break
+    case 'MODIFY_DAMAGE_TAKEN':
+      core =
+        lang === 'en'
+          ? `Reduces incoming damage by ${Math.abs(dmg)}`
+          : `Réduit les dégâts subis (${dmg})`
+      break
+    case 'MODIFY_HP':
+      core =
+        lang === 'en'
+          ? `Modifies Maximum HP by ${dmg > 0 ? `+${dmg}` : dmg}`
+          : `Modifie les PV Max de ${dmg > 0 ? `+${dmg}` : dmg}`
+      break
+    case 'MODIFY_RETREAT_COST':
+      core =
+        dmg === 0
+          ? lang === 'en'
+            ? 'Sets Retreat Cost to 0'
+            : 'Rend le Coût de Retraite gratuit (0)'
+          : lang === 'en'
+            ? `Adjusts Retreat Cost by ${dmg > 0 ? `+${dmg}` : dmg}`
+            : `Modifie le Coût de Retraite de ${dmg > 0 ? `+${dmg}` : dmg}`
+      break
+    case 'PREVENT_DAMAGE_OR_EFFECTS':
+      core =
+        lang === 'en'
+          ? 'Prevents attack damage and/or effects on target Pokémon'
+          : 'Protège le Pokémon contre les dégâts ou effets d’attaques'
+      break
+    case 'EXPAND_BENCH':
+      core =
+        lang === 'en'
+          ? `Expands Bench size up to ${dmg || 8} slots`
+          : `Agrandit le Banc jusqu'à ${dmg || 8} emplacements`
+      break
+    case 'TAKE_EXTRA_PRIZE':
+      core =
+        lang === 'en'
+          ? `Takes ${count} extra Prize card(s) on Knock Out`
+          : `Permet de récupérer ${count} Récompense(s) supplémentaire(s) sur K.O.`
+      break
+    case 'PUT_ON_TOP_OR_BOTTOM_OF_DECK':
+      core =
+        lang === 'en'
+          ? `Places ${count} card(s) on top/bottom of the Deck`
+          : `Replace ${count} carte(s) au-dessus ou en dessous du Deck`
+      break
+    case 'MILL_DECK':
+      core =
+        lang === 'en'
+          ? `Discards ${count} card(s) from the top of the Deck`
+          : `Défausse ${count} carte(s) du dessus du Deck`
+      break
+    case 'KNOCK_OUT':
+      core =
+        lang === 'en'
+          ? `Immediately Knocks Out ${targetDetail || 'target Pokémon'}`
+          : `Met immédiatement K.O. : ${targetDetail || 'Pokémon ciblé'}`
+      break
+    default:
+      core = getHumanReadablePrimitive(prim, lang)
+  }
+
+  const qualifiers: string[] = []
+  if (effect.scalingMetric) {
+    const op = effect.scalingOperator === 'MULTIPLY' ? '×' : '+'
+    const val = effect.bonusValue != null ? ` ${op}${effect.bonusValue}` : ''
+    qualifiers.push(`${formatScalingMetric(effect.scalingMetric, lang)}${val}`)
+  } else if (effect.damageScalingType) {
+    qualifiers.push(
+      lang === 'en'
+        ? `Bonus scaling (+${effect.damageScalingValue ?? 0})`
+        : `Dégâts variables (+${effect.damageScalingValue ?? 0})`,
+    )
+  } else if (effect.damageScalingPerOpponentPrizeTaken) {
+    qualifiers.push(
+      lang === 'en'
+        ? `+${effect.damageScalingPerOpponentPrizeTaken} per Prize taken by Opponent`
+        : `+${effect.damageScalingPerOpponentPrizeTaken} par Récompense prise par l'adversaire`,
+    )
+  }
+
+  if (effect.coinFlipMode) {
+    const cf = getHumanReadableEffectDetails(effect, lang).find(
+      (d) => d.label === 'Coin Flip' || d.label === 'Lancer de pièce',
+    )?.value
+    if (cf) qualifiers.push(cf)
+  }
+  if (effect.optional) {
+    qualifiers.push(lang === 'en' ? 'Optional' : 'Effet optionnel')
+  }
+
+  return qualifiers.length > 0 ? `${core} — ${qualifiers.join(' • ')}` : core
+}
+
+export function formatDeadCardCondition(cond: unknown, lang: Language = 'fr'): string {
+  if (!cond) return ''
+  if (typeof cond === 'string') {
+    const up = cond.toUpperCase()
+    if (up.includes('NO_BASIC')) {
+      return lang === 'en' ? 'Useless if no Basic Pokémon needs to be searched' : 'Inutile s’il n’y a plus de Pokémon de Base à chercher'
+    }
+    if (up.includes('BENCH_FULL')) {
+      return lang === 'en' ? 'Unplayable when the Bench is completely full' : 'Injouable lorsque le Banc est complet'
+    }
+    if (up.includes('NO_ENERGY')) {
+      return lang === 'en' ? 'Dead card if no matching Energy remains' : 'Carte morte s’il ne reste plus d’Énergie compatible'
+    }
+    return cond
+  }
+  if (typeof cond === 'object') {
+    const obj = cond as Record<string, any>
+    const reason = String(obj.reason || '').toUpperCase()
+    const filterTxt = obj.targetFilter ? formatHumanCardFilter(obj.targetFilter, lang) : ''
+    const zonesTxt = Array.isArray(obj.zonesToCheck)
+      ? obj.zonesToCheck.map((z: string) => formatHumanZone(z, lang)).join(', ')
+      : ''
+    if (reason.includes('NO_MATCHING_TARGET') || reason.includes('EMPTY')) {
+      return lang === 'en'
+        ? `Considered dead if no ${filterTxt || 'compatible target'} remains${zonesTxt ? ` in ${zonesTxt}` : ''}`
+        : `Considérée comme carte morte s’il ne reste aucun(e) ${filterTxt || 'cible compatible'}${zonesTxt ? ` dans : ${zonesTxt}` : ''}`
+    }
+    if (reason) return `${reason}${filterTxt ? ` (${filterTxt})` : ''}`
+  }
+  return String(cond)
+}
+
+export function formatSynergyRequirementItem(
+  req: unknown,
+  lang: Language = 'fr',
+): { text: string; critical: boolean } {
+  if (typeof req === 'string') {
+    if (req.startsWith('requires_energy_type:')) {
+      const energyType = req.replace('requires_energy_type:', '').trim()
+      return {
+        text:
+          lang === 'en'
+            ? `Needs ${energyType} Energy cards in the deck`
+            : `Fonctionne avec des Énergies ${energyType} dans le deck`,
+        critical: true,
+      }
+    }
+    if (req.startsWith('requires_evolution_line:')) {
+      const evo = req.replace('requires_evolution_line:', '').trim()
+      return {
+        text:
+          lang === 'en'
+            ? `Requires pre-evolution line "${evo}" in the deck`
+            : `Dépend de la lignée évolutive « ${evo} » dans le deck`,
+        critical: true,
+      }
+    }
+    return { text: req, critical: false }
+  }
+
+  if (req && typeof req === 'object') {
+    const obj = req as Record<string, any>
+    const minCount = obj.minCountInDeck ?? 1
+    const critical = Boolean(obj.ifMissingSetValueToZero)
+    const filterTxt = obj.requiredFilter
+      ? formatHumanCardFilter(obj.requiredFilter, lang)
+      : lang === 'en'
+        ? 'compatible card'
+        : 'carte compatible'
+    return {
+      text:
+        lang === 'en'
+          ? `Expects at least ${minCount}× ${filterTxt}${critical ? ' (essential to function)' : ''}`
+          : `Attend au moins ${minCount}× ${filterTxt}${critical ? ' (indispensable)' : ''}`,
+      critical,
+    }
+  }
+
+  return { text: String(req), critical: false }
+}
+
+export function buildHumanReadableAiBreakdown(
+  card: ParsedDeckEntry | EngineCardModel | null | undefined,
+  lang: Language = 'fr',
+): HumanReadableAiBreakdown | null {
+  if (!card) return null
+  const model: EngineCardModel | null =
+    'model' in card && card.model ? card.model : 'playableActions' in card ? (card as EngineCardModel) : null
+  if (!model) return null
+
+  const evaluator = model.strategicEvaluator || ({} as EngineCardModel['strategicEvaluator'])
+  const roleKey = evaluator.aiRole || evaluator.primaryRole || 'CONSISTENCY_BOOSTER'
+  const roleLabel = getHumanReadableAiRole(roleKey, lang)
+  const roleDescription = getAiRoleDescription(roleKey, lang)
+
+  const traitBadges: string[] = []
+  if (model.identity.isRuleBox) {
+    traitBadges.push(
+      lang === 'en'
+        ? `Rule Box (${model.identity.prizeCardsGiven || 2} Prizes)`
+        : `Encadré Règle (${model.identity.prizeCardsGiven || 2} Récompenses)`,
+    )
+  }
+  if (model.identity.isAceSpec) traitBadges.push(lang === 'en' ? 'ACE SPEC (Max 1/deck)' : 'HIGH-TECH (Max 1/deck)')
+  if (model.identity.isTera) traitBadges.push(lang === 'en' ? 'Tera Pokémon' : 'Téracristal')
+  if (model.identity.isAncient) traitBadges.push(lang === 'en' ? 'Ancient' : 'Temps Passé')
+  if (model.identity.isFuture) traitBadges.push(lang === 'en' ? 'Future' : 'Temps Futur')
+  if (model.pokemonStats?.canAttackTwice) traitBadges.push(lang === 'en' ? 'Can attack twice/turn' : 'Double attaque / tour')
+
+  const evoChain = model.pokemonStats?.evolutionChain
+  const evolutionChainText =
+    Array.isArray(evoChain) && evoChain.length > 1 ? evoChain.join(' -> ') : null
+
+  const retreatCost = model.pokemonStats?.retreatCost
+  const retreatText =
+    typeof retreatCost === 'number'
+      ? retreatCost === 0
+        ? lang === 'en'
+          ? 'Free Retreat (0)'
+          : 'Retraite gratuite (0)'
+        : lang === 'en'
+          ? `Retreat cost: ${retreatCost} Energy`
+          : `Coût de retraite : ${retreatCost} Énergie${retreatCost > 1 ? 's' : ''}`
+      : null
+
+  const weights = evaluator.turnPhaseWeights || { turn1: 0.5, turn2: 0.5, turn3: 0.5, turn4Plus: 0.5 }
+  const phaseDefs: Array<{ key: 'turn1' | 'turn2' | 'turn3' | 'turn4Plus'; fr: string; en: string }> = [
+    { key: 'turn1', fr: 'Tour 1 (Ouverture)', en: 'Turn 1 (Opening)' },
+    { key: 'turn2', fr: 'Tour 2 (Mise en place)', en: 'Turn 2 (Setup)' },
+    { key: 'turn3', fr: 'Tour 3 (Milieu de jeu)', en: 'Turn 3 (Mid-game)' },
+    { key: 'turn4Plus', fr: 'Tour 4+ (Fin de partie)', en: 'Turn 4+ (Late-game)' },
+  ]
+  const phasePriorities: HumanReadableAiPhasePriority[] = phaseDefs.map((def) => {
+    const raw = Number(weights[def.key] ?? 0.5)
+    const pct = Math.max(0, Math.min(100, Math.round((raw <= 1 ? raw : raw / 100) * 100)))
+    const tier: 'high' | 'medium' | 'low' = pct >= 70 ? 'high' : pct >= 35 ? 'medium' : 'low'
+    const badge =
+      pct >= 85
+        ? lang === 'en'
+          ? 'Top priority'
+          : 'Priorité max'
+        : pct >= 60
+          ? lang === 'en'
+            ? 'Very useful'
+            : 'Très importante'
+          : pct >= 35
+            ? lang === 'en'
+              ? 'Moderate'
+              : 'Modérée'
+            : pct > 0
+              ? lang === 'en'
+                ? 'Situational'
+                : 'Situationnelle'
+              : lang === 'en'
+                ? 'Inactive / Wait'
+                : 'En attente'
+    return {
+      key: def.key,
+      label: lang === 'en' ? def.en : def.fr,
+      pct,
+      tier,
+      badge,
+    }
+  })
+
+  const behaviorInsights: string[] = []
+  if (typeof evaluator.intrinsicBaseScore === 'number') {
+    const score = evaluator.intrinsicBaseScore
+    if (score >= 80) {
+      behaviorInsights.push(
+        lang === 'en'
+          ? 'Core deck card: the AI strongly protects and searches for it.'
+          : 'Carte centrale du deck : l’IA la recherche et la protège en priorité.',
+      )
+    } else if (score <= 35) {
+      behaviorInsights.push(
+        lang === 'en'
+          ? 'Contextual card: played mainly when a specific tactical opening appears.'
+          : 'Carte contextuelle : jouée uniquement lorsque la situation du plateau s’y prête.',
+      )
+    }
+  }
+  if (typeof evaluator.holdForNextTurnBonus === 'number' && evaluator.holdForNextTurnBonus > 0.25) {
+    behaviorInsights.push(
+      lang === 'en'
+        ? 'Timing discipline: the AI tends to hold this card for the right turn instead of wasting it early.'
+        : 'Gestion du timing : l’IA préfère parfois garder cette carte en réserve pour un tour plus rentable.',
+    )
+  } else {
+    behaviorInsights.push(
+      lang === 'en'
+        ? 'Proactive usage: the AI plays or activates this card as soon as a valid target exists.'
+        : 'Utilisation proactive : l’IA joue ou active cette carte dès qu’une bonne opportunité se présente.',
+    )
+  }
+
+  if (typeof evaluator.discardPriorityWhenDead === 'number') {
+    if (evaluator.discardPriorityWhenDead >= 6) {
+      behaviorInsights.push(
+        lang === 'en'
+          ? 'Discard fodder: if not needed this matchup, the AI willingly discards it for Ultra Ball or Research.'
+          : 'Facile à défausser : si elle est inutile dans le matchup, l’IA s’en défausse volontiers (Hyper Ball, Professeur…).',
+      )
+    } else if (evaluator.discardPriorityWhenDead <= 3) {
+      behaviorInsights.push(
+        lang === 'en'
+          ? 'High retention: the AI avoids discarding this card unless forced to.'
+          : 'Carte précieuse : l’IA évite de s’en défausser sauf nécessité absolue.',
+      )
+    }
+  }
+
+  const synergies = (evaluator.decklistSynergyRequirements || []).map((req) =>
+    formatSynergyRequirementItem(req, lang),
+  )
+
+  const deadConditions = (evaluator.inGameDeadCardConditions || [])
+    .map((c) => formatDeadCardCondition(c, lang))
+    .filter(Boolean)
+
+  const actions: HumanReadableAiActionSummary[] = (model.playableActions || []).map((act) => {
+    const turn1Hints: string[] = []
+    if (act.canUseTurn1GoingFirst) {
+      turn1Hints.push(lang === 'en' ? 'Usable Turn 1 (Going 1st)' : 'Jouable Tour 1 (en 1er)')
+    } else if (act.canUseTurn1GoingSecond) {
+      turn1Hints.push(lang === 'en' ? 'Usable Turn 1 (Going 2nd)' : 'Jouable Tour 1 (en 2e)')
+    } else {
+      turn1Hints.push(lang === 'en' ? 'Not usable on Turn 1' : 'Pas dès le Tour 1')
+    }
+
+    const preconditions = (act.preconditions || [])
+      .map((p) => formatHumanPreconditionItem(p, lang))
+      .filter((txt) => Boolean(txt))
+
+    const effectSentences = (act.effects || []).map((eff) => describePlainAtomicEffect(eff, lang))
+
+    return {
+      actionId: act.actionId,
+      title: act.label || getHumanReadableActionType(act.actionType || act.sourceType || '', lang),
+      actionTypeLabel: getHumanReadableActionType(act.actionType || act.sourceType || '', lang),
+      timingLabel: getHumanReadableTimingPhase(act.timingPhase || act.timing || '', lang),
+      turn1Hints,
+      costs: formatHumanActionCosts(act, lang),
+      preconditions,
+      effectSentences,
+      deadConditionNote: act.deadCardCondition ? formatDeadCardCondition(act.deadCardCondition, lang) : null,
+    }
+  })
+
+  return {
+    roleLabel,
+    roleDescription,
+    traitBadges,
+    evolutionChainText,
+    retreatText,
+    phasePriorities,
+    behaviorInsights,
+    synergies,
+    deadConditions,
+    actions,
+  }
 }
