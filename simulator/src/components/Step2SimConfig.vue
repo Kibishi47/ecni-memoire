@@ -35,7 +35,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update-config', updated: SimulationConfig): void
-  (e: 'recalibrate-hardware'): void
   (e: 'back-step1'): void
   (e: 'launch-simulation'): void
   (e: 'cancel-simulation'): void
@@ -44,7 +43,7 @@ const emit = defineEmits<{
 
 const { t, currentLang } = useI18n()
 
-const showAdvancedParams = ref(false)
+const activeConfigTab = ref<'quick' | 'advanced'>('quick')
 
 const recommendedPresets = computed(() =>
   getRecommendedPresetsForProfile(props.hardwareProfile),
@@ -53,20 +52,6 @@ const recommendedPresets = computed(() =>
 const liveEstimate = computed(() =>
   estimateSimulationDurationSeconds(props.config, props.hardwareProfile),
 )
-
-const tierBadgeLabel = computed(() => {
-  switch (props.hardwareProfile.tier) {
-    case 'ECO':
-      return t('hwTierEco')
-    case 'BALANCED':
-      return t('hwTierBalanced')
-    case 'EXTREME':
-      return t('hwTierExtreme')
-    case 'PERFORMANCE':
-    default:
-      return t('hwTierPerformance')
-  }
-})
 
 const cpuPresetOptions = computed(() => {
   const presets: HardwareCpuPreset[] = ['ECO', 'BALANCED', 'MAX']
@@ -345,45 +330,56 @@ const launchButtonState = computed(() => {
       </div>
     </div>
 
-    <!-- BANDEAU DE CALIBRATION MATÉRIELLE + 3 SÉLECTEURS RAPIDES INDÉPENDANTS -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
-      <!-- En-tête calibration matérielle -->
-      <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div class="flex flex-wrap items-center gap-2.5">
-          <span class="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-          <span class="text-xs font-bold uppercase tracking-wider text-slate-700">
-            {{ t('hwCalibratedBanner') }}
-          </span>
-          <span class="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white">
-            {{ tierBadgeLabel }}
-          </span>
-          <span class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-800">
-            {{ t('hwCoresUnit', { n: hardwareProfile.logicalCores }) }}
-          </span>
-          <span
-            v-if="hardwareProfile.deviceMemoryGb"
-            class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-700"
+    <!-- CARTE CONFIGURATION PAR ONGLETS (RÉGLAGES RAPIDES / PARAMÈTRES AVANCÉS) -->
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+      <!-- Barre d'onglets -->
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-5 py-3">
+        <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+          <button
+            type="button"
+            @click="activeConfigTab = 'quick'"
+            class="rounded-lg px-4 py-1.5 text-xs font-bold transition"
+            :class="
+              activeConfigTab === 'quick'
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            "
           >
-            {{ hardwareProfile.deviceMemoryGb }} GB RAM
-          </span>
-          <span class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs text-slate-700">
-            {{ t('hwScoreLabel', { score: hardwareProfile.singleCoreScore }) }}
-          </span>
-          <span class="font-mono text-xs font-semibold text-indigo-700">
-            {{ t('hwClusterSpeed', { gps: hardwareProfile.estimatedClusterGamesPerSec }) }}
-          </span>
+            {{ t('tabQuickSettings') }}
+          </button>
+          <button
+            type="button"
+            @click="activeConfigTab = 'advanced'"
+            class="inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-bold transition"
+            :class="
+              activeConfigTab === 'advanced'
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            "
+          >
+            <span>{{ t('tabAdvancedSettings') }}</span>
+            <span
+              v-if="isCustomAdvancedActive"
+              class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+              :class="activeConfigTab === 'advanced' ? 'bg-amber-400 text-slate-900' : 'bg-amber-100 text-amber-800'"
+            >
+              {{ t('advancedCustomBadge') }}
+            </span>
+          </button>
         </div>
 
         <button
           type="button"
-          @click="emit('recalibrate-hardware')"
-          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs transition hover:bg-slate-100"
+          @click="resetToHardwareRecommended"
+          class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
         >
-          {{ t('hwRecalibrateBtn') }}
+          {{ t('advancedResetBtn') }}
         </button>
       </div>
 
-      <!-- Sélecteur 1 : Allocation Matérielle (CPU) -->
+      <!-- ONGLET 1 : RÉGLAGES RAPIDES -->
+      <div v-if="activeConfigTab === 'quick'" class="p-6 space-y-6">
+        <!-- Sélecteur 1 : Puissance PC (CPU) -->
       <div>
         <div class="flex items-baseline justify-between">
           <div>
@@ -511,44 +507,10 @@ const launchButtonState = computed(() => {
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- TIROIR DÉPLIABLE DES PARAMÈTRES AVANCÉS DU MOTEUR (14 CONTRÔLES) -->
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-      <div
-        class="flex flex-wrap items-center justify-between gap-3 p-5 cursor-pointer select-none hover:bg-slate-50/80 transition"
-        @click="showAdvancedParams = !showAdvancedParams"
-      >
-        <div class="flex items-center gap-3">
-          <span
-            class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700"
-          >
-            {{ showAdvancedParams ? '−' : '+' }}
-          </span>
-          <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-sm font-bold text-slate-900">{{ t('advancedToggleTitle') }}</h3>
-              <span
-                v-if="isCustomAdvancedActive"
-                class="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800"
-              >
-                {{ t('advancedCustomBadge') }}
-              </span>
-            </div>
-            <p class="mt-0.5 text-xs text-slate-500">{{ t('advancedToggleSub') }}</p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          @click.stop="resetToHardwareRecommended"
-          class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
-        >
-          {{ t('advancedResetBtn') }}
-        </button>
       </div>
 
-      <div v-if="showAdvancedParams" class="border-t border-slate-200 bg-slate-50/60 p-6 space-y-6">
+      <!-- ONGLET 2 : PARAMÈTRES AVANCÉS DU MOTEUR (14 CONTRÔLES) -->
+      <div v-else class="bg-slate-50/40 p-6 space-y-6">
         <!-- Groupe A : Recherche & Évaluateur IA -->
         <div>
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">

@@ -138,7 +138,7 @@ function classifyHardwareTier(logicalCores: number, singleCoreScore: number): Ha
 export function computeEffectiveParallelFactor(workers: number, logicalCores: number): number {
   const active = Math.max(1, Math.min(workers, logicalCores))
   if (active === 1) return 1
-  const parallelEfficiency = 0.84
+  const parallelEfficiency = 0.62
   return 1 + (active - 1) * parallelEfficiency
 }
 
@@ -199,9 +199,9 @@ export function calibrateHardwareProfile(forceRecalibrate = false): HardwareProf
   measureSingleCoreOpsPerSec(15000)
   const opsPerSec = measureSingleCoreOpsPerSec(50000)
 
-  // Référence calibrée : ~9 000 000 ops/sec ≈ score 100 ≈ 45 parties 3-Ply/sec mono-cœur
+  // Estimation prudente par défaut afin de ne jamais surestimer le débit réel
   const normalizedScore = Math.max(15, Math.min(200, Math.round((opsPerSec / 9000000) * 100)))
-  const baseSingleGps = Math.max(12, Math.min(90, Math.round((normalizedScore * 0.45) * 10) / 10))
+  const baseSingleGps = Math.max(8, Math.min(28, Math.round((normalizedScore * 0.2) * 10) / 10))
 
   const measuredPerf = safeReadLocalStorage<{ singleThreadBaselineGps: number }>(
     STORAGE_PERF_HISTORY_KEY,
@@ -381,10 +381,10 @@ export function getRecommendedPresetsForProfile(profile: HardwareProfile): {
     case 'BALANCED':
       return { cpu: 'BALANCED', volume: 'STANDARD', ai: 'COMPETITIVE' }
     case 'EXTREME':
-      return { cpu: 'MAX', volume: 'TOURNAMENT', ai: 'COMPETITIVE' }
+      return { cpu: 'BALANCED', volume: 'TOURNAMENT', ai: 'COMPETITIVE' }
     case 'PERFORMANCE':
     default:
-      return { cpu: 'MAX', volume: 'STANDARD', ai: 'COMPETITIVE' }
+      return { cpu: 'BALANCED', volume: 'STANDARD', ai: 'COMPETITIVE' }
   }
 }
 
@@ -418,9 +418,10 @@ export function estimateSimulationDurationSeconds(
     expectedIterations = Math.max(200, Math.min(iterations, Math.round(worstCaseConvergeN * 0.85)))
   }
 
+  const safetyFactor = profile.measuredLiveSpeed ? 0.88 : 0.78
   const speedGamesPerSec = Math.max(
     1,
-    Math.round((profile.singleThreadGamesPerSec * parallelFactor) / complexity),
+    Math.round(((profile.singleThreadGamesPerSec * parallelFactor) / complexity) * safetyFactor),
   )
   const estimatedSeconds = expectedIterations / speedGamesPerSec
 
