@@ -62,6 +62,10 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
     expect(summary1.bossFlexibility).toBeDefined()
     expect(summary1.bossFlexibilityRate).toBeGreaterThanOrEqual(0)
     expect(summary1.conditionalComboStats.length).toBeGreaterThan(0)
+    const comboWithPartners = summary1.conditionalComboStats.find(
+      (c) => Array.isArray(c.relatedCardIds) && c.relatedCardIds.length > 0,
+    )
+    expect(comboWithPartners).toBeDefined()
     expect(summary1.averageDamagePerTurn).toBeGreaterThanOrEqual(0)
 
     expect(summary1.turnOrderSplitStats.gamesGoingFirst).toBe(4)

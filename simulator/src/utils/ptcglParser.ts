@@ -283,6 +283,12 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
       seenKey.add(key)
 
       let matchingCount = 0
+      const matchedCardIds: string[] = []
+      const pushMatchedCardId = (cid: string) => {
+        if (cid && cid !== entry.model.cardId && !matchedCardIds.includes(cid)) {
+          matchedCardIds.push(cid)
+        }
+      }
       let filterDesc = ''
       let minCount = 1
       let isCriticalZero = false
@@ -296,25 +302,29 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
             continue
           }
           filterDesc = `Énergie ${energyType}`
-          matchingCount = activeCards
-            .filter(
-              (c) =>
-                c.model.category === 'ENERGY' &&
-                (c.model.pokemonStats?.types?.includes(energyType) ||
-                  c.nameFr.toLowerCase().includes(energyType.toLowerCase()) ||
-                  c.nameEn.toLowerCase().includes(energyType.toLowerCase())),
-            )
-            .reduce((sum, c) => sum + c.quantity, 0)
+          for (const c of activeCards) {
+            const isMatchingEnergy =
+              c.model.category === 'ENERGY' &&
+              (c.model.pokemonStats?.types?.includes(energyType) ||
+                c.nameFr.toLowerCase().includes(energyType.toLowerCase()) ||
+                c.nameEn.toLowerCase().includes(energyType.toLowerCase()))
+            if (isMatchingEnergy) {
+              matchingCount += c.quantity
+              pushMatchedCardId(c.cardId)
+            }
+          }
         } else if (rawReq.startsWith('requires_evolution_line:')) {
           const evoName = rawReq.replace('requires_evolution_line:', '')
           filterDesc = `Lignée ${evoName}`
-          matchingCount = activeCards
-            .filter(
-              (c) =>
-                c.nameFr.toLowerCase().includes(evoName.toLowerCase()) ||
-                c.nameEn.toLowerCase().includes(evoName.toLowerCase()),
-            )
-            .reduce((sum, c) => sum + c.quantity, 0)
+          for (const c of activeCards) {
+            if (
+              c.nameFr.toLowerCase().includes(evoName.toLowerCase()) ||
+              c.nameEn.toLowerCase().includes(evoName.toLowerCase())
+            ) {
+              matchingCount += c.quantity
+              pushMatchedCardId(c.cardId)
+            }
+          }
         } else {
           filterDesc = rawReq
           matchingCount = 1
@@ -331,6 +341,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         for (const candidate of activeCards) {
           if (matchesCardFilter(candidate.model, reqObj.requiredFilter)) {
             matchingCount += candidate.quantity
+            pushMatchedCardId(candidate.cardId)
           }
         }
       }
@@ -348,6 +359,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
             ? rawReq
             : { minCountInDeck: minCount, ifMissingSetValueToZero: isCriticalZero },
         matchingCountInDeck: matchingCount,
+        matchedCardIds,
         satisfied,
         criticalZeroValue,
         description: `${entry.nameFr} attend ≥ ${minCount}× ${filterDesc} (trouvé : ${matchingCount})`,

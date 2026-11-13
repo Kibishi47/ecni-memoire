@@ -84,6 +84,7 @@ export interface ConditionalComboStatRecord {
   label: string
   cardId: string
   cardNameFr: string
+  relatedCardIds?: string[]
   conditionSummary: string
   gamesTriggered: number
   totalTriggersCount: number

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ParsedDeck, ParsedDeckEntry } from '../types/deck'
-import { getCardImageUrl } from '../utils/cardImage'
+import type { EngineCardModel } from '../types/cardModel'
+import type { ParsedDeck, ParsedDeckEntry, SynergyAuditItem } from '../types/deck'
 import { useI18n } from '../utils/i18n'
+import CardFanThumbnail from './CardFanThumbnail.vue'
 import CardZoomModal from './CardZoomModal.vue'
 
 const props = defineProps<{
@@ -21,7 +22,9 @@ const { t, currentLang, getLocalizedCardName, getLocalizedSubCategory } = useI18
 
 const localText = ref(props.rawDeckText)
 const hasValidatedCurrentInput = ref(false)
-const zoomedCard = ref<ParsedDeckEntry | null>(null)
+const zoomedCard = ref<ParsedDeckEntry | EngineCardModel | null>(null)
+const zoomedCards = ref<Array<ParsedDeckEntry | EngineCardModel>>([])
+const zoomInitialIndex = ref<number>(0)
 
 watch(
   () => props.rawDeckText,
@@ -65,19 +68,36 @@ const energyCards = computed<ParsedDeckEntry[]>(() =>
   props.validatedDeck.cards.filter((c) => c.category === 'energy'),
 )
 
-function handleImgError(event: Event) {
-  const target = event.target as HTMLElement
-  if (target) {
-    target.style.display = 'none'
-  }
+function openCardZoomList(
+  cards: Array<ParsedDeckEntry | EngineCardModel>,
+  initialIndex = 0,
+) {
+  const clean = cards.filter(Boolean)
+  if (clean.length === 0) return
+  zoomedCards.value = clean
+  zoomInitialIndex.value = Math.max(0, Math.min(initialIndex, clean.length - 1))
+  zoomedCard.value = clean[zoomInitialIndex.value] ?? null
 }
 
-function openCardZoom(card: ParsedDeckEntry) {
-  zoomedCard.value = card
+function getSynergyAuditCards(item: SynergyAuditItem): ParsedDeckEntry[] {
+  const result: ParsedDeckEntry[] = []
+  const pushById = (cid: string) => {
+    const found = props.validatedDeck.cards.find((c) => c.cardId === cid)
+    if (found && !result.some((r) => r.cardId === found.cardId)) {
+      result.push(found)
+    }
+  }
+  pushById(item.cardId)
+  for (const matchedId of item.matchedCardIds || []) {
+    pushById(matchedId)
+  }
+  return result
 }
 
 function closeCardZoom() {
   zoomedCard.value = null
+  zoomedCards.value = []
+  zoomInitialIndex.value = 0
 }
 </script>
 
@@ -268,14 +288,18 @@ function closeCardZoom() {
             <div class="font-bold">
               {{ t('unresolvedCardsTitle', { n: validatedDeck.unresolvedCount }) }}
             </div>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              <span
-                v-for="unres in validatedDeck.unresolvedCards"
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-for="(unres, uIdx) in validatedDeck.unresolvedCards"
                 :key="unres.uid"
-                class="rounded border border-red-200 bg-white px-2 py-0.5 text-xs text-red-800"
+                type="button"
+                @click="openCardZoomList(validatedDeck.unresolvedCards, uIdx)"
+                class="flex items-center gap-2 rounded-lg border border-red-200 bg-white p-1.5 text-xs text-red-900 shadow-2xs transition hover:border-red-400 hover:bg-red-50/40"
+                :title="t('clickToEnlarge')"
               >
-                {{ unres.quantity }}× {{ unres.name }} {{ unres.setCode }} {{ unres.number }}
-              </span>
+                <CardFanThumbnail :cards="[unres]" size="sm" @select="openCardZoomList(validatedDeck.unresolvedCards, uIdx)" />
+                <span class="font-medium">{{ unres.quantity }}× {{ unres.name }} {{ unres.setCode }} {{ unres.number }}</span>
+              </button>
             </div>
           </div>
 
@@ -317,19 +341,29 @@ function closeCardZoom() {
             <div
               v-for="(item, idx) in validatedDeck.synergyAudit"
               :key="idx"
-              class="flex items-center justify-between gap-3 rounded-xl border p-3 text-xs"
-              :class="
+              @click="getSynergyAuditCards(item).length > 0 && openCardZoomList(getSynergyAuditCards(item), 0)"
+              class="flex items-center justify-between gap-3 rounded-xl border p-3 text-xs transition"
+              :class="[
                 item.satisfied
-                  ? 'border-slate-200 bg-slate-50/50'
-                  : 'border-amber-200 bg-amber-50/60'
-              "
+                  ? 'border-slate-200 bg-slate-50/50 hover:border-slate-400 hover:bg-white'
+                  : 'border-amber-200 bg-amber-50/60 hover:border-amber-400',
+                getSynergyAuditCards(item).length > 0 ? 'cursor-pointer' : '',
+              ]"
             >
-              <div>
-                <div class="font-bold text-slate-800">
-                  {{ currentLang === 'en' && item.cardNameEn ? item.cardNameEn : item.cardNameFr }}
-                </div>
-                <div class="mt-0.5 text-slate-500">
-                  {{ currentLang === 'en' && item.descriptionEn ? item.descriptionEn : item.description }}
+              <div class="flex min-w-0 items-center gap-3">
+                <CardFanThumbnail
+                  v-if="getSynergyAuditCards(item).length > 0"
+                  :cards="getSynergyAuditCards(item)"
+                  size="sm"
+                  @select="openCardZoomList(getSynergyAuditCards(item), 0)"
+                />
+                <div class="min-w-0">
+                  <div class="truncate font-bold text-slate-800">
+                    {{ currentLang === 'en' && item.cardNameEn ? item.cardNameEn : item.cardNameFr }}
+                  </div>
+                  <div class="mt-0.5 text-slate-500">
+                    {{ currentLang === 'en' && item.descriptionEn ? item.descriptionEn : item.description }}
+                  </div>
                 </div>
               </div>
               <span
@@ -357,27 +391,14 @@ function closeCardZoom() {
 
         <ul class="space-y-3">
           <li
-            v-for="card in pokemonCards"
+            v-for="(card, cIdx) in pokemonCards"
             :key="card.uid"
-            @click="openCardZoom(card)"
+            @click="openCardZoomList(pokemonCards, cIdx)"
             class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
             :title="t('clickToEnlarge')"
           >
             <!-- Image de la carte avec zoom au clic -->
-            <img
-              v-if="getCardImageUrl(card)"
-              :src="getCardImageUrl(card)!"
-              :alt="getLocalizedCardName(card)"
-              loading="lazy"
-              @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
-            />
-            <div
-              v-else
-              class="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-slate-200 font-bold text-slate-500 text-[10px]"
-            >
-              PKM
-            </div>
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(pokemonCards, cIdx)" />
 
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -407,27 +428,14 @@ function closeCardZoom() {
 
         <ul class="space-y-3">
           <li
-            v-for="card in trainerCards"
+            v-for="(card, cIdx) in trainerCards"
             :key="card.uid"
-            @click="openCardZoom(card)"
+            @click="openCardZoomList(trainerCards, cIdx)"
             class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
             :title="t('clickToEnlarge')"
           >
             <!-- Image de la carte avec zoom au clic -->
-            <img
-              v-if="getCardImageUrl(card)"
-              :src="getCardImageUrl(card)!"
-              :alt="getLocalizedCardName(card)"
-              loading="lazy"
-              @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
-            />
-            <div
-              v-else
-              class="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-slate-200 font-bold text-slate-500 text-[10px]"
-            >
-              DRS
-            </div>
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(trainerCards, cIdx)" />
 
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -455,27 +463,14 @@ function closeCardZoom() {
 
         <ul class="space-y-3">
           <li
-            v-for="card in energyCards"
+            v-for="(card, cIdx) in energyCards"
             :key="card.uid"
-            @click="openCardZoom(card)"
+            @click="openCardZoomList(energyCards, cIdx)"
             class="group flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2 text-xs transition hover:border-slate-400 hover:bg-slate-100/70"
             :title="t('clickToEnlarge')"
           >
             <!-- Image de l'énergie avec zoom au clic -->
-            <img
-              v-if="getCardImageUrl(card)"
-              :src="getCardImageUrl(card)!"
-              :alt="getLocalizedCardName(card)"
-              loading="lazy"
-              @error="handleImgError"
-              class="h-14 w-10 shrink-0 rounded object-cover shadow-xs border border-slate-200 transition group-hover:scale-105"
-            />
-            <div
-              v-else
-              class="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-slate-200 font-bold text-slate-500 text-[10px]"
-            >
-              NRG
-            </div>
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(energyCards, cIdx)" />
 
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -496,7 +491,9 @@ function closeCardZoom() {
     <!-- Modale de Zoom de Carte -->
     <CardZoomModal
       :card="zoomedCard"
-      :is-open="zoomedCard !== null"
+      :cards="zoomedCards"
+      :initial-index="zoomInitialIndex"
+      :is-open="zoomedCards.length > 0 || zoomedCard !== null"
       @close="closeCardZoom"
     />
   </div>
