@@ -16,7 +16,7 @@ Ce document définit l'architecture, les conventions de développement, les inva
    npm --prefix simulator run test    # Exécute vitest run (toutes les suites + benchmark 3-ply)
    ```
 3. **Commandes de développement & configuration API** :
-   - `npm --prefix simulator run dev` : serveur Vite accessible sur le réseau local avec proxy `/api` et `/health` vers le backend Fastify (`VITE_API_PROXY_TARGET`, défaut `http://localhost:3000`) et affichage d'un QR code terminal (`?debug=true` active l'Inspecteur Debug et l'onglet Modèle IA dans le zoom carte).
+   - `npm --prefix simulator run dev` : serveur Vite accessible sur le réseau local avec proxy `/api` et `/health` vers le backend Fastify (`VITE_API_PROXY_TARGET`, défaut `http://localhost:3000`) et affichage d'un QR code terminal.
    - `VITE_API_URL` (optionnel en build/prod, voir `.env.example` et `Dockerfile`) : URL de base du backend REST quand l'API n'est pas servie sur le même domaine.
    - En tests unitaires (`vitest run`), `vitest.setup.ts` hydrate dynamiquement `UNIFIED_CARD_REGISTRY` depuis `../card-compiler/data/cards_database.json` afin d'isoler l'exécution sans bundler de JSON dans le client.
 
@@ -51,20 +51,22 @@ Ce document définit l'architecture, les conventions de développement, les inva
   - Hachage commutatif 53 bits (`computeNumericStateHash`) + buffer binaire plat `Int32Array(128)` (`encodeStateToFlatBuffer`).
   - **Invariant critique** : tout nouveau champ tactique ajouté à `InPlayPokemon`, `PlayerBoardState` ou `MatchState` **doit** être cloné dans `cloneInPlayPokemon`/`clonePlayerBoard` et intégré dans `hashInPlayPokemon`, `computeNumericBoardHash` et `encodePlayerBoardToSlice`.
 
-### Évaluateur 3-Ply, Boucle de Simulation & Workers
+### Évaluateur Configurable, Boucle de Simulation & Calibration Matérielle
 - **`src/core/evaluator.ts`** :
-  - Beam Search intra-tour dédoublonné par `computeNumericStateHash`, puis lookahead asymétrique sur 3 demi-tours ($T \rightarrow T_{\text{adv}} \rightarrow T+1$) avec rollouts gloutons en place (`mutateInPlace = true`) et table de transposition.
+  - Beam Search intra-tour dédoublonné par `computeNumericStateHash`, puis lookahead configurable sur 1, 2 ou 3 demi-tours (`lookaheadPly`: `1 | 2 | 3`) avec rollouts gloutons en place (`mutateInPlace = true`), table de transposition, largeur de Beam (`beamWidth`), profondeur max d'actions (`maxActionDepth`), candidats Top-K (`topKCandidates`), plafond `maxBranches` jusqu'à 60, et tempérament IA (`BALANCED`, `AGGRESSIVE`, `CONSERVATIVE`).
   - Heuristiques clés de `scoreAtomicActionHeuristic` et `evaluateState` : simulation du Gust sur la cible du Banc (Faiblesse, dégâts garantis de Checkup Poison/Brûlure, contournement de murs immunisés type *Mimiqui*), déblocage de la Retraite/Échange sous verrou (`cantAttackNextTurn`, `CONFUSED`, `PARALYZED`), séquencement intra-tour (Épuration/Recherche $\rightarrow$ Empilement $\rightarrow$ Pioche $\rightarrow$ Énergie manuelle), pénalité d'exposition des Pokémon à 2 ou 3 Récompenses, et rétention des cartes de riposte (`isCardTemporallyWaiting`).
   - **Contrainte de performance** : `src/core/fastState.test.ts` valide un débit **> 30 parties/sec** en monothread sur des decks méta complets ; éviter toute allocation superflue (`filter`, `sort`, Regex, `structuredClone`) dans les chemins critiques de `evaluator.ts` et `engine.ts`.
 - **`src/core/gameLoop.ts`, `src/core/alternativesFinder.ts`, `src/worker/simulation.worker.ts`, `src/worker/workerPool.ts`** :
-  - Exécution multi-threads en Web Workers, calcul des 8 KPIs + télémétrie carte par carte et génération de variantes de decklist.
+  - Exécution multi-threads en Web Workers (lots dynamiques Work-Stealing ou Shards statiques), arrêt statistique précoce par intervalle de confiance à 95 % (`earlyStoppingMargin`), calcul des 8 KPIs + télémétrie carte par carte activable et génération de variantes de decklist.
+- **`src/services/hardwareBenchmark.ts`** :
+  - Détection matérielle réelle (`logicalCores`, `deviceMemory`, micro-benchmark CPU mono-cœur avec cache local + auto-calibration sur le débit réel observé) pilotant les 3 sélecteurs rapides indépendants (Allocation CPU, Volume Statistique, Intelligence IA) et l'estimation live de durée dans `Step2SimConfig.vue`.
 
 ### Parseur PTCGL, i18n & Interface UI
 - **`src/utils/ptcglParser.ts` & `src/utils/ptcglExporter.ts`** :
   - Import/export PTCGL (`parsePtcglDecklistWithApi` + `POST /api/cards/resolve`) et validation réglementaire : 60 cartes, au moins 1 Pokémon de Base, 100 % résolues dans le catalogue API, légalité Standard (G, H, I + Énergies de base), max 1 ACE SPEC, max 1 Pokémon Radieux, max 4 exemplaires par nom (hors Énergies de base).
-- **`src/services/metaDeckAdapter.ts`, `src/services/useBugReport.ts`, `src/utils/i18n.ts`, `src/utils/debugModelHelper.ts`, `src/utils/cardImage.ts`** :
-  - Mapping des decks adverses depuis `GET /api/decks/meta`, recherche catalogue (`GET /api/cards`), alternatives (`POST /api/cards/alternatives`), signalements de bugs (`POST /api/reports`), support complet Français / Anglais et lecteur lisible du modèle IA dans `CardZoomModal.vue` sans champs `null`.
+- **`src/services/metaDeckAdapter.ts`, `src/services/useBugReport.ts`, `src/utils/i18n.ts`, `src/utils/cardImage.ts`** :
+  - Mapping des decks adverses depuis `GET /api/decks/meta`, recherche catalogue (`GET /api/cards`), alternatives (`POST /api/cards/alternatives`), signalements de bugs (`POST /api/reports`) et support complet Français / Anglais.
 - **`src/App.vue` & `src/components/*.vue`** :
-  - Wizard 3 étapes (`Step1DeckImport.vue`, `Step2SimConfig.vue`, `Step3DashboardAndComparator.vue`), historique complet des versions du deck, export PTCGL direct de la version active, `CardZoomModal.vue`, `DebugInspectorPanel.vue`.
+  - Wizard 3 étapes (`Step1DeckImport.vue`, `Step2SimConfig.vue` avec calibration matérielle, 3 sélecteurs rapides et tiroir avancé à 14 paramètres, `Step3DashboardAndComparator.vue`), historique complet des versions du deck, export PTCGL direct de la version active, `CardZoomModal.vue`.
 - **`Dockerfile` & `nginx.conf`** :
   - Build multi-stage Node 22 + Nginx 1.27 prêt pour un déploiement Coolify directement depuis `./simulator/`.
