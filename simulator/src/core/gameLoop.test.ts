@@ -133,13 +133,11 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
       workerSchedulingMode: 'DYNAMIC_BATCHES',
       batchSize: 5,
       collectDetailedTelemetry: false,
-      earlyStoppingMargin: 0,
       fixedSeed: 5555,
     })
 
     expect(summary.totalGamesSimulated).toBe(16)
     expect(summary.marginOfErrorPct).toBeGreaterThanOrEqual(0)
-    expect(summary.earlyStopped).toBe(false)
     expect(Object.keys(summary.cardTelemetry)).toHaveLength(0)
   })
 })

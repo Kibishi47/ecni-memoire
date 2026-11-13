@@ -3,7 +3,6 @@ import { computed, ref } from 'vue'
 import type { DebugPerturbationType } from '../core/engine'
 import type { AiTemperament, LookaheadPly, MaxBranchesSetting } from '../core/evaluator'
 import type {
-  EarlyStoppingMargin,
   SimulationConfig,
   WorkerSchedulingMode,
 } from '../types/simulator'
@@ -75,7 +74,6 @@ const volumePresetOptions: Array<{
   labelKey: string
   descKey: string
   iterations: number
-  earlyStoppingMargin: EarlyStoppingMargin
 }> = (['FLASH', 'STANDARD', 'TOURNAMENT', 'DEEP_STAT'] as StatisticalVolumePreset[]).map((id) => {
   const vals = computeStatisticalVolume(id)
   const labelKey =
@@ -119,9 +117,7 @@ const activeCpuPreset = computed<HardwareCpuPreset | null>(() => {
 
 const activeVolumePreset = computed<StatisticalVolumePreset | null>(() => {
   const match = volumePresetOptions.find(
-    (opt) =>
-      opt.iterations === props.config.iterations &&
-      (props.config.earlyStoppingMargin ?? 0) === opt.earlyStoppingMargin,
+    (opt) => opt.iterations === props.config.iterations,
   )
   return match?.id ?? null
 })
@@ -757,27 +753,12 @@ const launchButtonState = computed(() => {
           </div>
         </div>
 
-        <!-- Groupe D : Convergence, Télémétrie & Stress-Tests -->
+        <!-- Groupe D : Télémétrie & Stress-Tests -->
         <div>
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">
             {{ t('advGroupStatsTitle') }}
           </h4>
-          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <!-- earlyStoppingMargin -->
-            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
-              <span class="text-xs font-semibold text-slate-700">{{ t('advEarlyStopping') }}</span>
-              <select
-                :value="config.earlyStoppingMargin ?? 0"
-                @change="patchConfig({ earlyStoppingMargin: Number(($event.target as HTMLSelectElement).value) as EarlyStoppingMargin })"
-                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
-              >
-                <option :value="0">{{ t('earlyStopOff') }}</option>
-                <option :value="1.5">{{ t('earlyStop15') }}</option>
-                <option :value="2.5">{{ t('earlyStop25') }}</option>
-                <option :value="4">{{ t('earlyStop40') }}</option>
-              </select>
-            </label>
-
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <!-- collectDetailedTelemetry & stressTestOhkoEachTurn -->
             <div class="flex flex-col justify-center gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
               <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">

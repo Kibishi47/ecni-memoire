@@ -498,12 +498,6 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             >
               ±{{ currentSummary.marginOfErrorPct }} %
             </span>
-            <span
-              v-if="currentSummary.earlyStopped && currentSummary.marginOfErrorPct !== undefined"
-              class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
-            >
-              {{ t('simEarlyStoppedTag', { moe: currentSummary.marginOfErrorPct }) }}
-            </span>
           </div>
         </div>
 
