@@ -1,7 +1,14 @@
 import type { DebugPerturbationType, MatchWinner, WinReason } from '../core/engine'
-import type { EvaluatedBranchTrace, MaxBranchesSetting } from '../core/evaluator'
+import type {
+  AiTemperament,
+  EvaluatedBranchTrace,
+  LookaheadPly,
+  MaxBranchesSetting,
+} from '../core/evaluator'
 
 export type FirstPlayerMode = 'PLAYER' | 'OPPONENT' | 'RANDOM'
+export type WorkerSchedulingMode = 'STATIC_SHARDS' | 'DYNAMIC_BATCHES'
+export type EarlyStoppingMargin = 0 | 1.5 | 2.5 | 4.0
 
 export interface SimulationConfig {
   iterations: number
@@ -14,6 +21,18 @@ export interface SimulationConfig {
   perturbationType?: DebugPerturbationType
   perturbationTurn?: number
   stressTestOhkoEachTurn?: boolean
+  lookaheadPly?: LookaheadPly
+  topKCandidates?: number
+  beamWidth?: number
+  maxActionDepth?: number
+  rolloutMaxActions?: number
+  aiTemperament?: AiTemperament
+  opponentMaxBranches?: MaxBranchesSetting
+  opponentLookaheadPly?: LookaheadPly
+  workerSchedulingMode?: WorkerSchedulingMode
+  batchSize?: number
+  collectDetailedTelemetry?: boolean
+  earlyStoppingMargin?: EarlyStoppingMargin
 }
 
 export interface CardUsageMetrics {
@@ -210,6 +229,8 @@ export interface SimulationMetricsSummary {
 
   configUsed: SimulationConfig
   baseSeedUsed: number
+  marginOfErrorPct?: number
+  earlyStopped?: boolean
 }
 
 export interface DeckCardContributionItem {

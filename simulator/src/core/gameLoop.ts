@@ -40,7 +40,7 @@ import {
   type PlayerBoardState,
   type WinReason,
 } from './engine'
-import { selectBestTurnBranch } from './evaluator'
+import { selectBestTurnBranch, type EvaluatorOptions } from './evaluator'
 import { deriveGameSeed } from './prng'
 
 export const MAX_TRACED_GAMES = 20
@@ -472,6 +472,24 @@ export function playFullGame(
     perturbationTurn: config.perturbationTurn,
   })
 
+  const playerEvalOptions: EvaluatorOptions = {
+    maxActionDepth: config.maxActionDepth,
+    beamWidth: config.beamWidth,
+    topKCandidates: config.topKCandidates,
+    lookaheadPly: config.lookaheadPly,
+    rolloutMaxActions: config.rolloutMaxActions,
+    aiTemperament: config.aiTemperament,
+  }
+  const opponentMaxBranches = config.opponentMaxBranches ?? config.maxBranches
+  const opponentEvalOptions: EvaluatorOptions = {
+    maxActionDepth: config.maxActionDepth,
+    beamWidth: config.beamWidth,
+    topKCandidates: config.topKCandidates,
+    lookaheadPly: config.opponentLookaheadPly ?? config.lookaheadPly,
+    rolloutMaxActions: config.rolloutMaxActions,
+    aiTemperament: 'BALANCED',
+  }
+
   const deckLookup = new Map<string, EngineCardModel>()
   for (const m of playerDeckModels) {
     if (!deckLookup.has(m.cardId)) {
@@ -568,7 +586,10 @@ export function playFullGame(
     const prevOpponentPrizes = state.opponent.prizes.length
     const prevPlayerHandLen = state.player.hand.length
 
-    const decision = selectBestTurnBranch(state, config.maxBranches, recordTrace)
+    const decision =
+      actingPlayer === 'PLAYER'
+        ? selectBestTurnBranch(state, config.maxBranches, recordTrace, playerEvalOptions)
+        : selectBestTurnBranch(state, opponentMaxBranches, recordTrace, opponentEvalOptions)
     state = decision.finalTurnState
 
     if (actingPlayer === 'PLAYER') {
@@ -898,7 +919,10 @@ export function runSimulationShard(
 ): SimulationShardResult {
   const outcomes: SingleGameOutcome[] = []
   const oppCount = Math.max(1, input.opponentDecks.length)
-  const telemetry = createShardTelemetryAccumulator(input.playerDeckModels)
+  const telemetry =
+    input.config.collectDetailedTelemetry === false
+      ? undefined
+      : createShardTelemetryAccumulator(input.playerDeckModels)
 
   for (let i = 0; i < input.gameCount; i++) {
     const globalGameIdx = input.startGameIndex + i
@@ -958,6 +982,7 @@ export function mergeSimulationShards(
   config: SimulationConfig,
   baseSeed: number,
   totalDurationMs: number,
+  earlyStopped = false,
 ): SimulationMetricsSummary {
   const allOutcomes: SingleGameOutcome[] = []
   const mergedCardCounters: Record<string, ShardCardCounter> = {}
@@ -1294,6 +1319,12 @@ export function mergeSimulationShards(
         : 0,
   }
 
+  const pWinRate = totalGames > 0 ? wins / totalGames : 0
+  const marginOfErrorPct =
+    totalGames > 0
+      ? Math.round(1.96 * Math.sqrt((pWinRate * (1 - pWinRate)) / totalGames) * 1000) / 10
+      : 0
+
   return {
     totalDurationMs: Math.round(totalDurationMs),
     totalGamesSimulated: totalGames,
@@ -1331,5 +1362,7 @@ export function mergeSimulationShards(
     turnOrderSplitStats,
     configUsed: config,
     baseSeedUsed: baseSeed,
+    marginOfErrorPct,
+    earlyStopped,
   }
 }
