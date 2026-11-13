@@ -622,4 +622,40 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     })
     expect(afterUltraBall.player.hand.some((c) => c.cardId === unfairStamp.cardId)).toBe(true)
   })
+
+  it('supports configurable lookaheadPly (1, 2, 3), aiTemperament, topKCandidates and uncapped maxBranches > 12', () => {
+    const deckA = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText).cards.flatMap((e) =>
+      Array.from({ length: e.quantity }, () => e.model),
+    )
+    const deckB = parsePtcglDecklist(META_OPPONENT_DECKS[1]!.ptcglText).cards.flatMap((e) =>
+      Array.from({ length: e.quantity }, () => e.model),
+    )
+    const state = createInitialMatchState(deckA, deckB, { seed: 4242, firstPlayerIndex: 0, maxTurns: 15 })
+
+    const ply1 = selectBestTurnBranch(state, 20, true, { lookaheadPly: 1, topKCandidates: 1 })
+    expect(ply1.candidateTraces.length).toBe(1)
+    expect(ply1.scoreTAdv).toBe(0)
+    expect(ply1.scoreTPlus1).toBe(0)
+    expect(ply1.totalScore).toBe(ply1.scoreT)
+
+    const ply2 = selectBestTurnBranch(state, 20, true, {
+      lookaheadPly: 2,
+      topKCandidates: 2,
+      aiTemperament: 'CONSERVATIVE',
+    })
+    expect(ply2.candidateTraces.length).toBeGreaterThanOrEqual(1)
+    expect(ply2.candidateTraces.length).toBeLessThanOrEqual(2)
+    expect(ply2.scoreTPlus1).toBe(0)
+
+    const deep = selectBestTurnBranch(state, 50, true, {
+      lookaheadPly: 3,
+      beamWidth: 12,
+      topKCandidates: 5,
+      maxActionDepth: 10,
+      rolloutMaxActions: 10,
+      aiTemperament: 'AGGRESSIVE',
+    })
+    expect(deep.totalBranchesExplored).toBeGreaterThanOrEqual(1)
+    expect(deep.chosenActions.length).toBeGreaterThan(0)
+  })
 })

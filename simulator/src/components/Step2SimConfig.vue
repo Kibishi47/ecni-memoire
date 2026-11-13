@@ -1,14 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import type { SimulationConfig } from '../types/simulator'
+import { computed, ref } from 'vue'
+import type { DebugPerturbationType } from '../core/engine'
+import type { AiTemperament, LookaheadPly, MaxBranchesSetting } from '../core/evaluator'
+import type {
+  EarlyStoppingMargin,
+  SimulationConfig,
+  WorkerSchedulingMode,
+} from '../types/simulator'
 import type { MetaOpponentDeck, ParsedDeck } from '../types/deck'
-import type { MaxBranchesSetting } from '../core/evaluator'
+import {
+  computeAiIntelligence,
+  computeHardwareAllocation,
+  computeStatisticalVolume,
+  estimateSimulationDurationSeconds,
+  getRecommendedPresetsForProfile,
+  type AiIntelligencePreset,
+  type HardwareCpuPreset,
+  type HardwareProfile,
+  type StatisticalVolumePreset,
+} from '../services/hardwareBenchmark'
 import { useI18n } from '../utils/i18n'
 
 const props = defineProps<{
   config: SimulationConfig
   deck: ParsedDeck
-  isDebugMode: boolean
+  hardwareProfile: HardwareProfile
   maxHardwareWorkers: number
   metaOpponents: MetaOpponentDeck[]
   metaLoading?: boolean
@@ -19,6 +35,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update-config', updated: SimulationConfig): void
+  (e: 'recalibrate-hardware'): void
   (e: 'back-step1'): void
   (e: 'launch-simulation'): void
   (e: 'cancel-simulation'): void
@@ -27,67 +44,134 @@ const emit = defineEmits<{
 
 const { t, currentLang } = useI18n()
 
-export interface PerformanceProfile {
-  id: string
+const showAdvancedParams = ref(false)
+
+const recommendedPresets = computed(() =>
+  getRecommendedPresetsForProfile(props.hardwareProfile),
+)
+
+const liveEstimate = computed(() =>
+  estimateSimulationDurationSeconds(props.config, props.hardwareProfile),
+)
+
+const tierBadgeLabel = computed(() => {
+  switch (props.hardwareProfile.tier) {
+    case 'ECO':
+      return t('hwTierEco')
+    case 'BALANCED':
+      return t('hwTierBalanced')
+    case 'EXTREME':
+      return t('hwTierExtreme')
+    case 'PERFORMANCE':
+    default:
+      return t('hwTierPerformance')
+  }
+})
+
+const cpuPresetOptions = computed(() => {
+  const presets: HardwareCpuPreset[] = ['ECO', 'BALANCED', 'MAX']
+  return presets.map((id) => {
+    const alloc = computeHardwareAllocation(id, props.maxHardwareWorkers)
+    const labelKey =
+      id === 'ECO' ? 'cpuEcoLabel' : id === 'BALANCED' ? 'cpuBalancedLabel' : 'cpuMaxLabel'
+    const descKey =
+      id === 'ECO' ? 'cpuEcoDesc' : id === 'BALANCED' ? 'cpuBalancedDesc' : 'cpuMaxDesc'
+    return {
+      id,
+      labelKey,
+      descKey,
+      ...alloc,
+    }
+  })
+})
+
+const volumePresetOptions: Array<{
+  id: StatisticalVolumePreset
   labelKey: string
   descKey: string
-  estimatedTime: string
   iterations: number
-  maxTurns: number
-  maxBranches: MaxBranchesSetting
-  recommendedBadge?: boolean
-}
+  earlyStoppingMargin: EarlyStoppingMargin
+}> = (['FLASH', 'STANDARD', 'TOURNAMENT', 'DEEP_STAT'] as StatisticalVolumePreset[]).map((id) => {
+  const vals = computeStatisticalVolume(id)
+  const labelKey =
+    id === 'FLASH'
+      ? 'volFlashLabel'
+      : id === 'STANDARD'
+        ? 'volStandardLabel'
+        : id === 'TOURNAMENT'
+          ? 'volTournamentLabel'
+          : 'volDeepLabel'
+  const descKey =
+    id === 'FLASH'
+      ? 'volFlashDesc'
+      : id === 'STANDARD'
+        ? 'volStandardDesc'
+        : id === 'TOURNAMENT'
+          ? 'volTournamentDesc'
+          : 'volDeepDesc'
+  return { id, labelKey, descKey, ...vals }
+})
 
-const PERFORMANCE_PROFILES: PerformanceProfile[] = [
-  {
-    id: 'ultra_fast',
-    labelKey: 'profileLightning',
-    descKey: 'profileLightningDesc',
-    estimatedTime: '~2 sec',
-    iterations: 60,
-    maxTurns: 12,
-    maxBranches: 8,
-  },
-  {
-    id: 'fast',
-    labelKey: 'profileFast',
-    descKey: 'profileFastDesc',
-    estimatedTime: '~5 sec',
-    iterations: 150,
-    maxTurns: 15,
-    maxBranches: 8,
-    recommendedBadge: true,
-  },
-  {
-    id: 'balanced',
-    labelKey: 'profileBalanced',
-    descKey: 'profileBalancedDesc',
-    estimatedTime: '~10 sec',
-    iterations: 300,
-    maxTurns: 15,
-    maxBranches: 20,
-  },
-  {
-    id: 'precise',
-    labelKey: 'profilePrecise',
-    descKey: 'profilePreciseDesc',
-    estimatedTime: '~25 sec',
-    iterations: 600,
-    maxTurns: 18,
-    maxBranches: 20,
-  },
-  {
-    id: 'tournament',
-    labelKey: 'profileTournament',
-    descKey: 'profileTournamentDesc',
-    estimatedTime: '~60 sec',
-    iterations: 1200,
-    maxTurns: 20,
-    maxBranches: 50,
-  },
+const aiPresetOptions: Array<{
+  id: AiIntelligencePreset
+  labelKey: string
+  descKey: string
+}> = [
+  { id: 'FAST_HEURISTIC', labelKey: 'aiFastLabel', descKey: 'aiFastDesc' },
+  { id: 'COMPETITIVE', labelKey: 'aiCompLabel', descKey: 'aiCompDesc' },
+  { id: 'EXPERT_DEEP', labelKey: 'aiExpertLabel', descKey: 'aiExpertDesc' },
 ]
 
-const activeProfileId = ref<string>('fast')
+const activeCpuPreset = computed<HardwareCpuPreset | null>(() => {
+  const match = cpuPresetOptions.value.find(
+    (opt) =>
+      opt.workerCount === props.config.workerCount &&
+      (props.config.workerSchedulingMode ?? 'DYNAMIC_BATCHES') === opt.workerSchedulingMode &&
+      (props.config.batchSize ?? opt.batchSize) === opt.batchSize,
+  )
+  return match?.id ?? null
+})
+
+const activeVolumePreset = computed<StatisticalVolumePreset | null>(() => {
+  const match = volumePresetOptions.find(
+    (opt) =>
+      opt.iterations === props.config.iterations &&
+      (props.config.earlyStoppingMargin ?? 0) === opt.earlyStoppingMargin,
+  )
+  return match?.id ?? null
+})
+
+const activeAiPreset = computed<AiIntelligencePreset | null>(() => {
+  for (const opt of aiPresetOptions) {
+    const vals = computeAiIntelligence(opt.id)
+    if (
+      props.config.maxBranches === vals.maxBranches &&
+      (props.config.lookaheadPly ?? 3) === vals.lookaheadPly &&
+      (props.config.topKCandidates ?? 3) === vals.topKCandidates &&
+      (props.config.beamWidth ?? 8) === vals.beamWidth &&
+      (props.config.maxActionDepth ?? 8) === vals.maxActionDepth &&
+      (props.config.rolloutMaxActions ?? 8) === vals.rolloutMaxActions &&
+      (props.config.opponentLookaheadPly ?? 3) === vals.opponentLookaheadPly &&
+      (props.config.opponentMaxBranches ?? 20) === vals.opponentMaxBranches &&
+      (props.config.aiTemperament ?? 'BALANCED') === vals.aiTemperament &&
+      props.config.maxTurns === vals.maxTurns
+    ) {
+      return opt.id
+    }
+  }
+  return null
+})
+
+const isCustomAdvancedActive = computed(
+  () =>
+    activeCpuPreset.value === null ||
+    activeVolumePreset.value === null ||
+    activeAiPreset.value === null ||
+    props.config.fixedSeed !== null ||
+    props.config.collectDetailedTelemetry === false ||
+    Boolean(props.config.stressTestOhkoEachTurn) ||
+    (props.config.perturbationType ?? 'NONE') !== 'NONE',
+)
 
 function patchConfig(partial: Partial<SimulationConfig>) {
   emit('update-config', {
@@ -96,24 +180,54 @@ function patchConfig(partial: Partial<SimulationConfig>) {
   })
 }
 
-function applyProfile(profile: PerformanceProfile) {
-  activeProfileId.value = profile.id
+function selectCpuPreset(id: HardwareCpuPreset) {
+  patchConfig(computeHardwareAllocation(id, props.maxHardwareWorkers))
+}
+
+function selectVolumePreset(id: StatisticalVolumePreset) {
+  patchConfig(computeStatisticalVolume(id))
+}
+
+function selectAiPreset(id: AiIntelligencePreset) {
+  patchConfig(computeAiIntelligence(id))
+}
+
+function resetToHardwareRecommended() {
+  const reco = recommendedPresets.value
   patchConfig({
-    iterations: profile.iterations,
-    maxTurns: profile.maxTurns,
-    maxBranches: profile.maxBranches,
-    workerCount: Math.min(props.maxHardwareWorkers, 4),
+    ...computeHardwareAllocation(reco.cpu, props.maxHardwareWorkers),
+    ...computeStatisticalVolume(reco.volume),
+    ...computeAiIntelligence(reco.ai),
+    firstPlayerMode: 'RANDOM',
+    fixedSeed: null,
+    perturbationType: 'NONE',
+    perturbationTurn: 2,
+    stressTestOhkoEachTurn: false,
+    collectDetailedTelemetry: true,
   })
 }
 
-onMounted(() => {
-  const cores = props.maxHardwareWorkers || 4
-  if (cores >= 8) {
-    applyProfile(PERFORMANCE_PROFILES[2]!) // Équilibré
-  } else {
-    applyProfile(PERFORMANCE_PROFILES[1]!) // Rapide
+function handleSeedInput(raw: string) {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    patchConfig({ fixedSeed: null })
+    return
   }
-})
+  const parsed = Number.parseInt(trimmed, 10)
+  patchConfig({ fixedSeed: Number.isFinite(parsed) ? parsed : null })
+}
+
+function handleMaxBranchesSelect(val: string) {
+  const maxBranches: MaxBranchesSetting =
+    val === 'INFINITE' ? 'INFINITE' : (Number(val) as 8 | 20 | 50)
+  patchConfig({ maxBranches })
+}
+
+function handleOpponentBranchesSelect(val: string) {
+  const opponentMaxBranches: MaxBranchesSetting =
+    val === 'INFINITE' ? 'INFINITE' : (Number(val) as 8 | 20 | 50)
+  patchConfig({ opponentMaxBranches })
+}
 
 function toggleOpponent(oppId: string) {
   const current = new Set(props.config.selectedOpponentIds)
@@ -174,7 +288,28 @@ const launchButtonState = computed(() => {
         </p>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Pill estimation durée & débit live -->
+        <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs">
+          <div>
+            <span class="text-slate-500">{{ t('estDurationLabel') }} : </span>
+            <span class="font-mono font-bold text-slate-900">{{ liveEstimate.formattedDuration }}</span>
+          </div>
+          <span class="text-slate-300">|</span>
+          <div>
+            <span class="text-slate-500">{{ t('estSpeedLabel') }} : </span>
+            <span class="font-mono font-bold text-emerald-700">
+              {{ t('estSpeedValue', { gps: liveEstimate.speedGamesPerSec }) }}
+            </span>
+          </div>
+          <span
+            v-if="liveEstimate.isPrecisionCalibrated"
+            class="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800"
+          >
+            {{ t('estLiveCalibrated') }}
+          </span>
+        </div>
+
         <button
           type="button"
           @click="emit('back-step1')"
@@ -210,66 +345,527 @@ const launchButtonState = computed(() => {
       </div>
     </div>
 
-    <!-- 1. SELECTEUR DE PROFIL DE PERFORMANCE AUTOMATIQUE -->
-    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-        <div>
-          <h3 class="text-sm font-bold text-slate-900">
-            {{ t('perfProfileTitle') }}
-          </h3>
-          <p class="mt-0.5 text-xs text-slate-500">
-            {{ t('perfProfileSub') }}
-          </p>
+    <!-- BANDEAU DE CALIBRATION MATÉRIELLE + 3 SÉLECTEURS RAPIDES INDÉPENDANTS -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
+      <!-- En-tête calibration matérielle -->
+      <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <span class="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-700">
+            {{ t('hwCalibratedBanner') }}
+          </span>
+          <span class="rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white">
+            {{ tierBadgeLabel }}
+          </span>
+          <span class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-800">
+            {{ t('hwCoresUnit', { n: hardwareProfile.logicalCores }) }}
+          </span>
+          <span
+            v-if="hardwareProfile.deviceMemoryGb"
+            class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-700"
+          >
+            {{ hardwareProfile.deviceMemoryGb }} GB RAM
+          </span>
+          <span class="rounded-md bg-white border border-slate-200 px-2.5 py-0.5 font-mono text-xs text-slate-700">
+            {{ t('hwScoreLabel', { score: hardwareProfile.singleCoreScore }) }}
+          </span>
+          <span class="font-mono text-xs font-semibold text-indigo-700">
+            {{ t('hwClusterSpeed', { gps: hardwareProfile.estimatedClusterGamesPerSec }) }}
+          </span>
         </div>
-        <span class="rounded-lg bg-slate-100 px-3 py-1 font-mono text-xs font-bold text-slate-700">
-          {{ t('hardwareDetected', { n: maxHardwareWorkers }) }}
-        </span>
+
+        <button
+          type="button"
+          @click="emit('recalibrate-hardware')"
+          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs transition hover:bg-slate-100"
+        >
+          {{ t('hwRecalibrateBtn') }}
+        </button>
       </div>
 
-      <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div
-          v-for="profile in PERFORMANCE_PROFILES"
-          :key="profile.id"
-          @click="applyProfile(profile)"
-          class="group relative flex cursor-pointer flex-col justify-between rounded-xl border p-4 transition"
-          :class="[
-            activeProfileId === profile.id
-              ? 'border-slate-900 bg-slate-900 text-white shadow-md'
-              : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
-          ]"
-        >
+      <!-- Sélecteur 1 : Allocation Matérielle (CPU) -->
+      <div>
+        <div class="flex items-baseline justify-between">
           <div>
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-bold">
-                {{ t(profile.labelKey) }}
-              </span>
+            <h3 class="text-sm font-bold text-slate-900">{{ t('selectorCpuTitle') }}</h3>
+            <p class="mt-0.5 text-xs text-slate-500">{{ t('selectorCpuSub') }}</p>
+          </div>
+          <span class="font-mono text-xs font-bold text-slate-700">
+            {{ config.workerCount }} / {{ maxHardwareWorkers }} Workers
+          </span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <button
+            v-for="opt in cpuPresetOptions"
+            :key="opt.id"
+            type="button"
+            @click="selectCpuPreset(opt.id)"
+            class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
+            :class="[
+              activeCpuPreset === opt.id
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
+            ]"
+          >
+            <div class="flex w-full items-center justify-between gap-2">
+              <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
               <span
-                v-if="profile.recommendedBadge"
+                v-if="recommendedPresets.cpu === opt.id"
                 class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                :class="activeProfileId === profile.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
+                :class="activeCpuPreset === opt.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
               >
                 {{ t('recommended') }}
               </span>
             </div>
+            <div class="mt-2 flex items-center justify-between text-xs">
+              <span :class="activeCpuPreset === opt.id ? 'text-slate-300' : 'text-slate-500'">
+                {{ t(opt.descKey) }}
+              </span>
+              <span class="font-mono font-bold">{{ opt.workerCount }} Workers</span>
+            </div>
+          </button>
+        </div>
+      </div>
 
-            <p
-              class="mt-1 text-xs"
-              :class="activeProfileId === profile.id ? 'text-slate-300' : 'text-slate-500'"
-            >
-              {{ t(profile.descKey) }}
-            </p>
+      <!-- Sélecteur 2 : Volume Statistique & Précision -->
+      <div class="border-t border-slate-100 pt-5">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">{{ t('selectorVolumeTitle') }}</h3>
+            <p class="mt-0.5 text-xs text-slate-500">{{ t('selectorVolumeSub') }}</p>
           </div>
+          <span class="font-mono text-xs font-bold text-slate-700">
+            {{ config.iterations }} {{ t('gamesUnit') }}
+          </span>
+        </div>
 
-          <div class="mt-4 flex items-center justify-between border-t pt-3" :class="activeProfileId === profile.id ? 'border-white/20' : 'border-slate-200'">
-            <span class="font-mono text-xs font-bold">
-              {{ profile.iterations }} {{ t('gamesUnit') }}
-            </span>
-            <span
-              class="text-[11px] font-semibold"
-              :class="activeProfileId === profile.id ? 'text-emerald-300' : 'text-emerald-700'"
-            >
-              {{ profile.estimatedTime }}
-            </span>
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <button
+            v-for="opt in volumePresetOptions"
+            :key="opt.id"
+            type="button"
+            @click="selectVolumePreset(opt.id)"
+            class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
+            :class="[
+              activeVolumePreset === opt.id
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
+            ]"
+          >
+            <div class="flex w-full items-center justify-between gap-2">
+              <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
+              <span
+                v-if="recommendedPresets.volume === opt.id"
+                class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                :class="activeVolumePreset === opt.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
+              >
+                {{ t('recommended') }}
+              </span>
+            </div>
+            <p class="mt-1.5 text-xs" :class="activeVolumePreset === opt.id ? 'text-slate-300' : 'text-slate-500'">
+              {{ t(opt.descKey) }}
+            </p>
+          </button>
+        </div>
+      </div>
+
+      <!-- Sélecteur 3 : Intelligence & Anticipation IA -->
+      <div class="border-t border-slate-100 pt-5">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">{{ t('selectorAiTitle') }}</h3>
+            <p class="mt-0.5 text-xs text-slate-500">{{ t('selectorAiSub') }}</p>
+          </div>
+          <span class="font-mono text-xs font-bold text-slate-700">
+            {{ config.lookaheadPly ?? 3 }}-Ply • Beam {{ config.beamWidth ?? 8 }} • {{ config.maxBranches }} br.
+          </span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <button
+            v-for="opt in aiPresetOptions"
+            :key="opt.id"
+            type="button"
+            @click="selectAiPreset(opt.id)"
+            class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
+            :class="[
+              activeAiPreset === opt.id
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-slate-50/50 text-slate-800 hover:border-slate-400 hover:bg-white',
+            ]"
+          >
+            <div class="flex w-full items-center justify-between gap-2">
+              <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
+              <span
+                v-if="recommendedPresets.ai === opt.id"
+                class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                :class="activeAiPreset === opt.id ? 'bg-indigo-400 text-slate-900' : 'bg-indigo-100 text-indigo-800'"
+              >
+                {{ t('recommended') }}
+              </span>
+            </div>
+            <p class="mt-1.5 text-xs" :class="activeAiPreset === opt.id ? 'text-slate-300' : 'text-slate-500'">
+              {{ t(opt.descKey) }}
+            </p>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TIROIR DÉPLIABLE DES PARAMÈTRES AVANCÉS DU MOTEUR (14 CONTRÔLES) -->
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+      <div
+        class="flex flex-wrap items-center justify-between gap-3 p-5 cursor-pointer select-none hover:bg-slate-50/80 transition"
+        @click="showAdvancedParams = !showAdvancedParams"
+      >
+        <div class="flex items-center gap-3">
+          <span
+            class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 font-mono text-xs font-bold text-slate-700"
+          >
+            {{ showAdvancedParams ? '−' : '+' }}
+          </span>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-bold text-slate-900">{{ t('advancedToggleTitle') }}</h3>
+              <span
+                v-if="isCustomAdvancedActive"
+                class="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+              >
+                {{ t('advancedCustomBadge') }}
+              </span>
+            </div>
+            <p class="mt-0.5 text-xs text-slate-500">{{ t('advancedToggleSub') }}</p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          @click.stop="resetToHardwareRecommended"
+          class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+        >
+          {{ t('advancedResetBtn') }}
+        </button>
+      </div>
+
+      <div v-if="showAdvancedParams" class="border-t border-slate-200 bg-slate-50/60 p-6 space-y-6">
+        <!-- Groupe A : Recherche & Évaluateur IA -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">
+            {{ t('advGroupAiTitle') }}
+          </h4>
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- 1. lookaheadPly -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advLookaheadPly') }}</span>
+              <select
+                :value="config.lookaheadPly ?? 3"
+                @change="patchConfig({ lookaheadPly: Number(($event.target as HTMLSelectElement).value) as LookaheadPly })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900"
+              >
+                <option :value="1">1-Ply (Tour T seul)</option>
+                <option :value="2">2-Ply (T -> T_adv)</option>
+                <option :value="3">3-Ply (T -> T_adv -> T+1)</option>
+              </select>
+            </label>
+
+            <!-- 2. maxBranches -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advMaxBranches') }}</span>
+              <select
+                :value="String(config.maxBranches)"
+                @change="handleMaxBranchesSelect(($event.target as HTMLSelectElement).value)"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900"
+              >
+                <option value="8">8 branches</option>
+                <option value="20">20 branches</option>
+                <option value="50">50 branches</option>
+                <option value="INFINITE">INFINITE (plafond 60)</option>
+              </select>
+            </label>
+
+            <!-- 3. beamWidth -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advBeamWidth', { n: config.beamWidth ?? 8 }) }}
+              </span>
+              <input
+                type="range"
+                min="2"
+                max="16"
+                step="1"
+                :value="config.beamWidth ?? 8"
+                @input="patchConfig({ beamWidth: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 4. topKCandidates -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advTopK', { n: config.topKCandidates ?? 3 }) }}
+              </span>
+              <input
+                type="range"
+                min="1"
+                max="8"
+                step="1"
+                :value="config.topKCandidates ?? 3"
+                @input="patchConfig({ topKCandidates: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 5. maxActionDepth -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advMaxActionDepth', { n: config.maxActionDepth ?? 8 }) }}
+              </span>
+              <input
+                type="range"
+                min="4"
+                max="14"
+                step="1"
+                :value="config.maxActionDepth ?? 8"
+                @input="patchConfig({ maxActionDepth: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 6. rolloutMaxActions -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advRolloutMaxActions', { n: config.rolloutMaxActions ?? 8 }) }}
+              </span>
+              <input
+                type="range"
+                min="3"
+                max="12"
+                step="1"
+                :value="config.rolloutMaxActions ?? 8"
+                @input="patchConfig({ rolloutMaxActions: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 7. aiTemperament -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advAiTemperament') }}</span>
+              <select
+                :value="config.aiTemperament ?? 'BALANCED'"
+                @change="patchConfig({ aiTemperament: ($event.target as HTMLSelectElement).value as AiTemperament })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+              >
+                <option value="BALANCED">{{ t('tempBalanced') }}</option>
+                <option value="AGGRESSIVE">{{ t('tempAggressive') }}</option>
+                <option value="CONSERVATIVE">{{ t('tempConservative') }}</option>
+              </select>
+            </label>
+
+            <!-- 8. opponentLookaheadPly & opponentMaxBranches -->
+            <div class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3.5">
+              <div class="flex flex-col gap-1">
+                <span class="text-xs font-semibold text-slate-700">{{ t('advOpponentLookahead') }}</span>
+                <select
+                  :value="config.opponentLookaheadPly ?? 3"
+                  @change="patchConfig({ opponentLookaheadPly: Number(($event.target as HTMLSelectElement).value) as LookaheadPly })"
+                  class="rounded-lg border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-900"
+                >
+                  <option :value="1">1-Ply</option>
+                  <option :value="2">2-Ply</option>
+                  <option :value="3">3-Ply</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="text-[11px] font-semibold text-slate-600">{{ t('advOpponentBranches') }}</span>
+                <select
+                  :value="String(config.opponentMaxBranches ?? 20)"
+                  @change="handleOpponentBranchesSelect(($event.target as HTMLSelectElement).value)"
+                  class="rounded-lg border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-900"
+                >
+                  <option value="8">8</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Groupe B : Règles d'Exécution & Partie -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">
+            {{ t('advGroupExecTitle') }}
+          </h4>
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <!-- 9. iterations -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advIterations') }}</span>
+              <input
+                type="number"
+                min="10"
+                max="20000"
+                step="10"
+                :value="config.iterations"
+                @change="patchConfig({ iterations: Math.max(10, Math.min(20000, Number(($event.target as HTMLInputElement).value) || 300)) })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900"
+              />
+            </label>
+
+            <!-- 10. maxTurns -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advMaxTurns', { n: config.maxTurns }) }}
+              </span>
+              <input
+                type="range"
+                min="6"
+                max="30"
+                step="1"
+                :value="config.maxTurns"
+                @input="patchConfig({ maxTurns: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 11. fixedSeed -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advFixedSeed') }}</span>
+              <input
+                type="number"
+                :placeholder="t('advFixedSeedPlaceholder')"
+                :value="config.fixedSeed ?? ''"
+                @input="handleSeedInput(($event.target as HTMLInputElement).value)"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900"
+              />
+            </label>
+          </div>
+        </div>
+
+        <!-- Groupe C : Parallélisme & Ordonnancement -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">
+            {{ t('advGroupWorkersTitle') }}
+          </h4>
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <!-- 12. workerCount -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">
+                {{ t('advWorkerCount', { n: config.workerCount, max: maxHardwareWorkers }) }}
+              </span>
+              <input
+                type="range"
+                min="1"
+                :max="maxHardwareWorkers"
+                step="1"
+                :value="config.workerCount"
+                @input="patchConfig({ workerCount: Number(($event.target as HTMLInputElement).value) })"
+                class="accent-slate-900"
+              />
+            </label>
+
+            <!-- 13. workerSchedulingMode -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advSchedulingMode') }}</span>
+              <select
+                :value="config.workerSchedulingMode ?? 'DYNAMIC_BATCHES'"
+                @change="patchConfig({ workerSchedulingMode: ($event.target as HTMLSelectElement).value as WorkerSchedulingMode })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+              >
+                <option value="DYNAMIC_BATCHES">{{ t('schedDynamic') }}</option>
+                <option value="STATIC_SHARDS">{{ t('schedStatic') }}</option>
+              </select>
+            </label>
+
+            <!-- 14. batchSize -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advBatchSize') }}</span>
+              <select
+                :disabled="(config.workerSchedulingMode ?? 'DYNAMIC_BATCHES') !== 'DYNAMIC_BATCHES'"
+                :value="config.batchSize ?? 25"
+                @change="patchConfig({ batchSize: Number(($event.target as HTMLSelectElement).value) })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 disabled:opacity-50"
+              >
+                <option :value="10">10 {{ t('gamesUnit') }}</option>
+                <option :value="25">25 {{ t('gamesUnit') }}</option>
+                <option :value="50">50 {{ t('gamesUnit') }}</option>
+                <option :value="100">100 {{ t('gamesUnit') }}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Groupe D : Convergence, Télémétrie & Stress-Tests -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">
+            {{ t('advGroupStatsTitle') }}
+          </h4>
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- earlyStoppingMargin -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advEarlyStopping') }}</span>
+              <select
+                :value="config.earlyStoppingMargin ?? 0"
+                @change="patchConfig({ earlyStoppingMargin: Number(($event.target as HTMLSelectElement).value) as EarlyStoppingMargin })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+              >
+                <option :value="0">{{ t('earlyStopOff') }}</option>
+                <option :value="1.5">{{ t('earlyStop15') }}</option>
+                <option :value="2.5">{{ t('earlyStop25') }}</option>
+                <option :value="4">{{ t('earlyStop40') }}</option>
+              </select>
+            </label>
+
+            <!-- collectDetailedTelemetry & stressTestOhkoEachTurn -->
+            <div class="flex flex-col justify-center gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
+              <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="config.collectDetailedTelemetry !== false"
+                  @change="patchConfig({ collectDetailedTelemetry: ($event.target as HTMLInputElement).checked })"
+                  class="h-4 w-4 rounded border-slate-300 accent-slate-900"
+                />
+                <span>{{ t('advCollectTelemetry') }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="Boolean(config.stressTestOhkoEachTurn)"
+                  @change="patchConfig({ stressTestOhkoEachTurn: ($event.target as HTMLInputElement).checked })"
+                  class="h-4 w-4 rounded border-slate-300 accent-slate-900"
+                />
+                <span>{{ t('advStressOhko') }}</span>
+              </label>
+            </div>
+
+            <!-- perturbationType -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advPerturbation') }}</span>
+              <select
+                :value="config.perturbationType ?? 'NONE'"
+                @change="patchConfig({ perturbationType: ($event.target as HTMLSelectElement).value as DebugPerturbationType })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+              >
+                <option value="NONE">{{ t('pertNone') }}</option>
+                <option value="FORCE_OPPONENT_IONO">{{ t('pertIono') }}</option>
+                <option value="FORCE_KO_ACTIVE">{{ t('pertKo') }}</option>
+                <option value="FORCE_KEY_CARD_PRIZED">{{ t('pertPrized') }}</option>
+              </select>
+            </label>
+
+            <!-- perturbationTurn -->
+            <label class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span class="text-xs font-semibold text-slate-700">{{ t('advPerturbationTurn') }}</span>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                :disabled="(config.perturbationType ?? 'NONE') === 'NONE'"
+                :value="config.perturbationTurn ?? 2"
+                @change="patchConfig({ perturbationTurn: Math.max(1, Math.min(10, Number(($event.target as HTMLInputElement).value) || 2)) })"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 disabled:opacity-50"
+              />
+            </label>
           </div>
         </div>
       </div>

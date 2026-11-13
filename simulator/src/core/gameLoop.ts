@@ -40,7 +40,7 @@ import {
   type PlayerBoardState,
   type WinReason,
 } from './engine'
-import { selectBestTurnBranch } from './evaluator'
+import { selectBestTurnBranch, type EvaluatorOptions } from './evaluator'
 import { deriveGameSeed } from './prng'
 
 export const MAX_TRACED_GAMES = 20
@@ -132,7 +132,6 @@ export interface SimulationShardInput {
 export interface SimulationShardResult {
   shardId: number
   outcomes: SingleGameOutcome[]
-  tracedGames: TracedGameRecord[]
   telemetry?: ShardTelemetryAccumulator
 }
 
@@ -473,6 +472,24 @@ export function playFullGame(
     perturbationTurn: config.perturbationTurn,
   })
 
+  const playerEvalOptions: EvaluatorOptions = {
+    maxActionDepth: config.maxActionDepth,
+    beamWidth: config.beamWidth,
+    topKCandidates: config.topKCandidates,
+    lookaheadPly: config.lookaheadPly,
+    rolloutMaxActions: config.rolloutMaxActions,
+    aiTemperament: config.aiTemperament,
+  }
+  const opponentMaxBranches = config.opponentMaxBranches ?? config.maxBranches
+  const opponentEvalOptions: EvaluatorOptions = {
+    maxActionDepth: config.maxActionDepth,
+    beamWidth: config.beamWidth,
+    topKCandidates: config.topKCandidates,
+    lookaheadPly: config.opponentLookaheadPly ?? config.lookaheadPly,
+    rolloutMaxActions: config.rolloutMaxActions,
+    aiTemperament: 'BALANCED',
+  }
+
   const deckLookup = new Map<string, EngineCardModel>()
   for (const m of playerDeckModels) {
     if (!deckLookup.has(m.cardId)) {
@@ -569,7 +586,10 @@ export function playFullGame(
     const prevOpponentPrizes = state.opponent.prizes.length
     const prevPlayerHandLen = state.player.hand.length
 
-    const decision = selectBestTurnBranch(state, config.maxBranches, recordTrace)
+    const decision =
+      actingPlayer === 'PLAYER'
+        ? selectBestTurnBranch(state, config.maxBranches, recordTrace, playerEvalOptions)
+        : selectBestTurnBranch(state, opponentMaxBranches, recordTrace, opponentEvalOptions)
     state = decision.finalTurnState
 
     if (actingPlayer === 'PLAYER') {
@@ -898,15 +918,16 @@ export function runSimulationShard(
   onProgress?: (completedCountInShard: number) => void,
 ): SimulationShardResult {
   const outcomes: SingleGameOutcome[] = []
-  const tracedGames: TracedGameRecord[] = []
   const oppCount = Math.max(1, input.opponentDecks.length)
-  const telemetry = createShardTelemetryAccumulator(input.playerDeckModels)
+  const telemetry =
+    input.config.collectDetailedTelemetry === false
+      ? undefined
+      : createShardTelemetryAccumulator(input.playerDeckModels)
 
   for (let i = 0; i < input.gameCount; i++) {
     const globalGameIdx = input.startGameIndex + i
     const oppDeck = input.opponentDecks[globalGameIdx % oppCount]!
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
-    const shouldTrace = Boolean(input.config.debugMode) && globalGameIdx < MAX_TRACED_GAMES
 
     try {
       const outcome = playFullGame(
@@ -915,14 +936,11 @@ export function runSimulationShard(
         globalGameIdx,
         gameSeed,
         input.config,
-        shouldTrace,
+        false,
         telemetry,
       )
 
       outcomes.push(outcome)
-      if (outcome.tracedGame) {
-        tracedGames.push(outcome.tracedGame)
-      }
     } catch (err) {
       console.error(
         `[gameLoop] Exception in game #${globalGameIdx + 1} (Seed: ${gameSeed}) vs ${oppDeck.name}:`,
@@ -950,14 +968,13 @@ export function runSimulationShard(
   return {
     shardId: input.shardId,
     outcomes,
-    tracedGames,
     telemetry,
   }
 }
 
 /**
- * Fusionne les résultats de tous les Shards Web Workers pour produire les 8 KPIs obligatoires,
- * les 6 familles d'analyses tactiques compétitives et les parties tracées pour l'Inspecteur Debug.
+ * Fusionne les résultats de tous les Shards Web Workers pour produire les 8 KPIs obligatoires
+ * et les 6 familles d'analyses tactiques compétitives.
  */
 export function mergeSimulationShards(
   shards: SimulationShardResult[],
@@ -965,15 +982,14 @@ export function mergeSimulationShards(
   config: SimulationConfig,
   baseSeed: number,
   totalDurationMs: number,
+  earlyStopped = false,
 ): SimulationMetricsSummary {
   const allOutcomes: SingleGameOutcome[] = []
-  const allTraced: TracedGameRecord[] = []
   const mergedCardCounters: Record<string, ShardCardCounter> = {}
   const mergedComboCounters: Record<string, ShardComboCounter> = {}
 
   for (const shard of shards) {
     allOutcomes.push(...shard.outcomes)
-    allTraced.push(...shard.tracedGames)
 
     if (shard.telemetry) {
       for (const [cardId, c] of Object.entries(shard.telemetry.cardCounters)) {
@@ -1006,7 +1022,6 @@ export function mergeSimulationShards(
   }
 
   allOutcomes.sort((a, b) => a.gameIndex - b.gameIndex)
-  allTraced.sort((a, b) => a.gameIndex - b.gameIndex)
 
   const totalGames = allOutcomes.length
   let wins = 0
@@ -1304,6 +1319,12 @@ export function mergeSimulationShards(
         : 0,
   }
 
+  const pWinRate = totalGames > 0 ? wins / totalGames : 0
+  const marginOfErrorPct =
+    totalGames > 0
+      ? Math.round(1.96 * Math.sqrt((pWinRate * (1 - pWinRate)) / totalGames) * 1000) / 10
+      : 0
+
   return {
     totalDurationMs: Math.round(totalDurationMs),
     totalGamesSimulated: totalGames,
@@ -1341,6 +1362,7 @@ export function mergeSimulationShards(
     turnOrderSplitStats,
     configUsed: config,
     baseSeedUsed: baseSeed,
-    tracedGames: allTraced.slice(0, MAX_TRACED_GAMES),
+    marginOfErrorPct,
+    earlyStopped,
   }
 }

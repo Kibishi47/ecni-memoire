@@ -1,6 +1,10 @@
 import type { EngineCardModel } from '../types/cardModel'
 import type { ParsedDeck } from '../types/deck'
-import type { SimulationConfig, SimulationMetricsSummary } from '../types/simulator'
+import type {
+  EarlyStoppingMargin,
+  SimulationConfig,
+  SimulationMetricsSummary,
+} from '../types/simulator'
 import { META_OPPONENT_DECKS } from '../data/metaDecks'
 import { hasCompiledCardData } from '../data/cardCatalog'
 import { parsePtcglDecklist } from '../utils/ptcglParser'
@@ -52,6 +56,74 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
     result.push(desc)
   }
   return result
+}
+
+const EARLY_STOPPING_MIN_GAMES = 200
+
+function hasConvergedEarlyStopping(
+  completedGames: number,
+  winsCount: number,
+  totalGames: number,
+  margin: EarlyStoppingMargin | undefined,
+): boolean {
+  if (!margin || margin <= 0 || completedGames < EARLY_STOPPING_MIN_GAMES || completedGames >= totalGames) {
+    return false
+  }
+  const p = winsCount / completedGames
+  const moePct = 1.96 * Math.sqrt((p * (1 - p)) / completedGames) * 100
+  return moePct <= margin
+}
+
+function buildSimulationBatches(
+  totalGames: number,
+  desiredWorkers: number,
+  baseSeed: number,
+  cleanConfig: SimulationConfig,
+  cleanPlayerDeckModels: EngineCardModel[],
+  cleanOpponentDecks: OpponentDeckDescriptor[],
+): SimulationShardInput[] {
+  const mode = cleanConfig.workerSchedulingMode ?? 'STATIC_SHARDS'
+  const shards: SimulationShardInput[] = []
+
+  if (mode === 'DYNAMIC_BATCHES') {
+    const batchSize = Math.max(5, Math.min(200, cleanConfig.batchSize ?? 25))
+    let nextStart = 0
+    let shardId = 0
+    while (nextStart < totalGames) {
+      const countForBatch = Math.min(batchSize, totalGames - nextStart)
+      shards.push({
+        shardId: shardId++,
+        startGameIndex: nextStart,
+        gameCount: countForBatch,
+        baseSeed,
+        config: { ...cleanConfig },
+        playerDeckModels: cleanPlayerDeckModels,
+        opponentDecks: cleanOpponentDecks,
+      })
+      nextStart += countForBatch
+    }
+    return shards
+  }
+
+  let nextStart = 0
+  for (let wIdx = 0; wIdx < desiredWorkers; wIdx++) {
+    const remainingGames = totalGames - nextStart
+    const remainingWorkers = desiredWorkers - wIdx
+    const countForShard = Math.ceil(remainingGames / remainingWorkers)
+    if (countForShard <= 0) break
+
+    shards.push({
+      shardId: wIdx,
+      startGameIndex: nextStart,
+      gameCount: countForShard,
+      baseSeed,
+      config: { ...cleanConfig },
+      playerDeckModels: cleanPlayerDeckModels,
+      opponentDecks: cleanOpponentDecks,
+    })
+    nextStart += countForShard
+  }
+  return shards
 }
 
 export class SimulationWorkerPool {
@@ -162,26 +234,15 @@ export class SimulationWorkerPool {
       ),
     )
 
-    // Découpage en Shards équilibrés
-    const shardsInput: SimulationShardInput[] = []
-    let nextStart = 0
-    for (let wIdx = 0; wIdx < desiredWorkers; wIdx++) {
-      const remainingGames = totalGames - nextStart
-      const remainingWorkers = desiredWorkers - wIdx
-      const countForShard = Math.ceil(remainingGames / remainingWorkers)
-      if (countForShard <= 0) break
-
-      shardsInput.push({
-        shardId: wIdx,
-        startGameIndex: nextStart,
-        gameCount: countForShard,
-        baseSeed,
-        config: JSON.parse(JSON.stringify(cleanConfig)),
-        playerDeckModels: cleanPlayerDeckModels,
-        opponentDecks: cleanOpponentDecks,
-      })
-      nextStart += countForShard
-    }
+    // Découpage en lots statiques (N shards) ou dynamiques (file Work-Stealing)
+    const shardsInput = buildSimulationBatches(
+      totalGames,
+      desiredWorkers,
+      baseSeed,
+      cleanConfig,
+      cleanPlayerDeckModels,
+      cleanOpponentDecks,
+    )
 
     // Fallback asynchrone si `Worker` n'est pas disponible (ex: environnement Node/Vitest)
     if (typeof Worker === 'undefined') {
@@ -195,6 +256,8 @@ export class SimulationWorkerPool {
           try {
             const shardResults: SimulationShardResult[] = []
             let completedSoFar = 0
+            let winsSoFar = 0
+            let earlyStopped = false
             for (const shardIn of shardsInput) {
               if (this.isCancelled) {
                 reject(new Error('Simulation annulée par l\'utilisateur'))
@@ -209,8 +272,26 @@ export class SimulationWorkerPool {
                   )
                 }
               })
-              completedSoFar += shardIn.gameCount
+              completedSoFar += res.outcomes.length
+              for (const o of res.outcomes) {
+                if (o.winner === 'PLAYER') winsSoFar++
+              }
               shardResults.push(res)
+
+              if (
+                hasConvergedEarlyStopping(
+                  completedSoFar,
+                  winsSoFar,
+                  totalGames,
+                  cleanConfig.earlyStoppingMargin,
+                )
+              ) {
+                earlyStopped = true
+                if (onProgress) {
+                  onProgress(completedSoFar, totalGames, Math.round(performance.now() - startTime))
+                }
+                break
+              }
             }
             if (this.isCancelled) {
               reject(new Error('Simulation annulée par l\'utilisateur'))
@@ -219,7 +300,16 @@ export class SimulationWorkerPool {
             const totalDurationMs = performance.now() - startTime
             this.status = 'COMPLETED'
             this.isRunning = false
-            resolve(mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs))
+            resolve(
+              mergeSimulationShards(
+                shardResults,
+                opponentDecks,
+                config,
+                baseSeed,
+                totalDurationMs,
+                earlyStopped,
+              ),
+            )
           } catch (err) {
             this.status = 'ERROR'
             this.isRunning = false
@@ -231,74 +321,123 @@ export class SimulationWorkerPool {
       })
     }
 
-    // Exécution parallèle via Web Workers natifs
-    const progressByShard = new Map<number, number>()
+    // Exécution parallèle via Web Workers natifs avec file dynamique (Work-Stealing) + Early Stopping
+    const activeWorkerCount = Math.min(desiredWorkers, shardsInput.length)
+    const inFlightProgressBySlot = new Map<number, number>()
+    const shardResults: SimulationShardResult[] = []
+    let completedFinishedGames = 0
+    let winsSoFar = 0
+    let nextQueueIndex = 0
+    let earlyStopped = false
+
     const reportAggregatedProgress = () => {
       if (!onProgress) return
-      let sum = 0
-      for (const val of progressByShard.values()) {
-        sum += val
+      let inFlightSum = 0
+      for (const val of inFlightProgressBySlot.values()) {
+        inFlightSum += val
       }
-      onProgress(Math.min(totalGames, sum), totalGames, Math.round(performance.now() - startTime))
+      onProgress(
+        Math.min(totalGames, completedFinishedGames + inFlightSum),
+        totalGames,
+        Math.round(performance.now() - startTime),
+      )
     }
 
-    const shardPromises = shardsInput.map(
-      (shardIn, shardIdx) =>
-        new Promise<SimulationShardResult>((resolve, reject) => {
-          const worker = this.getOrCreateWarmWorker(shardIdx)
-          this.activeWorkers.push(worker)
+    const workerSlotPromises = Array.from({ length: activeWorkerCount }, (_, slotIdx) => {
+      return new Promise<void>((resolveSlot, rejectSlot) => {
+        const worker = this.getOrCreateWarmWorker(slotIdx)
+        this.activeWorkers.push(worker)
+        let currentBatch: SimulationShardInput | null = null
 
-          worker.onmessage = (event: MessageEvent<WorkerResponseMessage>) => {
-            const data = event.data
-            if (!data) return
-
-            if (data.type === 'PROGRESS') {
-              progressByShard.set(data.workerId, data.completedChunk)
-              reportAggregatedProgress()
-            } else if (data.type === 'SHARD_PROGRESS') {
-              progressByShard.set(data.shardId, data.completedInShard)
-              reportAggregatedProgress()
-            } else if (data.type === 'SHARD_COMPLETE') {
-              progressByShard.set(data.shardId, shardIn.gameCount)
-              reportAggregatedProgress()
-              worker.onmessage = null
-              worker.onerror = null
-              resolve(data.result)
-            } else if (data.type === 'ERROR') {
-              console.error('[WorkerPool ERROR]:', data.message, data.stack)
-              this.terminateAll()
-              reject(new Error(data.message))
-            } else if (data.type === 'SHARD_ERROR') {
-              console.error('[WorkerPool SHARD_ERROR]:', data.error)
-              this.terminateAll()
-              reject(new Error(data.error))
-            }
+        const dispatchNextBatch = () => {
+          if (this.isCancelled || earlyStopped || nextQueueIndex >= shardsInput.length) {
+            inFlightProgressBySlot.set(slotIdx, 0)
+            worker.onmessage = null
+            worker.onerror = null
+            resolveSlot()
+            return
           }
-
-          worker.onerror = (err) => {
-            this.terminateAll()
-            reject(new Error(err.message || 'Erreur Web Worker inattendue'))
-          }
-
+          currentBatch = shardsInput[nextQueueIndex++]!
+          inFlightProgressBySlot.set(slotIdx, 0)
           const req: WorkerRequestMessage = {
             type: 'RUN_SHARD',
-            payload: shardIn,
+            payload: currentBatch,
           }
           worker.postMessage(req)
-        }),
-    )
+        }
+
+        worker.onmessage = (event: MessageEvent<WorkerResponseMessage>) => {
+          const data = event.data
+          if (!data || !currentBatch) return
+
+          if (data.type === 'PROGRESS') {
+            inFlightProgressBySlot.set(slotIdx, data.completedChunk)
+            reportAggregatedProgress()
+          } else if (data.type === 'SHARD_PROGRESS') {
+            inFlightProgressBySlot.set(slotIdx, data.completedInShard)
+            reportAggregatedProgress()
+          } else if (data.type === 'SHARD_COMPLETE') {
+            completedFinishedGames += data.result.outcomes.length
+            for (const o of data.result.outcomes) {
+              if (o.winner === 'PLAYER') winsSoFar++
+            }
+            inFlightProgressBySlot.set(slotIdx, 0)
+            shardResults.push(data.result)
+
+            if (
+              !earlyStopped &&
+              hasConvergedEarlyStopping(
+                completedFinishedGames,
+                winsSoFar,
+                totalGames,
+                cleanConfig.earlyStoppingMargin,
+              )
+            ) {
+              earlyStopped = true
+            }
+
+            reportAggregatedProgress()
+            dispatchNextBatch()
+          } else if (data.type === 'ERROR') {
+            console.error('[WorkerPool ERROR]:', data.message, data.stack)
+            this.terminateAll()
+            rejectSlot(new Error(data.message))
+          } else if (data.type === 'SHARD_ERROR') {
+            console.error('[WorkerPool SHARD_ERROR]:', data.error)
+            this.terminateAll()
+            rejectSlot(new Error(data.error))
+          }
+        }
+
+        worker.onerror = (err) => {
+          this.terminateAll()
+          rejectSlot(new Error(err.message || 'Erreur Web Worker inattendue'))
+        }
+
+        dispatchNextBatch()
+      })
+    })
 
     return new Promise<SimulationMetricsSummary>(async (resolve, reject) => {
       this.rejectCurrentRun = reject
       try {
-        const shardResults = await Promise.all(shardPromises)
+        await Promise.all(workerSlotPromises)
         if (this.isCancelled) {
           reject(new Error("Simulation annulée par l'utilisateur"))
           return
         }
         const totalDurationMs = performance.now() - startTime
         this.status = 'COMPLETED'
-        resolve(mergeSimulationShards(shardResults, opponentDecks, config, baseSeed, totalDurationMs))
+        resolve(
+          mergeSimulationShards(
+            shardResults,
+            opponentDecks,
+            config,
+            baseSeed,
+            totalDurationMs,
+            earlyStopped,
+          ),
+        )
       } catch (err) {
         if (this.status !== 'CANCELLED') {
           this.status = 'ERROR'

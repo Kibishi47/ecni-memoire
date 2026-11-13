@@ -17,7 +17,6 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
         META_OPPONENT_DECKS[1]!.id,
       ],
       firstPlayerMode: 'RANDOM' as const,
-      debugMode: true,
       workerCount: 2,
       fixedSeed: 123456,
       perturbationType: 'NONE' as const,
@@ -40,11 +39,6 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
     expect(summary1.avgPlayerPrizesWon).toBeLessThanOrEqual(6)
     expect(summary1.avgOpponentPrizesWon).toBeGreaterThanOrEqual(0)
     expect(summary1.avgOpponentPrizesWon).toBeLessThanOrEqual(6)
-
-    // Vérification des traces détaillées pour l'Inspecteur Debug (?debug=true)
-    expect(summary1.tracedGames.length).toBe(8)
-    expect(summary1.tracedGames[0]!.turns.length).toBeGreaterThan(0)
-    expect(summary1.tracedGames[0]!.turns[0]!.candidateBranches.length).toBeGreaterThan(0)
 
     // Déterminisme strict à Seed fixe
     expect(summary1.globalWinRate).toBe(summary2.globalWinRate)
@@ -84,7 +78,6 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
       maxBranches: 8 as const,
       selectedOpponentIds: [META_OPPONENT_DECKS[0]!.id],
       firstPlayerMode: 'RANDOM' as const,
-      debugMode: false,
       workerCount: 1,
       fixedSeed: 987654,
       perturbationType: 'FORCE_OPPONENT_IONO' as const,
@@ -108,7 +101,6 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
       maxBranches: 8 as const,
       selectedOpponentIds: [META_OPPONENT_DECKS[0]!.id],
       firstPlayerMode: 'RANDOM' as const,
-      debugMode: false,
       workerCount: 2,
       fixedSeed: 42,
       perturbationType: 'NONE' as const,
@@ -122,5 +114,32 @@ describe('GameLoop & WorkerPool — Full Match Simulation & 8 Mandatory KPIs', (
     expect(pool.status).toBe('CANCELLED')
 
     await expect(simPromise).rejects.toThrow('Simulation annulée par l\'utilisateur')
+  })
+
+  it('supports DYNAMIC_BATCHES scheduling, collectDetailedTelemetry=false, and marginOfErrorPct', async () => {
+    const playerDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const pool = new SimulationWorkerPool()
+
+    const summary = await pool.runSimulation(playerDeck, {
+      iterations: 16,
+      maxTurns: 12,
+      maxBranches: 8,
+      lookaheadPly: 1,
+      topKCandidates: 1,
+      beamWidth: 4,
+      selectedOpponentIds: [META_OPPONENT_DECKS[0]!.id, META_OPPONENT_DECKS[1]!.id],
+      firstPlayerMode: 'RANDOM',
+      workerCount: 2,
+      workerSchedulingMode: 'DYNAMIC_BATCHES',
+      batchSize: 5,
+      collectDetailedTelemetry: false,
+      earlyStoppingMargin: 0,
+      fixedSeed: 5555,
+    })
+
+    expect(summary.totalGamesSimulated).toBe(16)
+    expect(summary.marginOfErrorPct).toBeGreaterThanOrEqual(0)
+    expect(summary.earlyStopped).toBe(false)
+    expect(Object.keys(summary.cardTelemetry)).toHaveLength(0)
   })
 })

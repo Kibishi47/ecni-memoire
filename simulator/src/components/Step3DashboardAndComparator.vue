@@ -13,7 +13,6 @@ import { exportDeckToPtcgl } from '../utils/ptcglExporter'
 import { getCardImageUrl } from '../utils/cardImage'
 import { useI18n } from '../utils/i18n'
 import CardZoomModal from './CardZoomModal.vue'
-import DebugInspectorPanel from './DebugInspectorPanel.vue'
 
 export interface DeckVersionEntry {
   id: string
@@ -35,7 +34,6 @@ const props = withDefaults(
     progressCompleted: number
     progressTotal: number
     progressElapsedMs: number
-    isDebugMode: boolean
     deckVersions?: DeckVersionEntry[]
     activeVersionId?: string
   }>(),
@@ -1388,14 +1386,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
     <CardZoomModal
       :card="zoomedCard"
       :is-open="zoomedCard !== null"
-      :is-debug-mode="isDebugMode"
       @close="closeZoom"
-    />
-
-    <!-- PANNEAU TECHNIQUE DE DEBUG (UNIQUEMENT SI ?debug=true) -->
-    <DebugInspectorPanel
-      v-if="isDebugMode && currentSummary"
-      :traced-games="currentSummary.tracedGames"
     />
   </div>
 </template>

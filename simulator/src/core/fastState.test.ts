@@ -165,7 +165,6 @@ describe('FastState — Zobrist / Murmur3 Numeric Hashing, Flat Int32Array Buffe
         firstPlayerMode: 'RANDOM',
         selectedOpponentIds: [META_OPPONENT_DECKS[1]!.id],
         fixedSeed: 20260711,
-        debugMode: false,
         workerCount: 1,
         perturbationType: 'NONE',
         perturbationTurn: 0,
