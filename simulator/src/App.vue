@@ -16,6 +16,15 @@ import {
   parsePtcglDecklistWithApi,
 } from './utils/ptcglParser'
 import { SimulationWorkerPool } from './worker/workerPool'
+import {
+  calibrateHardwareProfile,
+  computeAiIntelligence,
+  computeHardwareAllocation,
+  computeStatisticalVolume,
+  getRecommendedPresetsForProfile,
+  recordActualSimulationThroughput,
+  type HardwareProfile,
+} from './services/hardwareBenchmark'
 import { useI18n } from './utils/i18n'
 import WizardHeader from './components/WizardHeader.vue'
 import Step1DeckImport from './components/Step1DeckImport.vue'
@@ -27,10 +36,13 @@ import Step3DashboardAndComparator, {
 const currentStep = ref<1 | 2 | 3>(1)
 const { t } = useI18n()
 
-const maxHardwareWorkers =
-  typeof navigator !== 'undefined' && navigator.hardwareConcurrency
-    ? Math.max(1, Math.min(16, navigator.hardwareConcurrency))
-    : 4
+const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
+const maxHardwareWorkers = computed(() => hardwareProfile.value.workerThreadsMax)
+const initialPresets = getRecommendedPresetsForProfile(hardwareProfile.value)
+
+function handleRecalibrateHardware() {
+  hardwareProfile.value = calibrateHardwareProfile(true)
+}
 
 const rawDeckText = ref<string>('')
 
@@ -50,16 +62,16 @@ const isResolvingDeck = ref<boolean>(false)
 const deckResolveError = ref<string | null>(null)
 
 const simConfig = ref<SimulationConfig>({
-  iterations: 300,
-  maxTurns: 15,
-  maxBranches: 20,
+  ...computeStatisticalVolume(initialPresets.volume),
+  ...computeAiIntelligence(initialPresets.ai),
+  ...computeHardwareAllocation(initialPresets.cpu, hardwareProfile.value.workerThreadsMax),
   selectedOpponentIds: [],
   firstPlayerMode: 'RANDOM',
-  workerCount: Math.min(4, maxHardwareWorkers),
   fixedSeed: null,
   perturbationType: 'NONE',
   perturbationTurn: 2,
   stressTestOhkoEachTurn: false,
+  collectDetailedTelemetry: true,
 })
 
 const baselineSummary = ref<SimulationMetricsSummary | null>(null)
@@ -212,6 +224,8 @@ async function executeInitialSimulation() {
     )
     baselineSummary.value = summary
     currentSummary.value = summary
+    recordActualSimulationThroughput(summary.gamesPerSecond, rawConfig)
+    hardwareProfile.value = calibrateHardwareProfile(false)
     if (deckVersions.value.length > 0 && deckVersions.value[0]) {
       deckVersions.value[0].summary = summary
     }
@@ -304,6 +318,8 @@ async function executeComparisonSimulation() {
     }
     currentSummary.value = summary
     targetVersion.summary = summary
+    recordActualSimulationThroughput(summary.gamesPerSecond, rawConfig)
+    hardwareProfile.value = calibrateHardwareProfile(false)
   } catch (err) {
     if (err instanceof Error && err.message.includes('annulée')) {
       cancelNotice.value = t('simulationCancelled')
@@ -564,6 +580,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         v-else-if="currentStep === 2"
         :config="simConfig"
         :deck="baselineDeck"
+        :hardware-profile="hardwareProfile"
         :max-hardware-workers="maxHardwareWorkers"
         :meta-opponents="metaOpponents"
         :meta-loading="metaLoading"
@@ -571,6 +588,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :is-simulating="isSimulating"
         :progress-percent="progressPercent"
         @update-config="handleUpdateConfig"
+        @recalibrate-hardware="handleRecalibrateHardware"
         @back-step1="currentStep = 1"
         @launch-simulation="executeInitialSimulation"
         @cancel-simulation="handleCancelSimulation"
