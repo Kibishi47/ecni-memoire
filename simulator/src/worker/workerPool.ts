@@ -1,7 +1,6 @@
 import type { EngineCardModel } from '../types/cardModel'
 import type { ParsedDeck } from '../types/deck'
 import type {
-  EarlyStoppingMargin,
   SimulationConfig,
   SimulationMetricsSummary,
 } from '../types/simulator'
@@ -56,22 +55,6 @@ export function resolveOpponentDescriptors(selectedOpponentIds: string[]): Oppon
     result.push(desc)
   }
   return result
-}
-
-const EARLY_STOPPING_MIN_GAMES = 200
-
-function hasConvergedEarlyStopping(
-  completedGames: number,
-  winsCount: number,
-  totalGames: number,
-  margin: EarlyStoppingMargin | undefined,
-): boolean {
-  if (!margin || margin <= 0 || completedGames < EARLY_STOPPING_MIN_GAMES || completedGames >= totalGames) {
-    return false
-  }
-  const p = winsCount / completedGames
-  const moePct = 1.96 * Math.sqrt((p * (1 - p)) / completedGames) * 100
-  return moePct <= margin
 }
 
 function buildSimulationBatches(
@@ -256,8 +239,6 @@ export class SimulationWorkerPool {
           try {
             const shardResults: SimulationShardResult[] = []
             let completedSoFar = 0
-            let winsSoFar = 0
-            let earlyStopped = false
             for (const shardIn of shardsInput) {
               if (this.isCancelled) {
                 reject(new Error('Simulation annulée par l\'utilisateur'))
@@ -273,25 +254,7 @@ export class SimulationWorkerPool {
                 }
               })
               completedSoFar += res.outcomes.length
-              for (const o of res.outcomes) {
-                if (o.winner === 'PLAYER') winsSoFar++
-              }
               shardResults.push(res)
-
-              if (
-                hasConvergedEarlyStopping(
-                  completedSoFar,
-                  winsSoFar,
-                  totalGames,
-                  cleanConfig.earlyStoppingMargin,
-                )
-              ) {
-                earlyStopped = true
-                if (onProgress) {
-                  onProgress(completedSoFar, totalGames, Math.round(performance.now() - startTime))
-                }
-                break
-              }
             }
             if (this.isCancelled) {
               reject(new Error('Simulation annulée par l\'utilisateur'))
@@ -307,7 +270,6 @@ export class SimulationWorkerPool {
                 config,
                 baseSeed,
                 totalDurationMs,
-                earlyStopped,
               ),
             )
           } catch (err) {
@@ -321,14 +283,12 @@ export class SimulationWorkerPool {
       })
     }
 
-    // Exécution parallèle via Web Workers natifs avec file dynamique (Work-Stealing) + Early Stopping
+    // Exécution parallèle via Web Workers natifs avec file dynamique (Work-Stealing)
     const activeWorkerCount = Math.min(desiredWorkers, shardsInput.length)
     const inFlightProgressBySlot = new Map<number, number>()
     const shardResults: SimulationShardResult[] = []
     let completedFinishedGames = 0
-    let winsSoFar = 0
     let nextQueueIndex = 0
-    let earlyStopped = false
 
     const reportAggregatedProgress = () => {
       if (!onProgress) return
@@ -350,7 +310,7 @@ export class SimulationWorkerPool {
         let currentBatch: SimulationShardInput | null = null
 
         const dispatchNextBatch = () => {
-          if (this.isCancelled || earlyStopped || nextQueueIndex >= shardsInput.length) {
+          if (this.isCancelled || nextQueueIndex >= shardsInput.length) {
             inFlightProgressBySlot.set(slotIdx, 0)
             worker.onmessage = null
             worker.onerror = null
@@ -378,23 +338,8 @@ export class SimulationWorkerPool {
             reportAggregatedProgress()
           } else if (data.type === 'SHARD_COMPLETE') {
             completedFinishedGames += data.result.outcomes.length
-            for (const o of data.result.outcomes) {
-              if (o.winner === 'PLAYER') winsSoFar++
-            }
             inFlightProgressBySlot.set(slotIdx, 0)
             shardResults.push(data.result)
-
-            if (
-              !earlyStopped &&
-              hasConvergedEarlyStopping(
-                completedFinishedGames,
-                winsSoFar,
-                totalGames,
-                cleanConfig.earlyStoppingMargin,
-              )
-            ) {
-              earlyStopped = true
-            }
 
             reportAggregatedProgress()
             dispatchNextBatch()
@@ -435,7 +380,6 @@ export class SimulationWorkerPool {
             config,
             baseSeed,
             totalDurationMs,
-            earlyStopped,
           ),
         )
       } catch (err) {

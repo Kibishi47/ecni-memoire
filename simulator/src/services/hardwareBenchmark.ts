@@ -1,6 +1,5 @@
 import type { AiTemperament, LookaheadPly, MaxBranchesSetting } from '../core/evaluator'
 import type {
-  EarlyStoppingMargin,
   SimulationConfig,
   WorkerSchedulingMode,
 } from '../types/simulator'
@@ -138,7 +137,7 @@ function classifyHardwareTier(logicalCores: number, singleCoreScore: number): Ha
 export function computeEffectiveParallelFactor(workers: number, logicalCores: number): number {
   const active = Math.max(1, Math.min(workers, logicalCores))
   if (active === 1) return 1
-  const parallelEfficiency = 0.62
+  const parallelEfficiency = 0.55
   return 1 + (active - 1) * parallelEfficiency
 }
 
@@ -199,9 +198,9 @@ export function calibrateHardwareProfile(forceRecalibrate = false): HardwareProf
   measureSingleCoreOpsPerSec(15000)
   const opsPerSec = measureSingleCoreOpsPerSec(50000)
 
-  // Estimation prudente par défaut afin de ne jamais surestimer le débit réel
+  // Estimation volontairement conservatrice pour que la simulation réelle termine plus vite que l'estimation
   const normalizedScore = Math.max(15, Math.min(200, Math.round((opsPerSec / 9000000) * 100)))
-  const baseSingleGps = Math.max(8, Math.min(28, Math.round((normalizedScore * 0.2) * 10) / 10))
+  const baseSingleGps = Math.max(6, Math.min(20, Math.round((normalizedScore * 0.14) * 10) / 10))
 
   const measuredPerf = safeReadLocalStorage<{ singleThreadBaselineGps: number }>(
     STORAGE_PERF_HISTORY_KEY,
@@ -300,17 +299,16 @@ export function computeHardwareAllocation(
 
 export function computeStatisticalVolume(preset: StatisticalVolumePreset): {
   iterations: number
-  earlyStoppingMargin: EarlyStoppingMargin
 } {
   switch (preset) {
     case 'FLASH':
-      return { iterations: 150, earlyStoppingMargin: 0 }
+      return { iterations: 150 }
     case 'STANDARD':
-      return { iterations: 500, earlyStoppingMargin: 0 }
+      return { iterations: 500 }
     case 'TOURNAMENT':
-      return { iterations: 2000, earlyStoppingMargin: 2.5 }
+      return { iterations: 2000 }
     case 'DEEP_STAT':
-      return { iterations: 5000, earlyStoppingMargin: 0 }
+      return { iterations: 5000 }
   }
 }
 
@@ -409,21 +407,13 @@ export function estimateSimulationDurationSeconds(
   const parallelFactor = computeEffectiveParallelFactor(workers, profile.logicalCores)
   const complexity = computeConfigComplexityFactor(config)
 
-  // Nombre moyen attendu d'itérations si l'arrêt statistique précoce est activé
-  let expectedIterations = iterations
-  if (config.earlyStoppingMargin && config.earlyStoppingMargin > 0 && iterations > 250) {
-    const worstCaseConvergeN = Math.ceil(
-      (1.96 * 1.96 * 0.25 * 10000) / (config.earlyStoppingMargin * config.earlyStoppingMargin),
-    )
-    expectedIterations = Math.max(200, Math.min(iterations, Math.round(worstCaseConvergeN * 0.85)))
-  }
-
-  const safetyFactor = profile.measuredLiveSpeed ? 0.88 : 0.78
+  // Marge de sécurité conservatrice (~28-35% plus lent que le débit nominal) pour que le réel batte l'estimation
+  const safetyFactor = profile.measuredLiveSpeed ? 0.72 : 0.65
   const speedGamesPerSec = Math.max(
     1,
     Math.round(((profile.singleThreadGamesPerSec * parallelFactor) / complexity) * safetyFactor),
   )
-  const estimatedSeconds = expectedIterations / speedGamesPerSec
+  const estimatedSeconds = iterations / speedGamesPerSec
 
   return {
     estimatedSeconds,

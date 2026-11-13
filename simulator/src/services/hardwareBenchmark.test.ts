@@ -16,7 +16,7 @@ describe('hardwareBenchmark — Hardware Calibration & Performance Presets', () 
     expect(profile.logicalCores).toBeGreaterThanOrEqual(1)
     expect(profile.workerThreadsMax).toBe(profile.logicalCores)
     expect(profile.singleCoreScore).toBeGreaterThanOrEqual(15)
-    expect(profile.singleThreadGamesPerSec).toBeGreaterThanOrEqual(8)
+    expect(profile.singleThreadGamesPerSec).toBeGreaterThanOrEqual(6)
     expect(profile.estimatedClusterGamesPerSec).toBeGreaterThanOrEqual(profile.singleThreadGamesPerSec)
     expect(['ECO', 'BALANCED', 'PERFORMANCE', 'EXTREME']).toContain(profile.tier)
   })
@@ -37,7 +37,7 @@ describe('hardwareBenchmark — Hardware Calibration & Performance Presets', () 
 
   it('orders statistical volume and AI intelligence complexity accurately', () => {
     expect(computeStatisticalVolume('FLASH').iterations).toBe(150)
-    expect(computeStatisticalVolume('TOURNAMENT').earlyStoppingMargin).toBe(2.5)
+    expect(computeStatisticalVolume('TOURNAMENT').iterations).toBe(2000)
     expect(computeStatisticalVolume('DEEP_STAT').iterations).toBe(5000)
 
     const fastAi = computeAiIntelligence('FAST_HEURISTIC')
