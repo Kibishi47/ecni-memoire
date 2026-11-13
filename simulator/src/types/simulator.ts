@@ -9,11 +9,10 @@ export interface SimulationConfig {
   maxBranches: MaxBranchesSetting
   selectedOpponentIds: string[]
   firstPlayerMode: FirstPlayerMode
-  debugMode: boolean
   workerCount: number
   fixedSeed: number | null
-  perturbationType: DebugPerturbationType
-  perturbationTurn: number
+  perturbationType?: DebugPerturbationType
+  perturbationTurn?: number
   stressTestOhkoEachTurn?: boolean
 }
 
@@ -211,7 +210,6 @@ export interface SimulationMetricsSummary {
 
   configUsed: SimulationConfig
   baseSeedUsed: number
-  tracedGames: TracedGameRecord[]
 }
 
 export interface DeckCardContributionItem {

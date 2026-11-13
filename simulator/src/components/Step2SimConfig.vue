@@ -8,7 +8,6 @@ import { useI18n } from '../utils/i18n'
 const props = defineProps<{
   config: SimulationConfig
   deck: ParsedDeck
-  isDebugMode: boolean
   maxHardwareWorkers: number
   metaOpponents: MetaOpponentDeck[]
   metaLoading?: boolean

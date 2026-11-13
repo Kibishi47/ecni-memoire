@@ -8,7 +8,6 @@ import CardZoomModal from './CardZoomModal.vue'
 const props = defineProps<{
   rawDeckText: string
   validatedDeck: ParsedDeck
-  isDebugMode?: boolean
   isResolving?: boolean
   resolveError?: string | null
 }>()
@@ -498,7 +497,6 @@ function closeCardZoom() {
     <CardZoomModal
       :card="zoomedCard"
       :is-open="zoomedCard !== null"
-      :is-debug-mode="isDebugMode"
       @close="closeCardZoom"
     />
   </div>

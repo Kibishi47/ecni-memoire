@@ -25,7 +25,6 @@ import Step3DashboardAndComparator, {
 } from './components/Step3DashboardAndComparator.vue'
 
 const currentStep = ref<1 | 2 | 3>(1)
-const isDebugMode = ref<boolean>(false)
 const { t } = useI18n()
 
 const maxHardwareWorkers =
@@ -56,7 +55,6 @@ const simConfig = ref<SimulationConfig>({
   maxBranches: 20,
   selectedOpponentIds: [],
   firstPlayerMode: 'RANDOM',
-  debugMode: false,
   workerCount: Math.min(4, maxHardwareWorkers),
   fixedSeed: null,
   perturbationType: 'NONE',
@@ -99,14 +97,6 @@ function handleCancelSimulation() {
   }, 4500)
 }
 
-function detectDebugModeFromUrl() {
-  if (typeof window === 'undefined') return
-  const params = new URLSearchParams(window.location.search)
-  const debugActive = params.get('debug') === 'true' || params.get('debug') === '1'
-  isDebugMode.value = debugActive
-  simConfig.value.debugMode = debugActive
-}
-
 async function loadMetaDecks() {
   metaLoading.value = true
   metaError.value = null
@@ -127,18 +117,11 @@ async function loadMetaDecks() {
 }
 
 onMounted(() => {
-  detectDebugModeFromUrl()
   void loadMetaDecks()
-  if (typeof window !== 'undefined') {
-    window.addEventListener('popstate', detectDebugModeFromUrl)
-  }
 })
 
 onBeforeUnmount(() => {
   workerPool.terminateAll()
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('popstate', detectDebugModeFromUrl)
-  }
 })
 
 const canGoStep2 = computed(
@@ -195,7 +178,6 @@ function handleSelectStep(step: 1 | 2 | 3) {
 function handleUpdateConfig(updated: SimulationConfig) {
   simConfig.value = {
     ...updated,
-    debugMode: isDebugMode.value,
   }
 }
 
@@ -456,7 +438,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
       :current-step="currentStep"
       :can-go-step2="canGoStep2"
       :can-go-step3="canGoStep3"
-      :is-debug-mode="isDebugMode"
       :deck-total-cards="currentStep === 3 ? editableDeck.totalCards : baselineDeck.totalCards"
       @select-step="handleSelectStep"
     />
@@ -573,7 +554,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         v-if="currentStep === 1"
         :raw-deck-text="rawDeckText"
         :validated-deck="baselineDeck"
-        :is-debug-mode="isDebugMode"
         :is-resolving="isResolvingDeck"
         :resolve-error="deckResolveError"
         @validate-deck="handleValidateDeck"
@@ -584,7 +564,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         v-else-if="currentStep === 2"
         :config="simConfig"
         :deck="baselineDeck"
-        :is-debug-mode="isDebugMode"
         :max-hardware-workers="maxHardwareWorkers"
         :meta-opponents="metaOpponents"
         :meta-loading="metaLoading"
@@ -608,7 +587,6 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
         :progress-completed="progressCompleted"
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
-        :is-debug-mode="isDebugMode"
         :deck-versions="deckVersions"
         :active-version-id="activeVersionId"
         @adjust-card-qty="handleAdjustCardQty"
