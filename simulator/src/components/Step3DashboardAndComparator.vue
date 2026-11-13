@@ -479,11 +479,38 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <p class="mt-2 text-xs text-slate-500">
             {{ t('simulatedGamesCount', { n: currentSummary?.totalGamesSimulated ?? 0 }) }}
           </p>
+          <div
+            v-if="!isSimulating && currentSummary"
+            class="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[11px] text-slate-400"
+          >
+            <span>
+              {{
+                t('simPerfStatsLine', {
+                  sec: (currentSummary.totalDurationMs / 1000).toFixed(2),
+                  rate: currentSummary.gamesPerSecond,
+                  workers: currentSummary.configUsed.workerCount,
+                })
+              }}
+            </span>
+            <span
+              v-if="currentSummary.marginOfErrorPct !== undefined"
+              class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600"
+            >
+              ±{{ currentSummary.marginOfErrorPct }} %
+            </span>
+            <span
+              v-if="currentSummary.earlyStopped && currentSummary.marginOfErrorPct !== undefined"
+              class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
+            >
+              {{ t('simEarlyStoppedTag', { moe: currentSummary.marginOfErrorPct }) }}
+            </span>
+          </div>
         </div>
 
         <!-- Boutons d'action : Re-simuler, Enregistrer version et Exporter la variante -->
         <div class="flex flex-wrap items-center gap-3">
           <button
+            v-if="!isSimulating"
             type="button"
             :disabled="compareButtonState.disabled"
             @click="emit('rerun-and-compare')"
@@ -513,17 +540,6 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           >
             <span>{{ isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck') }}</span>
           </button>
-        </div>
-      </div>
-
-      <!-- Barre de progression de la simulation -->
-      <div v-if="isSimulating" class="mt-6 border-t border-slate-100 pt-4">
-        <div class="flex items-center justify-between text-xs font-semibold text-slate-700">
-          <span>{{ t('simulatingProgress', { done: progressCompleted, total: progressTotal }) }}</span>
-          <span>{{ progressPercent }} %</span>
-        </div>
-        <div class="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
-          <div class="h-full bg-indigo-600 transition-all duration-150" :style="{ width: `${progressPercent}%` }"></div>
         </div>
       </div>
     </div>
