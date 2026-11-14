@@ -37,7 +37,7 @@ from compiler.deterministic_builder import (
     build_deterministic_skeleton,
     compute_card_rule_signature,
 )
-from compiler.mlx_utils import resolve_mlx_batch_size
+from compiler.mlx_utils import clear_mlx_memory_cache, resolve_mlx_batch_size
 from compiler.models_config import (
     IntensityMode,
     PipelineMode,
@@ -436,6 +436,7 @@ def run_reasoning_phase(
                         if not continue_on_error:
                             raise
                     finally:
+                        clear_mlx_memory_cache()
                         progress.advance(task_id)
 
     finally:
@@ -805,6 +806,7 @@ def run_coding_phase(
                         if not continue_on_error:
                             raise
                     finally:
+                        clear_mlx_memory_cache()
                         progress.advance(task_id)
 
     finally:
