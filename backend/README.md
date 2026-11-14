@@ -72,6 +72,36 @@ npm run build
 npm start
 ```
 
+## Déploiement Docker (Coolify)
+
+Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement autonome sur **Coolify** (sans docker-compose) :
+
+- Image minimale basée sur `node:20-alpine` (~180 Mo).
+- Exécution sous l'utilisateur non-root standard `node`.
+- Healthcheck HTTP natif (`GET /health`) sans dépendances tierces (curl/wget).
+- `docker-entrypoint.sh` avec attente résiliente de PostgreSQL et exécution automatique des migrations SQL (`AUTO_MIGRATE=true`).
+
+### Configuration dans Coolify
+
+1. **Ajouter une ressource :** *Application* -> *Public/Private Repository* (GitHub / GitLab).
+2. **Paramètres de build :**
+   - **Build Pack :** `Dockerfile`
+   - **Base Directory :** `/backend`
+   - **Dockerfile Location :** `/Dockerfile` (ou `/backend/Dockerfile` si Base Directory est laissé à `/`)
+   - **Ports Exposes :** `3000`
+3. **Variables d'environnement dans Coolify :**
+   - `DATABASE_URL` *(obligatoire)* : URL de connexion PostgreSQL (ex. `postgres://postgres:password@mon-postgres-coolify:5432/pokemon_tcg_db`).
+   - `NODE_ENV` : `production`
+   - `PORT` : `3000`
+   - `CORS_ORIGIN` *(optionnel)* : Domaines autorisés séparés par des virgules (ex. `https://simulator.mondomaine.com`).
+   - `AUTO_MIGRATE` : `true` (défaut `true`, applique automatiquement les migrations SQL avec retry si PostgreSQL met quelques secondes à démarrer).
+   - `AUTO_SEED` : `false` (mettre à `true` pour amorcer automatiquement les cartes/decks si la base est vide).
+4. **Health Check :**
+   - **Path :** `/health`
+   - **Port :** `3000`
+
+---
+
 ## Endpoints REST
 
 - `GET /health` : Vérifie la connectivité PostgreSQL (`{ status: "ok", timestamp }`).

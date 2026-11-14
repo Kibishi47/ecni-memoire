@@ -13,9 +13,13 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:prod": "node dist/db/migrate.js",
     "seed": "npm run seed:cards && npm run seed:meta-decks",
+    "seed:prod": "npm run seed:cards:prod && npm run seed:meta-decks:prod",
     "seed:cards": "tsx src/scripts/seedCards.ts",
+    "seed:cards:prod": "node dist/scripts/seedCards.js",
     "seed:meta-decks": "tsx src/scripts/seedMetaDecks.ts",
+    "seed:meta-decks:prod": "node dist/scripts/seedMetaDecks.js",
     "test": "vitest run"
   },
   "dependencies": {
