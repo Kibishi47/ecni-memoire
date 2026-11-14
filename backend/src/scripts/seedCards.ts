@@ -35,8 +35,10 @@ export function resolveCardsDatabasePath(explicitPath?: string): string {
   const candidates = [
     explicitPath,
     process.env.CARDS_DATABASE_PATH,
+    path.resolve(getBackendRoot(), 'data/cards_database.json'),
     path.resolve(getBackendRoot(), '../card-compiler/data/cards_database.json'),
     path.resolve(getBackendRoot(), '../simulator/src/data/cards_database.json'),
+    path.resolve(process.cwd(), 'data/cards_database.json'),
     path.resolve(process.cwd(), '../card-compiler/data/cards_database.json'),
     path.resolve(process.cwd(), '../simulator/src/data/cards_database.json'),
   ].filter((p): p is string => Boolean(p && p.trim()))
