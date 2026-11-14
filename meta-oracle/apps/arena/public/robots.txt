@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://arena.meta-oracle.com/sitemap.xml

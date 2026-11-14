@@ -1,0 +1,23 @@
+# Exclusions build Docker (contexte Coolify : ./olydor)
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+.nuxt
+**/.nuxt
+.output
+**/.output
+.turbo
+.cache
+coverage
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+tools/card-compiler/.venv
+tools/card-compiler/**/__pycache__
+tools/card-compiler/**/*.gguf
+**/*.log

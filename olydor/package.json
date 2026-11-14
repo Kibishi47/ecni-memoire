@@ -1,0 +1,20 @@
+{
+  "name": "olydor-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Écosystème monorepo Olydor — Moteur de simulation Pokémon TCG, API TypeScript, Hub SEO, Simulateur & Arène IA",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @olydor/types build && pnpm --filter @olydor/engine build && pnpm --filter @olydor/ui build && pnpm -r --filter './apps/*' build",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "typecheck": "pnpm -r typecheck",
+    "dev:api": "pnpm --filter @olydor/api dev",
+    "dev:web": "pnpm --filter @olydor/web dev",
+    "dev:insight": "pnpm --filter @olydor/insight dev",
+    "dev:arena": "pnpm --filter @olydor/arena dev"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@olydor/arena",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Arène tactique 1v1 contre l'IA Pythia 3-Ply (Coming Soon) pour arena.olydor.app",
+  "scripts": {
+    "dev": "nuxt dev --port 3003",
+    "build": "nuxt build",
+    "preview": "nuxt preview --port 3003",
+    "prepare": "nuxt prepare",
+    "typecheck": "nuxt typecheck",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@olydor/engine": "workspace:*",
+    "@olydor/types": "workspace:*",
+    "@olydor/ui": "workspace:*",
+    "@nuxtjs/tailwindcss": "^6.13.1",
+    "lucide-vue-next": "^0.469.0",
+    "nuxt": "^3.16.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2",
+    "vue-tsc": "^2.2.0"
+  }
+}

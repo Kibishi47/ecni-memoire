@@ -1,0 +1,109 @@
+# ==============================================================================
+# Docker Compose Local — Écosystème Complet Olydor
+# Usage depuis ./olydor/ :
+#   docker compose -f docker/docker-compose.yml up --build
+# ==============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: olydor_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-olydor_db}
+    ports:
+      - '5432:5432'
+    volumes:
+      - olydor_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d olydor_db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    container_name: olydor_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-olydor_db}
+      AUTO_MIGRATE: 'true'
+      AUTO_SEED: 'true'
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3001,http://localhost:3002,http://localhost:3003,https://olydor.app,https://insight.olydor.app,https://arena.olydor.app}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPO_OWNER: ${GITHUB_REPO_OWNER:-}
+      GITHUB_REPO_NAME: ${GITHUB_REPO_NAME:-}
+      RATE_LIMIT_MAX_REPORTS_PER_HOUR: ${RATE_LIMIT_MAX_REPORTS_PER_HOUR:-5}
+    ports:
+      - '3000:3000'
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/web.Dockerfile
+    container_name: olydor_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NITRO_PORT: 3000
+      HOST: 0.0.0.0
+      NUXT_PUBLIC_WEB_URL: ${NUXT_PUBLIC_WEB_URL:-http://localhost:3001}
+      NUXT_PUBLIC_INSIGHT_URL: ${NUXT_PUBLIC_INSIGHT_URL:-http://localhost:3002}
+      NUXT_PUBLIC_ARENA_URL: ${NUXT_PUBLIC_ARENA_URL:-http://localhost:3003}
+      NUXT_PUBLIC_API_URL: ${NUXT_PUBLIC_API_URL:-http://localhost:3000}
+    ports:
+      - '3001:3000'
+
+  insight:
+    build:
+      context: ..
+      dockerfile: docker/insight.Dockerfile
+    container_name: olydor_insight
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NITRO_PORT: 3000
+      HOST: 0.0.0.0
+      NUXT_PUBLIC_WEB_URL: ${NUXT_PUBLIC_WEB_URL:-http://localhost:3001}
+      NUXT_PUBLIC_INSIGHT_URL: ${NUXT_PUBLIC_INSIGHT_URL:-http://localhost:3002}
+      NUXT_PUBLIC_ARENA_URL: ${NUXT_PUBLIC_ARENA_URL:-http://localhost:3003}
+      NUXT_PUBLIC_API_URL: ${NUXT_PUBLIC_API_URL:-http://localhost:3000}
+    ports:
+      - '3002:3000'
+
+  arena:
+    build:
+      context: ..
+      dockerfile: docker/arena.Dockerfile
+    container_name: olydor_arena
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NITRO_PORT: 3000
+      HOST: 0.0.0.0
+      NUXT_PUBLIC_WEB_URL: ${NUXT_PUBLIC_WEB_URL:-http://localhost:3001}
+      NUXT_PUBLIC_INSIGHT_URL: ${NUXT_PUBLIC_INSIGHT_URL:-http://localhost:3002}
+      NUXT_PUBLIC_ARENA_URL: ${NUXT_PUBLIC_ARENA_URL:-http://localhost:3003}
+      NUXT_PUBLIC_API_URL: ${NUXT_PUBLIC_API_URL:-http://localhost:3000}
+    ports:
+      - '3003:3000'
+
+volumes:
+  olydor_pgdata:

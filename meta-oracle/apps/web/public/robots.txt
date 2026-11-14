@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://meta-oracle.com/sitemap.xml
