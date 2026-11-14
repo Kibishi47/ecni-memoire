@@ -50,5 +50,3 @@ export const metaOracleTailwindPreset: Partial<Config> = {
     },
   },
 }
-
-export default metaOracleTailwindPreset
