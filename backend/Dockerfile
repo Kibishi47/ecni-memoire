@@ -1,13 +1,17 @@
 # ==============================================================================
 # Étape 1 : Construction (TypeScript -> JavaScript)
 # ==============================================================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Force NODE_ENV=development pour s'assurer que npm installe typescript et les devDependencies
+# même si Coolify injecte globalement NODE_ENV=production lors du build
+ENV NODE_ENV=development
+
 # Installation des dépendances (y compris devDependencies pour compiler TypeScript)
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=dev
 
 # Copie de la configuration et des sources TypeScript
 COPY tsconfig.json ./
@@ -22,7 +26,7 @@ RUN npm prune --omit=dev
 # ==============================================================================
 # Étape 2 : Image d'exécution de production (légère et sécurisée)
 # ==============================================================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 

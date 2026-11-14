@@ -76,7 +76,7 @@ npm start
 
 Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement autonome sur **Coolify** (sans docker-compose) :
 
-- Image minimale basée sur `node:20-alpine` (~180 Mo).
+- Image minimale basée sur `node:22-alpine` (Node.js 22 LTS, ~180 Mo).
 - Exécution sous l'utilisateur non-root standard `node`.
 - Healthcheck HTTP natif (`GET /health`) sans dépendances tierces (curl/wget).
 - `docker-entrypoint.sh` avec attente résiliente de PostgreSQL et exécution automatique des migrations SQL (`AUTO_MIGRATE=true`).
@@ -87,7 +87,7 @@ Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement au
 2. **Paramètres de build :**
    - **Build Pack :** `Dockerfile`
    - **Base Directory :** `/backend`
-   - **Dockerfile Location :** `/Dockerfile` (ou `/backend/Dockerfile` si Base Directory est laissé à `/`)
+   - **Dockerfile Location :** `/Dockerfile`
    - **Ports Exposes :** `3000`
 3. **Variables d'environnement dans Coolify :**
    - `DATABASE_URL` *(obligatoire)* : URL de connexion PostgreSQL (ex. `postgres://postgres:password@mon-postgres-coolify:5432/pokemon_tcg_db`).
