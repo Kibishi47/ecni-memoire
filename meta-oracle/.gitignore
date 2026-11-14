@@ -1,0 +1,25 @@
+# Dépendances & builds JS/TS/Nuxt
+node_modules/
+dist/
+.nuxt/
+.output/
+.nitro/
+.cache/
+*.local
+
+# Environnements & système
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Python & Outils offline (tools/card-compiler)
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.gguf
+tools/card-compiler/data/compiled_cards/*.json
+tools/card-compiler/data/raw_tcgdex/*.json
