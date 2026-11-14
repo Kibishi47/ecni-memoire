@@ -1,13 +1,16 @@
 # ==============================================================================
 # Dockerfile racine pour déploiement Coolify (Base Directory: /)
 # ==============================================================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Force NODE_ENV=development pour installer typescript et les devDependencies
+ENV NODE_ENV=development
+
 # Installation des dépendances du backend
 COPY backend/package*.json ./
-RUN npm ci
+RUN npm ci --include=dev
 
 # Compilation TypeScript
 COPY backend/tsconfig.json ./
@@ -20,7 +23,7 @@ RUN npm prune --omit=dev
 # ==============================================================================
 # Image d'exécution de production
 # ==============================================================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
