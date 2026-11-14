@@ -87,7 +87,7 @@ Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement au
 2. **Paramètres de build :**
    - **Build Pack :** `Dockerfile`
    - **Base Directory :** `/backend`
-   - **Dockerfile Location :** `/Dockerfile` (ou `/backend/Dockerfile` si Base Directory est laissé à `/`)
+   - **Dockerfile Location :** `/Dockerfile`
    - **Ports Exposes :** `3000`
 3. **Variables d'environnement dans Coolify :**
    - `DATABASE_URL` *(obligatoire)* : URL de connexion PostgreSQL (ex. `postgres://postgres:password@mon-postgres-coolify:5432/pokemon_tcg_db`).
