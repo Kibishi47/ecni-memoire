@@ -109,12 +109,14 @@ class TestCliRerunCommand(unittest.TestCase):
 
     @patch("compiler.cli.rebuild_consolidated_database")
     @patch("compiler.cli.run_two_pass_pipeline")
+    @patch("compiler.cli.run_reasoning_phase")
     @patch("compiler.cli.TCGdexFetcher")
     @patch("compiler.cli.get_data_dir")
     def test_re_run_phase_code_discovery(
         self,
         mock_data_dir: MagicMock,
         mock_fetcher_cls: MagicMock,
+        mock_run_reason: MagicMock,
         mock_pipeline: MagicMock,
         mock_rebuild_db: MagicMock,
     ) -> None:
@@ -123,8 +125,8 @@ class TestCliRerunCommand(unittest.TestCase):
         # Création de 2 cartes compilées existantes et de leurs fiches de raisonnement
         (self.compiled_dir / "sv05-144.json").write_text('{"cardId": "sv05-144"}', encoding="utf-8")
         (self.compiled_dir / "sv05-145.json").write_text('{"cardId": "sv05-145"}', encoding="utf-8")
-        (self.reason_dir / "sv05-144.json").write_text('{"cardId": "sv05-144"}', encoding="utf-8")
-        (self.reason_dir / "sv05-145.json").write_text('{"cardId": "sv05-145"}', encoding="utf-8")
+        (self.reason_dir / "sv05-144.json").write_text('{"cardId": "sv05-144", "reasoningText": "Analyse valide"}', encoding="utf-8")
+        (self.reason_dir / "sv05-145.json").write_text('{"cardId": "sv05-145", "reasoningText": "Analyse valide"}', encoding="utf-8")
 
         mock_fetcher = MagicMock()
         b1 = make_dummy_bundle("sv05-144")

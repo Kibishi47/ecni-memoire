@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
-DEFAULT_MLX_BATCH_SIZE = 2
+DEFAULT_MLX_BATCH_SIZE = 1
 
 
 def resolve_mlx_batch_size(batch_size: Optional[int] = None) -> int:
@@ -166,6 +166,7 @@ def run_mlx_continuous_batch(
         "sampler": sampler,
         "prefill_batch_size": min(eff_batch, len(prompts_tokens)),
         "completion_batch_size": eff_batch,
+        "max_kv_size": 4096,
     }
     if logits_processors:
         bg_kwargs["logits_processors"] = list(logits_processors)
