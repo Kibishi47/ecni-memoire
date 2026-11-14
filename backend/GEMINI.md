@@ -93,6 +93,7 @@ Les scripts dans `src/scripts/` sont strictement réservés à l'exécution loca
 - **Imports ESM :** Toujours utiliser l'extension `.js` dans les imports TypeScript relatifs (ex. `import { env } from '../config/env.js'`) pour satisfaire `moduleResolution: "NodeNext"`.
 - **Testabilité :** `buildServer(options)` accepte des dépendances injectables (`pool`, `githubService`, `reportRateLimiter`, `catalogCache`, `alternativesService`) afin de tester les routes Fastify via `app.inject()` sans dépendre d'appels réseau ou PostgreSQL externes.
 - **Compression :** `@fastify/compress` compresse automatiquement les réponses HTTP JSON (>= 1 Ko) quand le client envoie `Accept-Encoding: gzip`.
+- **Déploiement Docker / Coolify :** Image multi-stage `node:20-alpine` exécutée sous `node`. L'entrypoint `docker-entrypoint.sh` attend la disponibilité de PostgreSQL et exécute automatiquement les migrations (`node dist/db/migrate.js`) au démarrage avant de lancer `node dist/server.js`.
 - **Sécurité :** Ne jamais commiter `.env`. Garder `.env.example` synchronisé avec `envSchema` dans `src/config/env.ts`.
 
 ## 7. Commandes usuelles
