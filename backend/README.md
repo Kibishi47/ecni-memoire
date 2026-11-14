@@ -76,7 +76,7 @@ npm start
 
 Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement autonome sur **Coolify** (sans docker-compose) :
 
-- Image minimale basée sur `node:20-alpine` (~180 Mo).
+- Image minimale basée sur `node:22-alpine` (Node.js 22 LTS, ~180 Mo).
 - Exécution sous l'utilisateur non-root standard `node`.
 - Healthcheck HTTP natif (`GET /health`) sans dépendances tierces (curl/wget).
 - `docker-entrypoint.sh` avec attente résiliente de PostgreSQL et exécution automatique des migrations SQL (`AUTO_MIGRATE=true`).
