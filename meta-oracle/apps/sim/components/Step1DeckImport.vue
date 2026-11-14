@@ -1,0 +1,500 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { EngineCardModel } from '@meta-oracle/types'
+import type { ParsedDeck, ParsedDeckEntry, SynergyAuditItem } from '@meta-oracle/types'
+import { useI18n } from '../utils/i18n'
+import CardFanThumbnail from './CardFanThumbnail.vue'
+import CardZoomModal from './CardZoomModal.vue'
+
+const props = defineProps<{
+  rawDeckText: string
+  validatedDeck: ParsedDeck
+  isResolving?: boolean
+  resolveError?: string | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'validate-deck', rawText: string): void
+  (e: 'proceed-step2'): void
+}>()
+
+const { t, currentLang, getLocalizedCardName, getLocalizedSubCategory } = useI18n()
+
+const localText = ref(props.rawDeckText)
+const hasValidatedCurrentInput = ref(false)
+const zoomedCard = ref<ParsedDeckEntry | EngineCardModel | null>(null)
+const zoomedCards = ref<Array<ParsedDeckEntry | EngineCardModel>>([])
+const zoomInitialIndex = ref<number>(0)
+
+watch(
+  () => props.rawDeckText,
+  (val) => {
+    localText.value = val
+    if (val && props.validatedDeck.cards.length > 0) {
+      hasValidatedCurrentInput.value = true
+    }
+  },
+  { immediate: true },
+)
+
+function onInputTextChange() {
+  hasValidatedCurrentInput.value = false
+}
+
+function handleValidateClick() {
+  if (!localText.value.trim() || props.isResolving) return
+  emit('validate-deck', localText.value)
+  hasValidatedCurrentInput.value = true
+}
+
+const isReadyToProceed = computed(() => {
+  return (
+    hasValidatedCurrentInput.value &&
+    !props.isResolving &&
+    !props.resolveError &&
+    props.validatedDeck.isValid60 &&
+    props.validatedDeck.isFullyResolved &&
+    props.validatedDeck.cards.length > 0
+  )
+})
+
+const pokemonCards = computed<ParsedDeckEntry[]>(() =>
+  props.validatedDeck.cards.filter((c) => c.category === 'pokemon'),
+)
+const trainerCards = computed<ParsedDeckEntry[]>(() =>
+  props.validatedDeck.cards.filter((c) => c.category === 'trainer'),
+)
+const energyCards = computed<ParsedDeckEntry[]>(() =>
+  props.validatedDeck.cards.filter((c) => c.category === 'energy'),
+)
+
+function openCardZoomList(
+  cards: Array<ParsedDeckEntry | EngineCardModel>,
+  initialIndex = 0,
+) {
+  const clean = cards.filter(Boolean)
+  if (clean.length === 0) return
+  zoomedCards.value = clean
+  zoomInitialIndex.value = Math.max(0, Math.min(initialIndex, clean.length - 1))
+  zoomedCard.value = clean[zoomInitialIndex.value] ?? null
+}
+
+function getSynergyAuditCards(item: SynergyAuditItem): ParsedDeckEntry[] {
+  const result: ParsedDeckEntry[] = []
+  const pushById = (cid: string) => {
+    const found = props.validatedDeck.cards.find((c) => c.cardId === cid)
+    if (found && !result.some((r) => r.cardId === found.cardId)) {
+      result.push(found)
+    }
+  }
+  pushById(item.cardId)
+  for (const matchedId of item.matchedCardIds || []) {
+    pushById(matchedId)
+  }
+  return result
+}
+
+function closeCardZoom() {
+  zoomedCard.value = null
+  zoomedCards.value = []
+  zoomInitialIndex.value = 0
+}
+</script>
+
+<template>
+  <div class="space-y-6">
+    <!-- SECTION HERO INTUITIVE -->
+    <section class="overflow-hidden rounded-2xl border border-[#263044] bg-[#131823] shadow-xs">
+      <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 px-6 py-8 text-white sm:px-8">
+        <div class="max-w-3xl">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-[#131823]/10 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-200 backdrop-blur">
+            {{ t('heroBadge') }}
+          </span>
+          <h1 class="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
+            {{ t('heroTitle') }}
+          </h1>
+          <p class="mt-2 text-sm leading-relaxed text-[#8a93a2] sm:text-base">
+            {{ t('heroDescription') }}
+          </p>
+
+          <div class="mt-5 flex flex-wrap gap-4 text-xs font-medium text-slate-200">
+            <div class="flex items-center gap-2">
+              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>{{ t('profileBalancedDesc') }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>{{ t('metaMatchupsTitle') }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>{{ t('step3Title') }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ZONE D'IMPORT ET VALIDATION DU DECK -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      <!-- Colonne Gauche : Saisie de la liste PTCGL -->
+      <div class="flex flex-col rounded-2xl border border-[#263044] bg-[#131823] p-5 shadow-xs lg:col-span-5">
+        <div class="mb-3 flex items-center justify-between">
+          <label for="ptcgl-decklist-input" class="text-xs font-bold uppercase tracking-wider text-slate-200">
+            Decklist Pokémon TCG Live
+          </label>
+          <span class="text-xs text-[#8a93a2] font-mono">
+            {{ t('formatQtyNameCode') }}
+          </span>
+        </div>
+
+        <textarea
+          id="ptcgl-decklist-input"
+          v-model="localText"
+          @input="onInputTextChange"
+          rows="18"
+          spellcheck="false"
+          :placeholder="t('pasteDeckPlaceholder')"
+          class="w-full flex-1 rounded-xl border border-[#263044] bg-[#0c0f16] p-3.5 font-mono text-xs leading-relaxed text-[#f8fafc] placeholder-slate-400 transition focus:border-[#ff6b00] focus:bg-[#131823] focus:outline-none"
+        ></textarea>
+
+        <!-- Bouton unique d'action -->
+        <div class="mt-4">
+          <button
+            v-if="!isReadyToProceed"
+            type="button"
+            :disabled="!localText.trim() || Boolean(isResolving)"
+            @click="handleValidateClick"
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-900 bg-[#ff6b00] py-3 text-sm font-bold text-white shadow-xs transition hover:bg-[#ff8a00] disabled:cursor-not-allowed disabled:bg-[#263044] disabled:border-[#263044]"
+          >
+            <span
+              v-if="isResolving"
+              class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+            ></span>
+            <span>{{ isResolving ? t('resolvingDeckApi') : t('importButton') }}</span>
+            <span v-if="!isResolving && localText.trim()" class="rounded bg-[#131823]/20 px-2 py-0.5 text-xs">
+              {{ validatedDeck.totalCards }} / 60
+            </span>
+          </button>
+
+          <button
+            v-else
+            type="button"
+            @click="emit('proceed-step2')"
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-600 bg-emerald-600 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-emerald-700 active:bg-emerald-800"
+          >
+            <span>{{ t('btnConfigure') }}</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Colonne Droite : Statut de validation et diagnostic -->
+      <div class="space-y-4 lg:col-span-7">
+        <!-- Bannière d'erreur API (résolution de cartes) -->
+        <div
+          v-if="resolveError"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/45 bg-red-950/45 p-4 text-xs text-red-200 shadow-xs"
+        >
+          <div>
+            <div class="font-bold">{{ t('apiResolveErrorTitle') }}</div>
+            <div class="mt-0.5 text-red-300">{{ resolveError }}</div>
+          </div>
+          <button
+            type="button"
+            :disabled="Boolean(isResolving) || !localText.trim()"
+            @click="handleValidateClick"
+            class="rounded-lg border border-red-500/45 bg-[#131823] px-3 py-1.5 text-xs font-bold text-red-200 shadow-2xs hover:bg-red-950/60 disabled:opacity-50"
+          >
+            {{ t('retryButton') }}
+          </button>
+        </div>
+
+        <!-- Bannière d'état du deck -->
+        <div
+          class="rounded-2xl border p-5 transition"
+          :class="[
+            validatedDeck.totalCards === 0
+              ? 'border-[#263044] bg-[#131823]'
+              : validatedDeck.isValid60 && validatedDeck.isFullyResolved
+                ? 'border-emerald-500/35 bg-emerald-950/45/70 text-emerald-100'
+                : 'border-amber-500/35 bg-amber-950/45/70 text-amber-100',
+          ]"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold"
+                :class="[
+                  validatedDeck.totalCards === 0
+                    ? 'bg-[#1b2232] text-[#8a93a2]'
+                    : validatedDeck.isValid60 && validatedDeck.isFullyResolved
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-amber-950/450 text-white shadow-xs',
+                ]"
+              >
+                <svg v-if="validatedDeck.isValid60 && validatedDeck.isFullyResolved" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span v-else-if="validatedDeck.totalCards === 0">0</span>
+                <span v-else>!</span>
+              </span>
+
+              <div>
+                <h3 class="text-base font-bold">
+                  {{
+                    validatedDeck.totalCards === 0
+                      ? t('awaitingDecklist')
+                      : validatedDeck.isValid60 && validatedDeck.isFullyResolved
+                        ? `${t('deckValidated')} (${t('cardsRequired')})`
+                        : `${t('deckIncomplete')} (${validatedDeck.totalCards} / 60)`
+                  }}
+                </h3>
+                <p class="text-xs text-[#8a93a2]">
+                  {{
+                    validatedDeck.totalCards === 0
+                      ? t('pasteDecklistPrompt')
+                      : t('distinctCardsDetected', { n: validatedDeck.uniqueCardCount })
+                  }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Badges récapitulatifs -->
+            <div v-if="validatedDeck.totalCards > 0" class="flex flex-wrap gap-2 text-xs">
+              <span class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1 font-semibold text-slate-200 shadow-2xs">
+                {{ t('pokemonCount') }} : {{ validatedDeck.pokemonCount }}
+              </span>
+              <span class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1 font-semibold text-slate-200 shadow-2xs">
+                {{ t('trainerCount') }} : {{ validatedDeck.trainerCount }}
+              </span>
+              <span class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1 font-semibold text-slate-200 shadow-2xs">
+                {{ t('energyCount') }} : {{ validatedDeck.energyCount }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Alertes de non-résolution -->
+          <div
+            v-if="!validatedDeck.isFullyResolved && validatedDeck.unresolvedCount > 0"
+            class="mt-4 rounded-xl border border-red-500/45 bg-red-950/45 p-3 text-xs text-red-200"
+          >
+            <div class="font-bold">
+              {{ t('unresolvedCardsTitle', { n: validatedDeck.unresolvedCount }) }}
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-for="(unres, uIdx) in validatedDeck.unresolvedCards"
+                :key="unres.uid"
+                type="button"
+                @click="openCardZoomList(validatedDeck.unresolvedCards, uIdx)"
+                class="flex items-center gap-2 rounded-lg border border-red-500/35 bg-[#131823] p-1.5 text-xs text-red-200 shadow-2xs transition hover:border-red-400 hover:bg-red-950/45/40"
+                :title="t('clickToEnlarge')"
+              >
+                <CardFanThumbnail :cards="[unres]" size="sm" @select="openCardZoomList(validatedDeck.unresolvedCards, uIdx)" />
+                <span class="font-medium">{{ unres.quantity }}× {{ unres.name }} {{ unres.setCode }} {{ unres.number }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Avertissements de format -->
+          <ul
+            v-if="validatedDeck.warnings.length > 0"
+            class="mt-3 space-y-1 border-t border-[#263044]/60 pt-2.5 text-xs text-[#8a93a2]"
+          >
+            <li v-for="(warn, wIdx) in validatedDeck.warnings" :key="wIdx">
+              • {{ warn.message }}
+            </li>
+          </ul>
+        </div>
+
+        <!-- Diagnostic des synergies du deck -->
+        <div v-if="validatedDeck.synergyAudit.length > 0" class="rounded-2xl border border-[#263044] bg-[#131823] p-5 shadow-xs">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-200">
+                {{ t('synergyAuditTitle') }}
+              </h3>
+              <p class="text-xs text-[#8a93a2]">
+                {{ t('deckSynergyVerification') }}
+              </p>
+            </div>
+            <span
+              class="rounded-lg border px-2.5 py-1 text-xs font-bold"
+              :class="
+                validatedDeck.synergyAudit.every((s) => s.satisfied)
+                  ? 'border-emerald-500/35 bg-emerald-950/45 text-[#10b981]'
+                  : 'border-amber-500/35 bg-amber-950/45 text-[#f59e0b]'
+              "
+            >
+              {{ t('synergiesValidated', { done: validatedDeck.synergyAudit.filter((s) => s.satisfied).length, total: validatedDeck.synergyAudit.length }) }}
+            </span>
+          </div>
+
+          <div class="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <div
+              v-for="(item, idx) in validatedDeck.synergyAudit"
+              :key="idx"
+              @click="getSynergyAuditCards(item).length > 0 && openCardZoomList(getSynergyAuditCards(item), 0)"
+              class="flex items-center justify-between gap-3 rounded-xl border p-3 text-xs transition"
+              :class="[
+                item.satisfied
+                  ? 'border-[#263044] bg-[#0c0f16]/60 hover:border-[#ff8a00]/60 hover:bg-[#1b2232]'
+                  : 'border-amber-500/35 bg-amber-950/35 hover:border-amber-400',
+                getSynergyAuditCards(item).length > 0 ? 'cursor-pointer' : '',
+              ]"
+            >
+              <div class="flex min-w-0 items-center gap-3">
+                <CardFanThumbnail
+                  v-if="getSynergyAuditCards(item).length > 0"
+                  :cards="getSynergyAuditCards(item)"
+                  size="sm"
+                  @select="openCardZoomList(getSynergyAuditCards(item), 0)"
+                />
+                <div class="min-w-0">
+                  <div class="truncate font-bold text-[#f8fafc]">
+                    {{ currentLang === 'en' && item.cardNameEn ? item.cardNameEn : item.cardNameFr }}
+                  </div>
+                  <div class="mt-0.5 text-[#8a93a2]">
+                    {{ currentLang === 'en' && item.descriptionEn ? item.descriptionEn : item.description }}
+                  </div>
+                </div>
+              </div>
+              <span
+                class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
+                :class="item.satisfied ? 'bg-emerald-950/60 text-emerald-300' : 'bg-amber-950/60 text-amber-300'"
+              >
+                {{ item.satisfied ? t('synergySatisfied') : t('synergyMissing') }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VISUALISATION DU DECK AVEC IMAGES DE CARTES ET ZOOM -->
+    <div v-if="validatedDeck.cards.length > 0" class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <!-- Pokémon -->
+      <div class="rounded-2xl border border-[#263044] bg-[#131823] p-5 shadow-xs">
+        <div class="mb-4 flex items-center justify-between border-b border-[#263044] pb-3">
+          <h3 class="text-sm font-bold text-[#f8fafc]">{{ t('pokemonCount') }}</h3>
+          <span class="rounded-lg bg-[#1b2232] px-2.5 py-0.5 font-mono text-xs font-bold text-slate-200">
+            {{ validatedDeck.pokemonCount }} {{ t('cardsUnit') }}
+          </span>
+        </div>
+
+        <ul class="space-y-3">
+          <li
+            v-for="(card, cIdx) in pokemonCards"
+            :key="card.uid"
+            @click="openCardZoomList(pokemonCards, cIdx)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-[#263044] bg-[#0c0f16]/60 p-2 text-xs transition hover:border-[#3a4763] hover:bg-[#1b2232]/70"
+            :title="t('clickToEnlarge')"
+          >
+            <!-- Image de la carte avec zoom au clic -->
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(pokemonCards, cIdx)" />
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="rounded bg-[#ff6b00] px-1.5 py-0.5 font-bold text-white text-[11px]">
+                  {{ card.quantity }}×
+                </span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+              </div>
+              <div class="mt-1 flex items-center gap-2 text-[11px] text-[#8a93a2]">
+                <span>{{ getLocalizedSubCategory(card.subCategory) }}</span>
+                <span>•</span>
+                <span>{{ card.model.pokemonStats?.hp ?? 70 }} {{ t('cardHp') }}</span>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Dresseurs -->
+      <div class="rounded-2xl border border-[#263044] bg-[#131823] p-5 shadow-xs">
+        <div class="mb-4 flex items-center justify-between border-b border-[#263044] pb-3">
+          <h3 class="text-sm font-bold text-[#f8fafc]">{{ t('trainerCount') }}</h3>
+          <span class="rounded-lg bg-[#1b2232] px-2.5 py-0.5 font-mono text-xs font-bold text-slate-200">
+            {{ validatedDeck.trainerCount }} {{ t('cardsUnit') }}
+          </span>
+        </div>
+
+        <ul class="space-y-3">
+          <li
+            v-for="(card, cIdx) in trainerCards"
+            :key="card.uid"
+            @click="openCardZoomList(trainerCards, cIdx)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-[#263044] bg-[#0c0f16]/60 p-2 text-xs transition hover:border-[#3a4763] hover:bg-[#1b2232]/70"
+            :title="t('clickToEnlarge')"
+          >
+            <!-- Image de la carte avec zoom au clic -->
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(trainerCards, cIdx)" />
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="rounded bg-slate-800 px-1.5 py-0.5 font-bold text-white text-[11px]">
+                  {{ card.quantity }}×
+                </span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+              </div>
+              <div class="mt-1 text-[11px] text-[#8a93a2]">
+                {{ getLocalizedSubCategory(card.subCategory) }}
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Énergies (Avec images officielles pour les énergies de base et spéciales) -->
+      <div class="rounded-2xl border border-[#263044] bg-[#131823] p-5 shadow-xs">
+        <div class="mb-4 flex items-center justify-between border-b border-[#263044] pb-3">
+          <h3 class="text-sm font-bold text-[#f8fafc]">{{ t('energyCount') }}</h3>
+          <span class="rounded-lg bg-[#1b2232] px-2.5 py-0.5 font-mono text-xs font-bold text-slate-200">
+            {{ validatedDeck.energyCount }} {{ t('cardsUnit') }}
+          </span>
+        </div>
+
+        <ul class="space-y-3">
+          <li
+            v-for="(card, cIdx) in energyCards"
+            :key="card.uid"
+            @click="openCardZoomList(energyCards, cIdx)"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl border border-[#263044] bg-[#0c0f16]/60 p-2 text-xs transition hover:border-[#3a4763] hover:bg-[#1b2232]/70"
+            :title="t('clickToEnlarge')"
+          >
+            <!-- Image de l'énergie avec zoom au clic -->
+            <CardFanThumbnail :cards="[card]" size="md" @select="openCardZoomList(energyCards, cIdx)" />
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="rounded bg-slate-700 px-1.5 py-0.5 font-bold text-white text-[11px]">
+                  {{ card.quantity }}×
+                </span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+              </div>
+              <div class="mt-1 text-[11px] text-[#8a93a2]">
+                {{ getLocalizedSubCategory(card.subCategory) }}
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Modale de Zoom de Carte -->
+    <CardZoomModal
+      :card="zoomedCard"
+      :cards="zoomedCards"
+      :initial-index="zoomInitialIndex"
+      :is-open="zoomedCards.length > 0 || zoomedCard !== null"
+      @close="closeCardZoom"
+    />
+  </div>
+</template>
