@@ -239,6 +239,8 @@ describe('@olydor/insight migrated simulator suite', () => {
       expect(src).not.toMatch(/\/(?:35|45|60)\/(?:25|40|50|60|70)\b/)
     }
     expect(step3).toContain('v-if="isDebugMode && currentSummary?.tracedGames')
+    expect(step3).toContain('sm:flex-row sm:items-center sm:justify-between')
+    expect(step3).toContain('min-w-0 flex-1')
     expect(step3).toContain('bg-emerald-500')
     expect(step3).toContain('bg-red-500')
     expect(indexPage).not.toContain('Simulation en cours sur')

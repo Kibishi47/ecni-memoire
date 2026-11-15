@@ -1101,7 +1101,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <button
                   type="button"
                   @click="emit('add-catalog-card', model)"
-                  class="rounded-lg bg-[#ff6b00] px-2 py-1 text-[11px] font-bold text-white hover:bg-[#ff8a00]"
+                  class="shrink-0 rounded-lg bg-[#ff6b00] px-2 py-1 text-[11px] font-bold text-white hover:bg-[#ff8a00]"
                 >
                   {{ t('addCard') }}
                 </button>
@@ -1189,9 +1189,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               <div
                 v-for="(alt, aIdx) in selectedCardAlternatives.slice(0, 4)"
                 :key="alt.alternativeCardId"
-                class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#263044] bg-[#131823] p-3.5 shadow-2xs transition hover:border-[#263044]"
+                class="flex flex-col gap-3 rounded-xl border border-[#263044] bg-[#131823] p-3.5 shadow-2xs transition hover:border-[#263044] sm:flex-row sm:items-center sm:justify-between"
               >
-                <div class="flex items-center gap-3 min-w-0">
+                <div class="flex min-w-0 flex-1 items-center gap-3">
                   <!-- Miniature alternative avec zoom au clic -->
                   <CardFanThumbnail
                     :cards="[alt.alternativeModel]"
@@ -1199,12 +1199,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     @select="openAlternativeZoom(aIdx)"
                   />
 
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
                       <span class="text-sm font-bold text-[#f8fafc] truncate">
                         {{ getLocalizedCardName(alt.alternativeModel) }}
                       </span>
-                      <span class="rounded bg-sky-950/40 px-2 py-0.5 text-[10px] font-bold text-[#38bdf8]">
+                      <span class="shrink-0 rounded bg-sky-950/40 px-2 py-0.5 text-[10px] font-bold text-[#38bdf8]">
                         {{ alt.actionEconomyBadge }}
                       </span>
                     </div>
@@ -1219,7 +1219,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <button
                   type="button"
                   @click="handleReplaceWithAlternative(selectedCardEntry!.cardId, alt)"
-                  class="shrink-0 rounded-xl border border-[#ff6b00] bg-[#ff6b00] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#ff8a00]"
+                  class="w-full shrink-0 rounded-xl border border-[#ff6b00] bg-[#ff6b00] px-3.5 py-2 text-center text-xs font-bold text-white transition hover:bg-[#ff8a00] sm:w-auto"
                 >
                   {{ t('replaceInDeck') }}
                 </button>
