@@ -98,7 +98,7 @@ export function computeConfigComplexityFactor(config: Partial<SimulationConfig>)
   const topK = Math.max(1, config.topKCandidates ?? 3)
   const depth = Math.max(1, config.maxActionDepth ?? 8)
   const rolloutDepth = Math.max(1, config.rolloutMaxActions ?? 8)
-  const maxTurns = Math.max(4, config.maxTurns ?? 15)
+  const maxTurns = Math.max(4, config.maxTurns ?? 20)
 
   const avgPly = (ply + oppPly) / 2
   const branchSearchCost = (beamWidth / 8) * (depth / 8)
@@ -332,7 +332,7 @@ export function computeAiIntelligence(preset: AiIntelligencePreset): {
         opponentLookaheadPly: 1,
         opponentMaxBranches: 8,
         aiTemperament: 'BALANCED',
-        maxTurns: 12,
+        maxTurns: 16,
       }
     case 'EXPERT_DEEP':
       return {
@@ -345,7 +345,7 @@ export function computeAiIntelligence(preset: AiIntelligencePreset): {
         opponentLookaheadPly: 3,
         opponentMaxBranches: 20,
         aiTemperament: 'BALANCED',
-        maxTurns: 18,
+        maxTurns: 24,
       }
     case 'COMPETITIVE':
     default:
@@ -359,7 +359,7 @@ export function computeAiIntelligence(preset: AiIntelligencePreset): {
         opponentLookaheadPly: 3,
         opponentMaxBranches: 20,
         aiTemperament: 'BALANCED',
-        maxTurns: 15,
+        maxTurns: 20,
       }
   }
 }

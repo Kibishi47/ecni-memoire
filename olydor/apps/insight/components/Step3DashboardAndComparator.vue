@@ -619,6 +619,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
 
           <p class="mt-2 text-xs text-[#8a93a2]">
             {{ t('simulatedGamesCount', { n: currentSummary?.totalGamesSimulated ?? 0 }) }}
+            <span v-if="currentSummary" class="ml-1.5 font-mono font-semibold text-slate-300">
+              ({{ t('globalWldSummary', { wins: currentSummary.wins, losses: currentSummary.losses, draws: currentSummary.draws }) }})
+            </span>
           </p>
           <div
             v-if="!isSimulating && currentSummary"
@@ -807,7 +810,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             {{ formatRate(m.winRate) }} %
           </span>
           <span class="text-xs text-[#8a93a2] font-medium">
-            {{ t('matchupStats', { wins: m.wins, losses: m.losses, total: m.gamesPlayed }) }}
+            {{ t('matchupStats', { wins: m.wins, losses: m.losses, draws: m.draws, total: m.gamesPlayed }) }}
           </span>
         </div>
 

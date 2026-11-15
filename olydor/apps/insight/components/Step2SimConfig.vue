@@ -715,10 +715,10 @@ const launchButtonState = computed(() => {
               <input
                 type="range"
                 min="1"
-                max="20"
+                max="30"
                 step="1"
                 :value="config.maxTurns"
-                :style="{ '--range-pct': rangePct(config.maxTurns, 1, 20) }"
+                :style="{ '--range-pct': rangePct(config.maxTurns, 1, 30) }"
                 @input="patchConfig({ maxTurns: Number(($event.target as HTMLInputElement).value) })"
                 class="w-full cursor-pointer accent-[#ff6b00]"
               />

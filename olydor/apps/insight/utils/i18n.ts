@@ -202,6 +202,7 @@ export const translations: Record<Language, Record<string, string>> = {
     globalWinRate: 'Taux de Victoire Global',
     vsBaseline: 'vs deck initial',
     simulatedGamesCount: 'Basé sur {n} parties simulées face aux decks méta sélectionnés.',
+    globalWldSummary: '{wins}V • {losses}D • {draws}N',
     simPerfStatsLine: 'Temps d’exécution : {sec} s • {rate} parties/sec • {workers} cœurs',
     rerunSimulation: 'Relancer la simulation',
     testVariantAndCompare: 'Tester cette variante et comparer',
@@ -300,7 +301,7 @@ export const translations: Record<Language, Record<string, string>> = {
     addCard: '+ Ajouter',
     altCountBadge: '{n} alt.',
     cardReplacedFeedback: '{oldCard} remplacé par {newCard}.',
-    matchupStats: '{wins}V - {losses}D ({total} parties)',
+    matchupStats: '{wins}V - {losses}D - {draws}N ({total} parties)',
 
     // Export Modal
     exportModalTitle: 'Exporter la variante optimisée (60 cartes)',
@@ -668,6 +669,7 @@ export const translations: Record<Language, Record<string, string>> = {
     globalWinRate: 'Global Win Rate',
     vsBaseline: 'vs initial deck',
     simulatedGamesCount: 'Based on {n} simulated games against selected meta decks.',
+    globalWldSummary: '{wins}W • {losses}L • {draws}D',
     simPerfStatsLine: 'Execution time: {sec} s • {rate} games/sec • {workers} cores',
     rerunSimulation: 'Rerun simulation',
     testVariantAndCompare: 'Test this variant & compare',
@@ -766,7 +768,7 @@ export const translations: Record<Language, Record<string, string>> = {
     addCard: '+ Add',
     altCountBadge: '{n} alt.',
     cardReplacedFeedback: '{oldCard} replaced by {newCard}.',
-    matchupStats: '{wins}W - {losses}L ({total} games)',
+    matchupStats: '{wins}W - {losses}L - {draws}D ({total} games)',
 
     // Export Modal
     exportModalTitle: 'Export Optimized Variant (60 cards)',
