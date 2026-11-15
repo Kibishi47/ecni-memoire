@@ -10,11 +10,10 @@ PNPM := pnpm
 COMPOSE := docker compose --project-directory . -f docker/docker-compose.yml
 COMPILER_DIR := tools/card-compiler
 COMPILER_PYTHON := $(shell if [ -x "$(COMPILER_DIR)/.venv/bin/python" ]; then echo ".venv/bin/python"; else echo "python3"; fi)
-NAMEGEN_DIR := tools/name-generator
 
 .PHONY: help install build build-libs typecheck check clean \
         test test-engine test-ui test-api test-web test-insight test-arena \
-        test-compiler test-name-generator test-all \
+        test-compiler test-all \
         dev dev-api dev-web dev-insight dev-arena \
         db-up db-migrate db-seed db-seed-cards db-seed-decks sync-cards \
         docker-build deploy-local up down restart logs ps
@@ -76,10 +75,7 @@ test-arena: ## Tests de l'arène Coming Soon @olydor/arena
 test-compiler: ## Tests unitaires Python du compilateur de cartes (tools/card-compiler)
 	cd $(COMPILER_DIR) && $(COMPILER_PYTHON) -m unittest discover -s tests -q
 
-test-name-generator: ## Tests unitaires Python du générateur de nom (tools/name-generator)
-	cd $(NAMEGEN_DIR) && python3 -m unittest discover -s tests -v
-
-test-all: test test-compiler test-name-generator ## Exécute TOUS les tests (monorepo TS + outils Python)
+test-all: test test-compiler ## Exécute TOUS les tests (monorepo TS + compilateur Python)
 
 # --- Développement Local (Sans Docker pour les apps) --------------------------
 
