@@ -639,6 +639,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             >
               ±{{ currentSummary.marginOfErrorPct }} %
             </span>
+            <span
+              class="rounded bg-[#1b2232] px-1.5 py-0.5 text-[10px] font-semibold text-[#8a93a2]"
+              data-testid="step3-base-seed"
+            >
+              Seed #{{ currentSummary.baseSeedUsed }}
+            </span>
           </div>
         </div>
 

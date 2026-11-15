@@ -28,7 +28,12 @@ import {
   setApiBaseUrl,
 } from '../services/apiClient'
 import { mapApiMetaDecks } from '../services/metaDeckAdapter'
-import { SimulationWorkerPool } from '../worker/workerPool'
+import {
+  SimulationWorkerPool,
+  areDecksEquivalent,
+  generateRandomBaseSeed,
+  resolveRunSeed,
+} from '../worker/workerPool'
 
 const SIM_ROOT = resolve(__dirname, '..')
 const LOCAL_DB_PATH = [
@@ -251,5 +256,78 @@ describe('@olydor/insight migrated simulator suite', () => {
     expect(mentions).toContain('LegalMentionsContent')
     expect(privacy).toContain('PrivacyPolicyContent')
     expect(cgu).toContain('TermsContent')
+    expect(indexPage).toContain('resolveRunSeed')
+    expect(indexPage).toContain('areDecksEquivalent')
+    expect(step3).toContain('data-testid="step3-base-seed"')
+  })
+
+  it('changes random seed on rerun when fixedSeed is unset, and preserves baseline seed only for deck variants', async () => {
+    registerCompiledCards(LOCAL_CARDS_JSON)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('offline')
+      }),
+    )
+
+    const metaDecks = await fetchMetaDecks()
+    const mapped = mapApiMetaDecks(metaDecks)
+    const firstDeck = mapped[0]!
+    const parsedA = parsePtcglDecklist(firstDeck.metaDeck.ptcglText)
+    const parsedB = parsePtcglDecklist(mapped[1]!.metaDeck.ptcglText)
+
+    expect(areDecksEquivalent(parsedA, parsePtcglDecklist(firstDeck.metaDeck.ptcglText))).toBe(true)
+    expect(areDecksEquivalent(parsedA, parsedB)).toBe(false)
+
+    // 1. Rerun without fixedSeed on the same deck -> seed changes
+    const s1 = resolveRunSeed({ configuredFixedSeed: null, reuseBaselineSeed: false })
+    const s2 = resolveRunSeed({
+      configuredFixedSeed: null,
+      reuseBaselineSeed: false,
+      baselineSeed: s1,
+      previousSeed: s1,
+    })
+    expect(s2).not.toBe(s1)
+
+    // 2. Rerun without fixedSeed on another deck version -> seed stays equal to baselineSeed
+    const variantSeed = resolveRunSeed({
+      configuredFixedSeed: null,
+      reuseBaselineSeed: true,
+      baselineSeed: s1,
+      previousSeed: s2,
+    })
+    expect(variantSeed).toBe(s1)
+
+    // 3. Explicit fixedSeed always takes precedence
+    expect(
+      resolveRunSeed({
+        configuredFixedSeed: 987654,
+        reuseBaselineSeed: false,
+        baselineSeed: s1,
+        previousSeed: s1,
+      }),
+    ).toBe(987654)
+    expect(generateRandomBaseSeed(123456)).not.toBe(123456)
+
+    // 4. SimulationWorkerPool with fixedSeed: null produces different random baseSeedUsed across consecutive runs
+    const pool = new SimulationWorkerPool()
+    const baseCfg = {
+      iterations: 1,
+      maxTurns: 4,
+      maxBranches: 8 as const,
+      lookaheadPly: 1 as const,
+      opponentLookaheadPly: 1 as const,
+      opponentMaxBranches: 8 as const,
+      selectedOpponentIds: [firstDeck.descriptor.id],
+      firstPlayerMode: 'RANDOM' as const,
+      workerCount: 1,
+      fixedSeed: null,
+      debugMode: false,
+      collectDetailedTelemetry: false,
+    }
+    const run1 = await pool.runSimulation(parsedA, baseCfg, undefined, [firstDeck.descriptor])
+    const run2 = await pool.runSimulation(parsedA, baseCfg, undefined, [firstDeck.descriptor])
+    expect(run1.baseSeedUsed).toBeGreaterThan(0)
+    expect(run2.baseSeedUsed).not.toBe(run1.baseSeedUsed)
   })
 })

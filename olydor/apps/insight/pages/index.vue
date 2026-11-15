@@ -24,7 +24,11 @@ import {
   setApiBaseUrl,
 } from '../services/apiClient'
 import { mapApiMetaDecks } from '../services/metaDeckAdapter'
-import { SimulationWorkerPool } from '../worker/workerPool'
+import {
+  SimulationWorkerPool,
+  areDecksEquivalent,
+  resolveRunSeed,
+} from '../worker/workerPool'
 import {
   calibrateHardwareProfile,
   computeAiIntelligence,
@@ -276,8 +280,17 @@ async function executeInitialSimulation() {
     if (metaError.value || metaOpponentDescriptors.value.length === 0) {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
+    const effectiveSeed = resolveRunSeed({
+      configuredFixedSeed: simConfig.value.fixedSeed,
+      reuseBaselineSeed: false,
+      previousSeed: currentSummary.value?.baseSeedUsed ?? baselineSummary.value?.baseSeedUsed,
+    })
     const rawDeck = toRaw(baselineDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
+    const rawConfig = {
+      ...toRaw(simConfig.value),
+      fixedSeed: effectiveSeed,
+      debugMode: isDebugMode.value,
+    }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -319,9 +332,15 @@ async function executeComparisonSimulation() {
     return
   }
 
+  const isDeckVariant = !areDecksEquivalent(editableDeck.value, baselineDeck.value)
   const activeVer = deckVersions.value.find((v) => v.id === activeVersionId.value)
   let targetVersion: DeckVersionEntry
-  if (activeVer && activeVer.versionNumber === 1 && deckVersions.value.length === 1) {
+  if (
+    isDeckVariant &&
+    activeVer &&
+    activeVer.versionNumber === 1 &&
+    deckVersions.value.length === 1
+  ) {
     const v2: DeckVersionEntry = {
       id: 'v2',
       versionNumber: 2,
@@ -366,8 +385,18 @@ async function executeComparisonSimulation() {
     if (metaError.value || metaOpponentDescriptors.value.length === 0) {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
+    const effectiveSeed = resolveRunSeed({
+      configuredFixedSeed: simConfig.value.fixedSeed,
+      reuseBaselineSeed: isDeckVariant,
+      baselineSeed: baselineSummary.value?.baseSeedUsed,
+      previousSeed: currentSummary.value?.baseSeedUsed ?? baselineSummary.value?.baseSeedUsed,
+    })
     const rawDeck = toRaw(editableDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
+    const rawConfig = {
+      ...toRaw(simConfig.value),
+      fixedSeed: effectiveSeed,
+      debugMode: isDebugMode.value,
+    }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -379,7 +408,7 @@ async function executeComparisonSimulation() {
       },
       JSON.parse(JSON.stringify(rawOpponents)),
     )
-    if (!baselineSummary.value) {
+    if (!baselineSummary.value || (!isDeckVariant && targetVersion.isBaseline)) {
       baselineSummary.value = summary
     }
     currentSummary.value = summary

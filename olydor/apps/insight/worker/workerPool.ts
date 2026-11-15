@@ -16,7 +16,78 @@ import {
 } from '@olydor/engine'
 import type { WorkerRequestMessage, WorkerResponseMessage } from './simulation.worker'
 
-const DEFAULT_BASE_SEED = 20260420
+const MAX_SEED_VALUE = 0x7fffffff
+
+/**
+ * Generates a positive 31-bit random seed, avoiding `excludeSeed` when provided
+ * so consecutive reruns without a fixed seed never reuse the previous seed.
+ */
+export function generateRandomBaseSeed(excludeSeed?: number | null): number {
+  const drawSeed = (): number => {
+    const cryptoApi = globalThis.crypto
+    if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+      const buf = new Uint32Array(1)
+      cryptoApi.getRandomValues(buf)
+      return (buf[0]! % (MAX_SEED_VALUE - 1)) + 1
+    }
+    return Math.floor(Math.random() * (MAX_SEED_VALUE - 1)) + 1
+  }
+
+  let candidate = drawSeed()
+  if (excludeSeed != null && Number.isFinite(excludeSeed) && candidate === Math.trunc(excludeSeed)) {
+    candidate = (candidate % (MAX_SEED_VALUE - 1)) + 1
+  }
+  return candidate
+}
+
+/**
+ * Returns true when two parsed decks contain the exact same card IDs and quantities.
+ */
+export function areDecksEquivalent(a: ParsedDeck, b: ParsedDeck): boolean {
+  const countsA = new Map<string, number>()
+  for (const entry of a.cards) {
+    countsA.set(entry.cardId, (countsA.get(entry.cardId) ?? 0) + entry.quantity)
+  }
+  const countsB = new Map<string, number>()
+  for (const entry of b.cards) {
+    countsB.set(entry.cardId, (countsB.get(entry.cardId) ?? 0) + entry.quantity)
+  }
+  if (countsA.size !== countsB.size) return false
+  for (const [cardId, qty] of countsA.entries()) {
+    if (countsB.get(cardId) !== qty) return false
+  }
+  return true
+}
+
+/**
+ * Resolves the effective base seed for a simulation run:
+ * - Explicit user `fixedSeed` always wins.
+ * - Re-running with another deck version (`reuseBaselineSeed`) preserves `baselineSeed` for paired A/B comparison.
+ * - Otherwise (initial run or rerunning the same deck), generates a fresh random seed.
+ */
+export function resolveRunSeed(params: {
+  configuredFixedSeed: number | null | undefined
+  reuseBaselineSeed: boolean
+  baselineSeed?: number | null
+  previousSeed?: number | null
+}): number {
+  if (
+    params.configuredFixedSeed !== null &&
+    params.configuredFixedSeed !== undefined &&
+    Number.isFinite(params.configuredFixedSeed)
+  ) {
+    return params.configuredFixedSeed
+  }
+  if (
+    params.reuseBaselineSeed &&
+    params.baselineSeed !== null &&
+    params.baselineSeed !== undefined &&
+    Number.isFinite(params.baselineSeed)
+  ) {
+    return params.baselineSeed
+  }
+  return generateRandomBaseSeed(params.previousSeed)
+}
 
 export function expandParsedDeckToModels(deck: ParsedDeck): EngineCardModel[] {
   const models: EngineCardModel[] = []
@@ -110,6 +181,7 @@ export class SimulationWorkerPool {
   private warmWorkers: Worker[] = []
   private rejectCurrentRun?: ((reason?: unknown) => void) | null
   private isCancelled = false
+  private lastRandomSeed: number | null = null
   public isRunning = false
   public status: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'ERROR' = 'IDLE'
 
@@ -171,7 +243,8 @@ export class SimulationWorkerPool {
     const baseSeed =
       config.fixedSeed !== null && Number.isFinite(config.fixedSeed)
         ? config.fixedSeed
-        : DEFAULT_BASE_SEED
+        : generateRandomBaseSeed(this.lastRandomSeed)
+    this.lastRandomSeed = baseSeed
 
     if (!hasCompiledCardData()) {
       this.status = 'ERROR'
