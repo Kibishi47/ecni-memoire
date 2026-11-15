@@ -11,6 +11,7 @@ import {
   FLAT_STATE_WORD_LENGTH,
 } from '../src/fastState.js'
 import { runSimulationShard } from '../src/gameLoop.js'
+import { createNativeBasicEnergyModel } from '../src/energy.js'
 
 function buildDeckModelsFromPtcgl(rawText: string) {
   const parsed = parsePtcglDecklist(rawText)
@@ -208,5 +209,19 @@ describe('FastState — Zobrist / Murmur3 Numeric Hashing, Flat Int32Array Buffe
 
     expect(shardRes.outcomes.length).toBe(100)
     expect(gamesPerSec).toBeGreaterThan(30)
+  })
+
+  it('distinguishes attached energy card IDs in computeNumericStateHash', () => {
+    const models = buildDeckModelsFromPtcgl(META_OPPONENT_DECKS[0]!.ptcglText)
+    const stateA = createInitialMatchState(models, models, { seed: 2026, firstPlayerIndex: 0, maxTurns: 16 })
+    const stateB = fastCloneState(stateA)
+
+    const fireEnergy = createNativeBasicEnergyModel('Feu')
+    const psychicEnergy = createNativeBasicEnergyModel('Psy')
+
+    stateA.player.activePokemon!.attachedEnergies = [fireEnergy]
+    stateB.player.activePokemon!.attachedEnergies = [psychicEnergy]
+
+    expect(computeNumericStateHash(stateA)).not.toBe(computeNumericStateHash(stateB))
   })
 })

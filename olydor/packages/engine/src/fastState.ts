@@ -80,6 +80,18 @@ export function hashInPlayPokemon(p: InPlayPokemon): number {
     (((p.retreatCostModifier || 0) & 0xff) << 24)
   h = mix32(modPack ^ (p.hpBonus || 0), h)
 
+  // Hachage commutatif des énergies attachées (préserve les types distincts, ex. Feu vs Psy)
+  let energySum = 0
+  let energyXor = 0
+  for (let i = 0; i < p.attachedEnergies.length; i++) {
+    const energyNum = getCardFastMeta(p.attachedEnergies[i]!).numericId
+    const eh = mix32(energyNum, 0x9e3779b1)
+    energySum = (energySum + eh) | 0
+    energyXor ^= eh
+  }
+  h = mix32(energySum, h)
+  h = mix32(energyXor, h)
+
   // Hachage commutatif des outils attachés
   let toolsSum = 0
   let toolsXor = 0
