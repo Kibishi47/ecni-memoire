@@ -636,7 +636,7 @@ def build_identity_and_stats_from_raw(
         else (False, 1)
     )
 
-    is_ace_spec = (
+    is_ace_spec = category != CardCategory.POKEMON and (
         "high-tech" in rarity_lower
         or "ace spec" in rarity_lower
         or "high-tech" in rules_joined_lower

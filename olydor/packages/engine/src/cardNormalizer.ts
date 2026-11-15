@@ -463,7 +463,7 @@ export function normalizeCardModel(raw: any): EngineCardModel {
     subCategory,
     isRuleBox,
     prizeCardsGiven,
-    isAceSpec: Boolean(rawIdent.isAceSpec ?? false),
+    isAceSpec: category === 'POKEMON' ? false : Boolean(rawIdent.isAceSpec ?? false),
     isAncient: Boolean(rawIdent.isAncient ?? rawIdent.mechanicTag === 'ANCIENT'),
     isFuture: Boolean(rawIdent.isFuture ?? rawIdent.mechanicTag === 'FUTURE'),
     isTera: Boolean(rawIdent.isTera ?? raw.pokemonStats?.isTera ?? false),

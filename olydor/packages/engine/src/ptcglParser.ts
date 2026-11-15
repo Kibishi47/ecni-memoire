@@ -165,10 +165,11 @@ export function buildDeckEntryFromTokens(input: {
     model.category === 'POKEMON' ? 'pokemon' : model.category === 'TRAINER' ? 'trainer' : 'energy'
 
   const isAceSpec =
-    model.identity.isAceSpec === true ||
-    (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
-    (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH') ||
-    /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr)
+    model.category !== 'POKEMON' &&
+    (model.identity.isAceSpec === true ||
+      (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
+      (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH') ||
+      /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr))
   const isRadiant = /radieux|radiant/i.test(model.identity.nameFr)
   const isEx = Boolean(model.pokemonStats?.isRuleBox)
   const isResolved = source === 'compiled_db' || source === 'native_basic_energy'
@@ -235,9 +236,10 @@ export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number
     ptcglId: `${mapping.ptcglCode}-${cleanNumber}`,
     imageUrl: model.identity.imageUrl || `https://assets.tcgdex.net/fr/${mapping.serie}/${model.identity.setId}/${paddedNumber}`,
     isAceSpec:
-      model.identity.isAceSpec === true ||
-      (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
-      (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH'),
+      model.category !== 'POKEMON' &&
+      (model.identity.isAceSpec === true ||
+        (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
+        (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH')),
     isRadiant: /radieux|radiant/i.test(model.identity.nameFr),
     isEx: Boolean(model.pokemonStats?.isRuleBox),
     line: lineIndex,
