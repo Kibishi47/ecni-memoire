@@ -42,10 +42,12 @@ const props = withDefaults(
     deckVersions?: DeckVersionEntry[]
     activeVersionId?: string
     metaOpponents?: MetaOpponentDeck[]
+    isDebugMode?: boolean
     arenaUrl?: string
   }>(),
   {
     deckVersions: () => [],
+    isDebugMode: false,
     arenaUrl: undefined,
     activeVersionId: '',
     metaOpponents: () => [],
@@ -1663,9 +1665,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       @close="closeZoom"
     />
 
-    <!-- Inspecteur granulaire de parties -->
+    <!-- Inspecteur granulaire (actif avec ?debug=true) -->
     <DebugInspectorPanel
-      v-if="currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
+      v-if="isDebugMode && currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
       :traced-games="currentSummary.tracedGames"
     />
   </div>

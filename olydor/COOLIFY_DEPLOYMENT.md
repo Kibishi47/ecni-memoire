@@ -137,6 +137,6 @@ docker compose -f docker/docker-compose.yml up --build
 
 Une fois démarré en local :
 - Hub Web : `http://localhost:3001`
-- Simulateur : `http://localhost:3002`
+- Simulateur : `http://localhost:3002` (avec `?debug=true` pour débloquer l'inspecteur)
 - Arène : `http://localhost:3003`
 - API : `http://localhost:3000/health`

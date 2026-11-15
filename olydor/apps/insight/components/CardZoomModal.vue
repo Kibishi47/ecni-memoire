@@ -463,7 +463,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                       <li
                         v-for="(syn, sIdx) in aiBreakdown.synergies"
                         :key="sIdx"
-                        :class="syn.critical ? 'text-amber-200 font-semibold' : 'text-[#8a93a2]'"
+                        :class="syn.critical ? 'text-[#f8fafc] font-semibold' : 'text-[#8a93a2]'"
                       >
                         • {{ syn.text }}
                       </li>
@@ -521,13 +521,13 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                       <span
                         v-for="(costBadge, cIdx) in act.costs"
                         :key="`c_${cIdx}`"
-                        class="rounded bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-200"
+                        class="rounded border border-[#263044] bg-[#1b2232] px-2 py-0.5 font-semibold text-[#f8fafc]"
                       >
                         {{ costBadge }}
                       </span>
                     </div>
 
-                    <div v-if="act.preconditions.length > 0" class="space-y-0.5 text-[11px] text-amber-200/90">
+                    <div v-if="act.preconditions.length > 0" class="space-y-0.5 text-[11px] text-[#f8fafc]">
                       <div class="font-semibold text-[#8a93a2]">{{ t('aiPreconditionsLabel') }} :</div>
                       <div v-for="(pre, pIdx) in act.preconditions" :key="pIdx">
                         • {{ pre }}

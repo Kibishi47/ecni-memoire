@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Database } from 'lucide-vue-next'
+import { Bug, Database } from 'lucide-vue-next'
 import { isUsingOfflineCatalog } from '../services/apiClient'
 import { useI18n } from '../utils/i18n'
 
@@ -9,6 +9,7 @@ defineProps<{
   canGoStep2: boolean
   canGoStep3: boolean
   deckTotalCards: number
+  isDebugMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -53,8 +54,17 @@ const navSteps = computed(() => [
         </button>
       </nav>
 
-      <!-- Statut technique (Offline) & Compteur Deck -->
+      <!-- Statut technique (Debug / Offline) & Compteur Deck -->
       <div class="flex items-center gap-2.5">
+        <span
+          v-if="isDebugMode"
+          class="inline-flex items-center gap-1 rounded-md border border-[#ff6b00]/45 bg-[#ff6b00]/15 px-2 py-0.5 font-mono text-[11px] font-bold text-[#ff8a00]"
+          title="Mode debug actif via ?debug=true"
+        >
+          <Bug class="h-3 w-3" />
+          {{ t('debugModeBadge') }}
+        </span>
+
         <span
           v-if="isUsingOfflineCatalog"
           class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold"

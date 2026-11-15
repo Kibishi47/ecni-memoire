@@ -55,6 +55,7 @@ const resolvedUrls = computed(() =>
 setApiBaseUrl(resolvedUrls.value.apiUrl)
 
 const currentStep = ref<1 | 2 | 3>(1)
+const isDebugMode = ref<boolean>(false)
 const { t, currentLang } = useI18n()
 
 const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
@@ -82,7 +83,7 @@ const simConfig = ref<SimulationConfig>({
   selectedOpponentIds: [],
   firstPlayerMode: 'RANDOM',
   fixedSeed: null,
-  debugMode: true,
+  debugMode: false,
   perturbationType: 'NONE',
   perturbationTurn: 2,
   stressTestOhkoEachTurn: false,
@@ -115,7 +116,10 @@ const workerPool = new SimulationWorkerPool()
 
 function detectUrlParams() {
   if (typeof window === 'undefined') return
-  simConfig.value.debugMode = true
+  const params = new URLSearchParams(window.location.search)
+  const debugActive = params.get('debug') === 'true'
+  isDebugMode.value = debugActive
+  simConfig.value.debugMode = debugActive
 }
 
 async function applyInitialDeckFromUrl() {
@@ -244,7 +248,7 @@ function handleSelectStep(step: 1 | 2 | 3) {
 function handleUpdateConfig(updated: SimulationConfig) {
   simConfig.value = {
     ...updated,
-    debugMode: true,
+    debugMode: isDebugMode.value,
   }
 }
 
@@ -265,7 +269,7 @@ async function executeInitialSimulation() {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
     const rawDeck = toRaw(baselineDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: true }
+    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -355,7 +359,7 @@ async function executeComparisonSimulation() {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
     const rawDeck = toRaw(editableDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: true }
+    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -517,6 +521,7 @@ useSeoMeta({
       :current-step="currentStep"
       :can-go-step2="canGoStep2"
       :can-go-step3="canGoStep3"
+      :is-debug-mode="isDebugMode"
       :deck-total-cards="currentStep === 3 ? editableDeck.totalCards : baselineDeck.totalCards"
       @select-step="handleSelectStep"
     />
@@ -659,6 +664,7 @@ useSeoMeta({
         :progress-completed="progressCompleted"
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
+        :is-debug-mode="isDebugMode"
         :arena-url="resolvedUrls.arenaUrl"
         :deck-versions="deckVersions"
         :active-version-id="activeVersionId"

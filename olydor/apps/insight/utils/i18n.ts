@@ -36,7 +36,7 @@ export const translations: Record<Language, Record<string, string>> = {
     // Header & Steps
     appTitle: 'Olydor Insight',
     appSubtitle: 'Simulateur Monte-Carlo 3-Ply & Atelier A/B',
-    debugModeBadge: 'INSPECTEUR DE PARTIES',
+    debugModeBadge: 'MODE DEBUG (?debug=true)',
     sendToArena: 'Affronter le bot Pythia dans l’Arène',
     offlineCatalogBanner: 'Mode hybride offline actif : catalogue local embarqué utilisé.',
     step1Title: 'Deck & Synergies',
@@ -399,7 +399,7 @@ export const translations: Record<Language, Record<string, string>> = {
     // Header & Steps
     appTitle: 'Olydor Insight',
     appSubtitle: '3-Ply Monte Carlo Simulator & A/B Deck Optimizer',
-    debugModeBadge: 'GAME INSPECTOR',
+    debugModeBadge: 'DEBUG MODE (?debug=true)',
     sendToArena: 'Battle Pythia Bot in the Arena',
     offlineCatalogBanner: 'Offline hybrid mode active: using built-in local catalog.',
     step1Title: 'Deck & Synergies',
