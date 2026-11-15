@@ -658,4 +658,22 @@ describe('Evaluator — 3-Ply Lookahead (T -> T_adv -> T+1) & Dynamic Card Valua
     expect(deep.totalBranchesExplored).toBeGreaterThanOrEqual(1)
     expect(deep.chosenActions.length).toBeGreaterThan(0)
   })
+
+  it('returns 0 on DRAW and stays strictly zero-sum across player and opponent perspectives', () => {
+    const deckList = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const deck: EngineCardModel[] = []
+    for (const c of deckList.cards) {
+      for (let i = 0; i < c.quantity; i++) deck.push(c.model)
+    }
+
+    const state = createInitialMatchState(deck, deck, { seed: 31415, firstPlayerIndex: 0, maxTurns: 16 })
+    state.turnNumber = 4
+    expect(evaluateState(state, 0)).toBeCloseTo(-evaluateState(state, 1), 6)
+
+    const drawState = fastCloneState(state)
+    drawState.winner = 'DRAW'
+    drawState.winReason = 'MAX_TURNS_REACHED'
+    expect(evaluateState(drawState, 0)).toBe(0)
+    expect(evaluateState(drawState, 1)).toBe(0)
+  })
 })

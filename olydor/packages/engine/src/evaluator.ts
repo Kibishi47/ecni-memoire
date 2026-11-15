@@ -255,55 +255,70 @@ export function computePokemonThreatScore(
   return score
 }
 
-/**
- * Fonction d'évaluation dynamique d'un état $V(S)$ du point de vue du joueur `perspectiveIndex` (`0` = PLAYER, `1` = OPPONENT).
- * S'appuie intégralement sur les propriétés `strategicEvaluator` de chaque `EngineCardModel` et les états v2.
- */
-export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): number {
-  const myBoard = perspectiveIndex === 0 ? state.player : state.opponent
-  const oppBoard = perspectiveIndex === 0 ? state.opponent : state.player
-  const myWinnerLabel = perspectiveIndex === 0 ? 'PLAYER' : 'OPPONENT'
-  const oppWinnerLabel = perspectiveIndex === 0 ? 'OPPONENT' : 'PLAYER'
+function scoreConditions(conds?: readonly string[]): number {
+  if (!conds || conds.length === 0) return 0
+  let val = 0
+  for (const c of conds) {
+    if (c === 'PARALYZED') val += 55
+    else if (c === 'ASLEEP') val += 30
+    else if (c === 'CONFUSED') val += 28
+    else if (c === 'POISONED') val += 18
+    else if (c === 'BURNED') val += 18
+  }
+  return val
+}
 
-  // 1. Conditions terminales de victoire / défaite
-  if (state.winner === myWinnerLabel) {
-    return WIN_SCORE
+const _seenHandIds: string[] = []
+
+function markSeenHandId(cardId: string): boolean {
+  for (let i = 0; i < _seenHandIds.length; i++) {
+    if (_seenHandIds[i] === cardId) return true
   }
-  if (state.winner === oppWinnerLabel) {
-    return -WIN_SCORE
+  _seenHandIds.push(cardId)
+  return false
+}
+
+function getPokeAt(board: PlayerBoardState, idx: number, hasActive: boolean): InPlayPokemon {
+  if (hasActive) {
+    return idx === 0 ? board.activePokemon! : board.bench[idx - 1]!
   }
+  return board.bench[idx]!
+}
+
+function computePerspectiveSideScore(state: MatchState, sideIndex: 0 | 1): number {
+  const myBoard = sideIndex === 0 ? state.player : state.opponent
+  const oppBoard = sideIndex === 0 ? state.opponent : state.player
 
   let totalScore = 0
 
-  // 2. Différentiel de cartes Récompenses (coeur de la course aux 6 Récompenses)
+  // Récompenses déjà prises + urgence fin de partie
   const myPrizesTaken = 6 - myBoard.prizes.length
-  const oppPrizesTaken = 6 - oppBoard.prizes.length
-  totalScore += (myPrizesTaken - oppPrizesTaken) * 145
-
-  // Bonus supplémentaire quand il ne reste plus qu'1 ou 2 Récompenses à prendre
+  totalScore += myPrizesTaken * 145
   if (myBoard.prizes.length <= 2) {
     totalScore += (3 - myBoard.prizes.length) * 45
   }
-  if (oppBoard.prizes.length <= 2) {
-    totalScore -= (3 - oppBoard.prizes.length) * 45
-  }
 
-  // 3. Évaluation du Plateau du Joueur vs Plateau de l'Adversaire
-  const myAllPoke = [myBoard.activePokemon, ...myBoard.bench].filter(
-    (p): p is InPlayPokemon => p !== null,
-  )
+  const myHasActive = myBoard.activePokemon !== null
+  const myPokeCount = (myHasActive ? 1 : 0) + myBoard.bench.length
 
   if (myBoard.activePokemon) {
     totalScore += computePokemonThreatScore(myBoard.activePokemon, state.turnNumber, true)
+    if (myBoard.activePokemon.damage > 0) {
+      totalScore -= Math.min(90, myBoard.activePokemon.damage * 0.25)
+    }
   } else {
     totalScore -= 300
   }
 
-  for (const bPoke of myBoard.bench) {
+  for (let i = 0; i < myBoard.bench.length; i++) {
+    const bPoke = myBoard.bench[i]!
     totalScore += computePokemonThreatScore(bPoke, state.turnNumber, false)
+    if (bPoke.damage > 0) {
+      totalScore -= Math.min(60, bPoke.damage * 0.2)
+    }
   }
 
-  // Bonus de stabilité du Banc (et bonus EXPAND_BENCH si > 5 slots utilisés)
+  // Stabilité du Banc (et bonus EXPAND_BENCH si > 5 slots utilisés)
   if (myBoard.bench.length === 0) {
     totalScore -= 85
   } else if (myBoard.bench.length === 1) {
@@ -315,79 +330,88 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     }
   }
 
-  // Pondération des rôles et effets en jeu :
-  const hasBenchPressure = myAllPoke.some(
-    (p) =>
-      p.card.strategicEvaluator.aiRole === 'SECONDARY_ATTACKER' ||
-      (p.card.strategicEvaluator.primaryRole as string) === 'SNIPER_BENCH_ATTACKER' ||
-      p.card.playableActions.some((a) =>
-        a.effects.some(
-          (e) => e.primitive === 'DAMAGE_BENCH' || e.primitive === 'PLACE_DAMAGE_COUNTERS',
-        ),
-      ),
-  )
-  if (hasBenchPressure) {
-    const fragileOppTargets = oppBoard.bench.filter((p) => {
-      const rem = getRemainingHp(p, state)
-      return rem <= 90 || (Boolean(p.card.pokemonStats?.isRuleBox) && p.damage >= 50)
-    })
-    totalScore += fragileOppTargets.length * 25
-  }
+  // Passage unique sur les Pokémon propres en jeu pour agréger rôles, dégâts, synergies & primitives
+  let hasBenchPressure = false
+  let hasControlLock = false
+  let hasDiscardEnergyAccelerator = false
+  let hasTeraInPlay = false
+  let hasStage2InPlay = false
+  let hasBasicHpLte70InPlay = false
+  let hasAncientInPlay = false
+  let damagedKeyCount = 0
 
-  // Contrôle & Verrous adverses / propres (`LOCK_ITEMS`, `LOCK_ABILITIES`, `LOCK_RETREAT`, `LOCK_NEXT_TURN_ATTACK`)
-  const oppItemsLocked = hasEffectiveItemLock(state, oppBoard)
-  const myItemsLocked = hasEffectiveItemLock(state, myBoard)
-  if (oppItemsLocked) totalScore += state.turnNumber <= 2 ? 120 : 55
-  if (myItemsLocked) totalScore -= state.turnNumber <= 2 ? 95 : 45
-  if (oppBoard.abilityLockActive) totalScore += 65
-  if (myBoard.abilityLockActive) totalScore -= 65
-
-  if (oppBoard.activePokemon?.cantRetreatNextTurn) totalScore += 25
-  if (myBoard.activePokemon?.cantRetreatNextTurn) totalScore -= 25
-  if (oppBoard.activePokemon?.cantAttackNextTurn) totalScore += 40
-  if (myBoard.activePokemon?.cantAttackNextTurn) totalScore -= 40
-  if (myBoard.activePokemon?.preventDamageOrEffectsNextTurn) totalScore += 90
-  if (oppBoard.activePokemon?.preventDamageOrEffectsNextTurn) totalScore -= 90
-  if (myBoard.activePokemon?.damageTakenModifierNextTurn && myBoard.activePokemon.damageTakenModifierNextTurn < 0) {
-    totalScore += Math.min(80, Math.abs(myBoard.activePokemon.damageTakenModifierNextTurn) * 1.1)
-  }
-  if (oppBoard.activePokemon?.damageTakenModifierNextTurn && oppBoard.activePokemon.damageTakenModifierNextTurn < 0) {
-    totalScore -= Math.min(80, Math.abs(oppBoard.activePokemon.damageTakenModifierNextTurn) * 1.1)
-  }
-
-  // États Spéciaux sur les Actifs (`PARALYZED`, `ASLEEP`, `CONFUSED`, `POISONED`, `BURNED`)
-  const scoreConditions = (conds?: readonly string[]): number => {
-    if (!conds || conds.length === 0) return 0
-    let val = 0
-    for (const c of conds) {
-      if (c === 'PARALYZED') val += 55
-      else if (c === 'ASLEEP') val += 30
-      else if (c === 'CONFUSED') val += 28
-      else if (c === 'POISONED') val += 18
-      else if (c === 'BURNED') val += 18
+  for (let i = 0; i < myPokeCount; i++) {
+    const p = getPokeAt(myBoard, i, myHasActive)
+    const stats = p.card.pokemonStats
+    const strat = p.card.strategicEvaluator
+    const r = (strat.aiRole || strat.primaryRole) as string
+    if (r === 'DISRUPTION' || r === 'CONTROL_LOCK_DISRUPTION') hasControlLock = true
+    if (r === 'SECONDARY_ATTACKER' || (strat.primaryRole as string) === 'SNIPER_BENCH_ATTACKER') {
+      hasBenchPressure = true
     }
-    return val
+    if (p.card.cardId === 'sv01-086' || p.card.cardId === 'sv04-123') {
+      hasDiscardEnergyAccelerator = true
+    }
+    if (p.card.identity.isTera || stats?.isTera) hasTeraInPlay = true
+    if (p.card.subCategory === 'STAGE_2') hasStage2InPlay = true
+    if (p.card.subCategory === 'BASIC' && (stats?.hp ?? 999) <= 70) hasBasicHpLte70InPlay = true
+    if (p.card.identity.isAncient || stats?.isAncient) hasAncientInPlay = true
+    if ((p.card.subCategory === 'STAGE_2' || Boolean(stats?.isRuleBox)) && p.damage > 0) {
+      damagedKeyCount++
+    }
   }
-  totalScore += scoreConditions(oppBoard.activePokemon?.specialConditions)
-  totalScore -= scoreConditions(myBoard.activePokemon?.specialConditions)
 
-  const hasControlLock = myAllPoke.some((p) => {
-    const r = (p.card.strategicEvaluator.aiRole || p.card.strategicEvaluator.primaryRole) as string
-    return r === 'DISRUPTION' || r === 'CONTROL_LOCK_DISRUPTION'
-  })
-  if (hasControlLock) totalScore += 35
+  const oppHasActive = oppBoard.activePokemon !== null
+  const oppPokeCount = (oppHasActive ? 1 : 0) + oppBoard.bench.length
 
-  // Réduction / Tank / Buff / Heal basés sur les primitives & PV réels
-  for (const p of myAllPoke) {
-    const hasDefOrBuff = p.card.playableActions.some((a) =>
-      a.effects.some(
-        (e) =>
-          e.primitive === 'MODIFY_DAMAGE_TAKEN' ||
-          e.primitive === 'MODIFY_HP' ||
-          e.primitive === 'PREVENT_DAMAGE_OR_EFFECTS',
-      ),
-    )
-    const r = (p.card.strategicEvaluator.aiRole || p.card.strategicEvaluator.primaryRole) as string
+  for (let i = 0; i < myPokeCount; i++) {
+    const p = getPokeAt(myBoard, i, myHasActive)
+    const strat = p.card.strategicEvaluator
+    const r = (strat.aiRole || strat.primaryRole) as string
+    let hasDefOrBuff = false
+    let hasHealPrim = false
+
+    const actions = p.card.playableActions
+    for (let ai = 0; ai < actions.length; ai++) {
+      const pa = actions[ai]!
+      const effects = pa.effects
+      for (let ei = 0; ei < effects.length; ei++) {
+        const prim = effects[ei]!.primitive
+        if (prim === 'DAMAGE_BENCH' || prim === 'PLACE_DAMAGE_COUNTERS') {
+          hasBenchPressure = true
+          if (pa.actionType === 'ATTACK' || pa.actionType === 'USE_ABILITY') {
+            if (prim === 'PLACE_DAMAGE_COUNTERS') {
+              const eff = effects[ei]!
+              const val = eff.value ?? eff.baseDamage ?? (eff.count ? eff.count * 10 : 0)
+              if (val > 0) {
+                let koCount = 0
+                for (let oi = 0; oi < oppPokeCount; oi++) {
+                  if (getRemainingHp(getPokeAt(oppBoard, oi, oppHasActive), state) <= val) {
+                    koCount++
+                  }
+                }
+                totalScore += Math.min(40, koCount * 14)
+              }
+            }
+          }
+        } else if (
+          prim === 'MODIFY_DAMAGE_TAKEN' ||
+          prim === 'MODIFY_HP' ||
+          prim === 'PREVENT_DAMAGE_OR_EFFECTS'
+        ) {
+          hasDefOrBuff = true
+        } else if (prim === 'HEAL') {
+          hasHealPrim = true
+        } else if (
+          prim === 'ATTACH_ENERGY' &&
+          (effects[ei]!.sourceZone === 'DISCARD' || effects[ei]!.zone === 'DISCARD')
+        ) {
+          hasDiscardEnergyAccelerator = true
+        }
+      }
+      // Break out of further action scan for PLACE_DAMAGE_COUNTERS? No, match exact `pa.effects.find` (max 1 PLACE_DAMAGE_COUNTERS contribution per `pa`).
+    }
+
     if (hasDefOrBuff || r === 'GUEST_TECH' || r === 'DEFENSIVE_TANK_WALL' || r === 'PASSIVE_STAT_BUFFER') {
       const maxHp = Math.max(40, getPokemonMaxHp(p, state))
       const remHp = Math.max(0, maxHp - p.damage)
@@ -395,30 +419,109 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
         totalScore += 28 + Math.round((remHp / maxHp) * 18)
       }
     }
-    if (
-      r === 'HEALER_SUPPORT' ||
-      p.card.playableActions.some((a) => a.effects.some((e) => e.primitive === 'HEAL'))
-    ) {
-      const damagedKeyPoke = myAllPoke.filter(
-        (kp) =>
-          (kp.card.subCategory === 'STAGE_2' || Boolean(kp.card.pokemonStats?.isRuleBox)) &&
-          kp.damage > 0,
-      )
-      totalScore += Math.min(45, damagedKeyPoke.length * 15)
+    if (r === 'HEALER_SUPPORT' || hasHealPrim) {
+      totalScore += Math.min(45, damagedKeyCount * 15)
+    }
+
+    const reqs = strat.decklistSynergyRequirements
+    if (reqs && reqs.length > 0) {
+      for (let ri = 0; ri < reqs.length; ri++) {
+        const req = reqs[ri]!
+        if (req === 'requires_tera_pokemon') {
+          if (hasTeraInPlay) totalScore += 8
+        } else if (req === 'requires_stage_2_pokemon') {
+          let hasS2 = hasStage2InPlay
+          if (!hasS2) {
+            for (let hi = 0; hi < myBoard.hand.length; hi++) {
+              if (myBoard.hand[hi]!.subCategory === 'STAGE_2') {
+                hasS2 = true
+                break
+              }
+            }
+          }
+          if (hasS2) totalScore += 8
+        } else if (req === 'requires_basic_hp_lte_70') {
+          if (hasBasicHpLte70InPlay) totalScore += 6
+        } else if (req === 'requires_discard_synergy') {
+          if (myBoard.discard.length >= 2) totalScore += 6
+        } else if (req === 'requires_ancient_pokemon') {
+          if (hasAncientInPlay) totalScore += 6
+        } else if (req.startsWith('requires_energy_type:')) {
+          const reqType = req.slice('requires_energy_type:'.length).toLowerCase()
+          let hasType = false
+          for (let ei = 0; ei < p.attachedEnergies.length; ei++) {
+            if (p.attachedEnergies[ei]!.identity.nameFr.toLowerCase().includes(reqType)) {
+              hasType = true
+              break
+            }
+          }
+          if (!hasType) {
+            for (let di = 0; di < myBoard.discard.length; di++) {
+              const dc = myBoard.discard[di]!
+              if (dc.category === 'ENERGY' && dc.identity.nameFr.toLowerCase().includes(reqType)) {
+                hasType = true
+                break
+              }
+            }
+          }
+          if (hasType) totalScore += 6
+        } else if (req.startsWith('requires_evolution_line:')) {
+          const lineName = req.slice('requires_evolution_line:'.length).toLowerCase()
+          for (let mi = 0; mi < myPokeCount; mi++) {
+            if (getPokeAt(myBoard, mi, myHasActive).card.identity.nameFr.toLowerCase().includes(lineName)) {
+              totalScore += 6
+              break
+            }
+          }
+        }
+      }
     }
   }
 
+  // Pression sur le Banc adverse
+  if (hasBenchPressure) {
+    let fragileCount = 0
+    for (let i = 0; i < oppBoard.bench.length; i++) {
+      const p = oppBoard.bench[i]!
+      const rem = getRemainingHp(p, state)
+      if (rem <= 90 || (Boolean(p.card.pokemonStats?.isRuleBox) && p.damage >= 50)) {
+        fragileCount++
+      }
+    }
+    totalScore += fragileCount * 25
+  }
+
+  // Verrous, protections & États Spéciaux propres (symétrisés par différence dans evaluateState)
+  if (hasEffectiveItemLock(state, myBoard)) {
+    totalScore -= state.turnNumber <= 2 ? 110 : 50
+  }
+  if (myBoard.abilityLockActive) totalScore -= 65
+  if (myBoard.activePokemon?.cantRetreatNextTurn) totalScore -= 25
+  if (myBoard.activePokemon?.cantAttackNextTurn) totalScore -= 40
+  if (myBoard.activePokemon?.preventDamageOrEffectsNextTurn) totalScore += 90
+  if (myBoard.activePokemon?.damageTakenModifierNextTurn && myBoard.activePokemon.damageTakenModifierNextTurn < 0) {
+    totalScore += Math.min(80, Math.abs(myBoard.activePokemon.damageTakenModifierNextTurn) * 1.1)
+  }
+  totalScore -= scoreConditions(myBoard.activePokemon?.specialConditions)
+
+  if (hasControlLock) totalScore += 35
+
   // Bonus TAKE_EXTRA_PRIZE sur l'attaque de l'Actif
-  if (
-    myBoard.activePokemon?.card.playableActions.some(
-      (a) =>
-        a.actionType === 'ATTACK' &&
-        a.effects.some(
-          (e) => e.primitive === 'TAKE_EXTRA_PRIZE' || (e as any).primitive === 'TAKE_EXTRA_PRIZE_CARDS',
-        ),
-    )
-  ) {
-    totalScore += 60
+  if (myBoard.activePokemon) {
+    const activeActions = myBoard.activePokemon.card.playableActions
+    let hasExtraPrize = false
+    for (let ai = 0; ai < activeActions.length && !hasExtraPrize; ai++) {
+      const a = activeActions[ai]!
+      if (a.actionType !== 'ATTACK') continue
+      for (let ei = 0; ei < a.effects.length; ei++) {
+        const prim = a.effects[ei]!.primitive as string
+        if (prim === 'TAKE_EXTRA_PRIZE' || prim === 'TAKE_EXTRA_PRIZE_CARDS') {
+          hasExtraPrize = true
+          break
+        }
+      }
+    }
+    if (hasExtraPrize) totalScore += 60
   }
 
   // Bonus Double Attaque ("Fête Battante" / Festival Lead sous Stade) & Bonus de dégâts du tour
@@ -430,21 +533,7 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     totalScore += myBoard.turnDamageBoost * (isDoubleAttacker ? 2.2 : 1.2)
   }
 
-  // Soustraction de la valeur du plateau adverse
-  if (oppBoard.activePokemon) {
-    totalScore -= computePokemonThreatScore(oppBoard.activePokemon, state.turnNumber, true) * 0.92
-    if (oppBoard.activePokemon.damage > 0) {
-      totalScore += Math.min(90, oppBoard.activePokemon.damage * 0.25)
-    }
-  }
-  for (const oppBench of oppBoard.bench) {
-    totalScore -= computePokemonThreatScore(oppBench, state.turnNumber, false) * 0.92
-    if (oppBench.damage > 0) {
-      totalScore += Math.min(60, oppBench.damage * 0.2)
-    }
-  }
-
-  // Course aux Récompenses & Risque d'exposition d'un Pokémon à 2 ou 3 Récompenses
+  // Risque d'exposition d'un Pokémon à 2 ou 3 Récompenses
   if (myBoard.activePokemon && oppBoard.activePokemon) {
     const myActivePrizes = myBoard.activePokemon.card.pokemonStats?.prizeCardsGiven ?? 1
     const myActiveRemHp = getRemainingHp(myBoard.activePokemon, state)
@@ -460,16 +549,15 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     }
   }
 
-  // 4. Évaluation dynamique de la Main (`computeCardIntrinsicValue`, `turnPhaseWeights`, `inGameDeadCardConditions`, `holdForNextTurnBonus`)
-  const seenHandCardIds = new Set<string>()
-  for (const card of myBoard.hand) {
+  // Évaluation dynamique de la Main
+  _seenHandIds.length = 0
+  for (let i = 0; i < myBoard.hand.length; i++) {
+    const card = myBoard.hand[i]!
     if (isCardDeadInHand(card, myBoard, oppBoard, state.activeStadium)) {
-      // Conserver une valeur de rétention pour les cartes de riposte en attente de K.O. / retard aux Récompenses (Tampon Injuste, Attrape-Riposte)
       if (isCardTemporallyWaiting(card, myBoard, oppBoard, state.activeStadium)) {
         const base = computeCardIntrinsicValue(card)
         const holdBonus = card.strategicEvaluator.holdForNextTurnBonus ?? 20
-        const duplicateFactor = seenHandCardIds.has(card.cardId) ? 0.35 : 1.0
-        seenHandCardIds.add(card.cardId)
+        const duplicateFactor = markSeenHandId(card.cardId) ? 0.35 : 1.0
         totalScore += (base * 0.08 + holdBonus * 0.35) * duplicateFactor
       }
       continue
@@ -477,91 +565,22 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     const base = computeCardIntrinsicValue(card)
     const phaseWeight = getTurnPhaseWeight(card, state.turnNumber)
     const holdBonus = card.strategicEvaluator.holdForNextTurnBonus ?? 15
-    const isDuplicateInHand = seenHandCardIds.has(card.cardId)
-    seenHandCardIds.add(card.cardId)
+    const isDuplicateInHand = markSeenHandId(card.cardId)
 
     const duplicateFactor = isDuplicateInHand ? 0.45 : 1.0
     totalScore += (base * phaseWeight * 0.14 + holdBonus * 0.18) * duplicateFactor
   }
 
-  // 5. Synergie avec le Cimetière et `decklistSynergyRequirements`
-  let basicEnergiesInDiscard = 0
-  for (const dCard of myBoard.discard) {
-    if (dCard.category === 'ENERGY' && dCard.subCategory === 'BASIC_ENERGY') {
-      basicEnergiesInDiscard++
-    }
-  }
-  const hasDiscardEnergyAccelerator = myAllPoke.some(
-    (p) =>
-      p.card.cardId === 'sv01-086' ||
-      p.card.cardId === 'sv04-123' ||
-      p.card.playableActions.some((a) =>
-        a.effects.some(
-          (e) =>
-            e.primitive === 'ATTACH_ENERGY' &&
-            (e.sourceZone === 'DISCARD' || e.zone === 'DISCARD'),
-        ),
-      ),
-  )
+  // Synergie avec le Cimetière
   if (hasDiscardEnergyAccelerator) {
+    let basicEnergiesInDiscard = 0
+    for (let i = 0; i < myBoard.discard.length; i++) {
+      const dCard = myBoard.discard[i]!
+      if (dCard.category === 'ENERGY' && dCard.subCategory === 'BASIC_ENERGY') {
+        basicEnergiesInDiscard++
+      }
+    }
     totalScore += Math.min(6, basicEnergiesInDiscard) * 14
-  }
-
-  // Synergies déclarées (`decklistSynergyRequirements` : tera, stage2, hp<=70, discard, type d'énergie, lignée)
-  for (const p of myAllPoke) {
-    const reqs = p.card.strategicEvaluator.decklistSynergyRequirements
-    if (!reqs || reqs.length === 0) continue
-    for (const req of reqs) {
-      if (req === 'requires_tera_pokemon') {
-        if (myAllPoke.some((m) => Boolean(m.card.identity.isTera || m.card.pokemonStats?.isTera))) {
-          totalScore += 8
-        }
-      } else if (req === 'requires_stage_2_pokemon') {
-        if (myAllPoke.some((m) => m.card.subCategory === 'STAGE_2') || myBoard.hand.some((c) => c.subCategory === 'STAGE_2')) {
-          totalScore += 8
-        }
-      } else if (req === 'requires_basic_hp_lte_70') {
-        if (myAllPoke.some((m) => m.card.subCategory === 'BASIC' && (m.card.pokemonStats?.hp ?? 999) <= 70)) {
-          totalScore += 6
-        }
-      } else if (req === 'requires_discard_synergy') {
-        if (myBoard.discard.length >= 2) totalScore += 6
-      } else if (req === 'requires_ancient_pokemon') {
-        if (myAllPoke.some((m) => Boolean(m.card.identity.isAncient || m.card.pokemonStats?.isAncient))) {
-          totalScore += 6
-        }
-      } else if (req.startsWith('requires_energy_type:')) {
-        const reqType = req.slice('requires_energy_type:'.length).toLowerCase()
-        const hasType =
-          p.attachedEnergies.some((e) => e.identity.nameFr.toLowerCase().includes(reqType)) ||
-          myBoard.discard.some((e) => e.category === 'ENERGY' && e.identity.nameFr.toLowerCase().includes(reqType))
-        if (hasType) totalScore += 6
-      } else if (req.startsWith('requires_evolution_line:')) {
-        const lineName = req.slice('requires_evolution_line:'.length).toLowerCase()
-        if (myAllPoke.some((m) => m.card.identity.nameFr.toLowerCase().includes(lineName))) {
-          totalScore += 6
-        }
-      }
-    }
-  }
-
-  // Bonus potentiel de K.O. par marqueurs de dégâts (`PLACE_DAMAGE_COUNTERS` en jeu)
-  const allOppEval = [oppBoard.activePokemon, ...oppBoard.bench].filter(
-    (p): p is InPlayPokemon => p !== null,
-  )
-  for (const p of myAllPoke) {
-    for (const pa of p.card.playableActions) {
-      if (pa.actionType === 'ATTACK' || pa.actionType === 'USE_ABILITY') {
-        const counterEff = pa.effects.find((e) => e.primitive === 'PLACE_DAMAGE_COUNTERS')
-        if (counterEff) {
-          const val = counterEff.value ?? counterEff.baseDamage ?? (counterEff.count ? counterEff.count * 10 : 0)
-          if (val > 0) {
-            const koCount = allOppEval.filter((op) => getRemainingHp(op, state) <= val).length
-            totalScore += Math.min(40, koCount * 14)
-          }
-        }
-      }
-    }
   }
 
   // Pénalité si le deck approche dangereusement du Deck-Out
@@ -569,7 +588,34 @@ export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): numbe
     totalScore -= (4 - myBoard.deck.length) * 35
   }
 
-  return Math.round(totalScore * 10) / 10
+  return totalScore
+}
+
+/**
+ * Fonction d'évaluation dynamique d'un état $V(S)$ du point de vue du joueur `perspectiveIndex` (`0` = PLAYER, `1` = OPPONENT).
+ * Strictement à somme nulle ($V(S, 0) = -V(S, 1)$) et nulle en cas de match nul (`DRAW`).
+ */
+export function evaluateState(state: MatchState, perspectiveIndex: 0 | 1): number {
+  const myWinnerLabel = perspectiveIndex === 0 ? 'PLAYER' : 'OPPONENT'
+  const oppWinnerLabel = perspectiveIndex === 0 ? 'OPPONENT' : 'PLAYER'
+
+  // 1. Conditions terminales de victoire / défaite / match nul
+  if (state.winner === myWinnerLabel) {
+    return WIN_SCORE
+  }
+  if (state.winner === oppWinnerLabel) {
+    return -WIN_SCORE
+  }
+  if (state.winner === 'DRAW') {
+    return 0
+  }
+
+  const oppIndex: 0 | 1 = perspectiveIndex === 0 ? 1 : 0
+  const diff =
+    computePerspectiveSideScore(state, perspectiveIndex) -
+    computePerspectiveSideScore(state, oppIndex)
+  const rounded = Math.round(diff * 10) / 10
+  return rounded === 0 ? 0 : rounded
 }
 
 /**
