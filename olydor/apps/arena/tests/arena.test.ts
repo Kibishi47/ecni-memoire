@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { BETA_FEEDBACK_FORM_URL, OLYDOR_SVG } from '@olydor/ui'
@@ -11,9 +11,14 @@ import {
 } from '@olydor/engine'
 
 const ARENA_ROOT = resolve(__dirname, '..')
-const LOCAL_CARDS_JSON = JSON.parse(
-  readFileSync(resolve(ARENA_ROOT, 'public/cards_database.json'), 'utf8'),
-) as unknown[]
+const LOCAL_DB_PATH = [
+  resolve(ARENA_ROOT, '../../tools/card-compiler/data/cards_database.json'),
+  resolve(ARENA_ROOT, 'public/cards_database.json'),
+].find((p) => existsSync(p))
+if (!LOCAL_DB_PATH) {
+  throw new Error('cards_database.json introuvable pour les tests @olydor/arena')
+}
+const LOCAL_CARDS_JSON = JSON.parse(readFileSync(LOCAL_DB_PATH, 'utf8')) as unknown[]
 
 describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
   it('uses the exact official SVG for public/favicon.svg', () => {

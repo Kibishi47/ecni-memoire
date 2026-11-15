@@ -1,13 +1,26 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
 import { META_OPPONENT_DECKS } from '@olydor/engine'
 import { buildServer } from '../src/server.js'
+
+const COMPILER_DB_PATH = resolve(__dirname, '../../../tools/card-compiler/data/cards_database.json')
+const MOCK_PG_CARD_ROWS = (JSON.parse(readFileSync(COMPILER_DB_PATH, 'utf8')) as Array<{ cardId: string }>).map(
+  (card) => ({
+    card_id: card.cardId,
+    data: card,
+  }),
+)
 
 function createMockPool(): Pool {
   return {
     query: vi.fn(async (sql: string) => {
       if (sql.includes('SELECT 1')) {
         return { rows: [{ '?column?': 1 }] }
+      }
+      if (sql.includes('SELECT card_id, data FROM cards')) {
+        return { rows: MOCK_PG_CARD_ROWS }
       }
       return { rows: [] }
     }),
@@ -33,7 +46,7 @@ describe('@olydor/api Engine Routes & CORS', () => {
     expect(body.hasAtLeastOneBasic).toBe(true)
     expect(body.isFullyResolved).toBe(true)
     expect(body.totalCards).toBe(60)
-    expect(body.catalogCardsLoaded).toBe(854)
+    expect(body.catalogCardsLoaded).toBe(MOCK_PG_CARD_ROWS.length)
 
     const partialRes = await app.inject({
       method: 'POST',

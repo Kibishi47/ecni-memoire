@@ -18,6 +18,9 @@ coverage
 .git
 .gitignore
 tools/card-compiler/.venv
+tools/card-compiler/data
 tools/card-compiler/**/__pycache__
 tools/card-compiler/**/*.gguf
+tools/name-generator/output
+tools/name-generator/**/__pycache__
 **/*.log

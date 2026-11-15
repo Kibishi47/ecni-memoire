@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OLYDOR_SVG } from '@olydor/ui'
@@ -29,9 +29,14 @@ import { mapApiMetaDecks } from '../services/metaDeckAdapter'
 import { SimulationWorkerPool } from '../worker/workerPool'
 
 const SIM_ROOT = resolve(__dirname, '..')
-const LOCAL_CARDS_JSON = JSON.parse(
-  readFileSync(resolve(SIM_ROOT, 'public/cards_database.json'), 'utf8'),
-) as unknown[]
+const LOCAL_DB_PATH = [
+  resolve(SIM_ROOT, '../../tools/card-compiler/data/cards_database.json'),
+  resolve(SIM_ROOT, 'public/cards_database.json'),
+].find((p) => existsSync(p))
+if (!LOCAL_DB_PATH) {
+  throw new Error('cards_database.json introuvable pour les tests @olydor/insight')
+}
+const LOCAL_CARDS_JSON = JSON.parse(readFileSync(LOCAL_DB_PATH, 'utf8')) as unknown[]
 
 afterEach(() => {
   vi.unstubAllGlobals()

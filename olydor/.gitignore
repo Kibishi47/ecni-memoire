@@ -15,12 +15,16 @@ dist/
 .DS_Store
 *.log
 
-# Python & Outils offline (tools/card-compiler)
+# Python & Outils offline (tools/card-compiler & tools/name-generator)
 .venv/
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 *.gguf
-tools/card-compiler/data/compiled_cards/*.json
-tools/card-compiler/data/raw_tcgdex/*.json
+**/cards_database.json
+**/mapping_ptcgl_to_tcgdex.json
+tools/card-compiler/data/**/*.json
+tools/card-compiler/data/reasoning_texts/
+tools/card-compiler/data/old_*/
+tools/name-generator/output/

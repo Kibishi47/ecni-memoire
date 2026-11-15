@@ -8,10 +8,10 @@ import { env } from './config/env.js'
 import { closePool, getPool } from './db/pool.js'
 import { registerCardRoutes } from './routes/cards.js'
 import { registerDeckRoutes } from './routes/decks.js'
-import { ensureEngineCatalogLoaded, registerEngineRoutes } from './routes/engine.js'
+import { registerEngineRoutes } from './routes/engine.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerReportRoutes } from './routes/reports.js'
-import type { AlternativesService, CardCatalogCache } from './services/alternativesService.js'
+import { CardCatalogCache, type AlternativesService } from './services/alternativesService.js'
 import type { GitHubIssueCreator } from './services/githubService.js'
 import type { InMemoryRateLimiter } from './services/rateLimiter.js'
 
@@ -74,7 +74,7 @@ function buildCorsOriginHandler(customOrigins?: string[] | '*') {
  */
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const pool = options.pool ?? getPool()
-  ensureEngineCatalogLoaded()
+  const catalogCache = options.catalogCache ?? new CardCatalogCache({ pool })
 
   const app = Fastify({
     logger: options.logger ?? env.NODE_ENV !== 'test',
@@ -94,10 +94,10 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   await registerHealthRoutes(app, { pool })
   await registerDeckRoutes(app, { pool })
-  await registerEngineRoutes(app)
+  await registerEngineRoutes(app, { pool, catalogCache })
   await registerCardRoutes(app, {
     pool,
-    catalogCache: options.catalogCache,
+    catalogCache,
     alternativesService: options.alternativesService,
   })
   await registerReportRoutes(app, {

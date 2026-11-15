@@ -1,8 +1,8 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import type { FastifyInstance } from 'fastify'
+import type { Pool } from 'pg'
 import { z } from 'zod'
 import {
+  clearCompiledCards,
   createInitialMatchState,
   evaluateBestTurnBranch,
   expandParsedDeckToModels,
@@ -16,40 +16,27 @@ import {
   type MatchState,
   type MaxBranchesSetting,
 } from '@olydor/engine'
-import { getBackendRoot } from '../config/env.js'
+import { getPool } from '../db/pool.js'
+import { CardCatalogCache, type CardCatalogSnapshot } from '../services/alternativesService.js'
 import { parseWithZod } from './validation.js'
 
-let catalogLoaded = false
+export interface EngineRouteOptions {
+  pool?: Pool
+  catalogCache?: CardCatalogCache
+}
+
+let lastLoadedSnapshot: CardCatalogSnapshot | null = null
 
 /**
- * Ensures the 854-card `@olydor/engine` catalog is loaded once in memory.
+ * Ensures the `@olydor/engine` in-memory catalog is synchronized from PostgreSQL (`cards` table).
  */
-export function ensureEngineCatalogLoaded(): number {
-  if (catalogLoaded && getCompiledCardsCount() > 0) {
-    return getCompiledCardsCount()
+export async function ensureEngineCatalogLoaded(catalogCache: CardCatalogCache): Promise<number> {
+  const snapshot = await catalogCache.getSnapshot()
+  if (snapshot !== lastLoadedSnapshot || (snapshot.models.length > 0 && getCompiledCardsCount() === 0)) {
+    clearCompiledCards()
+    registerCompiledCards(snapshot.models)
+    lastLoadedSnapshot = snapshot
   }
-
-  const candidates = [
-    process.env.CARDS_DATABASE_PATH,
-    path.resolve(getBackendRoot(), 'data/cards_database.json'),
-    path.resolve(getBackendRoot(), '../../packages/engine/data/cards_database.json'),
-    path.resolve(process.cwd(), 'data/cards_database.json'),
-  ].filter((p): p is string => Boolean(p && p.trim()))
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      const raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) as unknown
-      const rawList: unknown[] = Array.isArray(raw)
-        ? raw
-        : raw && typeof raw === 'object' && 'cards' in raw && (raw as { cards?: unknown }).cards
-          ? Object.values((raw as { cards: Record<string, unknown> }).cards)
-          : []
-      registerCompiledCards(rawList)
-      catalogLoaded = true
-      return getCompiledCardsCount()
-    }
-  }
-
   return getCompiledCardsCount()
 }
 
@@ -80,14 +67,17 @@ const evaluateTurnBodySchema = z
  * - `POST /api/decks/validate`
  * - `POST /api/engine/evaluate-turn`
  */
-export async function registerEngineRoutes(app: FastifyInstance): Promise<void> {
-  ensureEngineCatalogLoaded()
+export async function registerEngineRoutes(
+  app: FastifyInstance,
+  options: EngineRouteOptions = {},
+): Promise<void> {
+  const catalogCache = options.catalogCache ?? new CardCatalogCache({ pool: options.pool ?? getPool() })
 
   app.post('/api/decks/validate', async (request, reply) => {
-    ensureEngineCatalogLoaded()
-
     const parsedBody = parseWithZod(validateDeckBodySchema, request.body, reply)
     if (!parsedBody) return
+
+    await ensureEngineCatalogLoaded(catalogCache)
 
     const deck = parsePtcglDecklist(parsedBody.deckText)
     const isValid =
@@ -123,10 +113,10 @@ export async function registerEngineRoutes(app: FastifyInstance): Promise<void> 
   })
 
   app.post('/api/engine/evaluate-turn', async (request, reply) => {
-    ensureEngineCatalogLoaded()
-
     const body = parseWithZod(evaluateTurnBodySchema, request.body, reply)
     if (!body) return
+
+    await ensureEngineCatalogLoaded(catalogCache)
 
     let turnState: MatchState
     if (body.state) {

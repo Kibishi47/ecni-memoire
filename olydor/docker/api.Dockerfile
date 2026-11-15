@@ -57,12 +57,10 @@ COPY --from=builder /app/packages/types/dist ./packages/types/dist
 
 COPY --from=builder /app/packages/engine/package.json ./packages/engine/package.json
 COPY --from=builder /app/packages/engine/dist ./packages/engine/dist
-COPY --from=builder /app/packages/engine/data ./packages/engine/data
 
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/data ./apps/api/data
 COPY --from=builder /app/apps/api/meta_decks ./apps/api/meta_decks
 COPY --from=builder /app/apps/api/src/migrations ./apps/api/src/migrations
 COPY --from=builder /app/apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh

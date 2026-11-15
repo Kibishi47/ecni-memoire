@@ -7,7 +7,9 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const candidatePaths = [
+  path.resolve(__dirname, '../../../tools/card-compiler/data/cards_database.json'),
   path.resolve(__dirname, '../data/cards_database.json'),
+  path.resolve(process.cwd(), '../../tools/card-compiler/data/cards_database.json'),
   path.resolve(process.cwd(), 'data/cards_database.json'),
 ]
 
