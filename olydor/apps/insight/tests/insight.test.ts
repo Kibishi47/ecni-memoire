@@ -169,11 +169,15 @@ describe('@olydor/insight migrated simulator suite', () => {
   })
 
   it('wires BetaTesterBanner, AppNavbar, AppFooter, Step3 Arena CTA, and legal pages', () => {
+    const nuxtConfig = readFileSync(resolve(SIM_ROOT, 'nuxt.config.ts'), 'utf8')
     const layout = readFileSync(resolve(SIM_ROOT, 'layouts/default.vue'), 'utf8')
     const step3 = readFileSync(resolve(SIM_ROOT, 'components/Step3DashboardAndComparator.vue'), 'utf8')
     const mentions = readFileSync(resolve(SIM_ROOT, 'pages/mentions-legales.vue'), 'utf8')
     const privacy = readFileSync(resolve(SIM_ROOT, 'pages/confidentialite.vue'), 'utf8')
     const cgu = readFileSync(resolve(SIM_ROOT, 'pages/cgu.vue'), 'utf8')
+
+    expect(nuxtConfig).toContain("transpile: ['@olydor/ui', '@olydor/engine']")
+    expect(nuxtConfig).toContain("include: ['lucide-vue-next']")
 
     expect(layout).toContain('<BetaTesterBanner')
     expect(layout).toContain('active-app="insight"')

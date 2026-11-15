@@ -68,6 +68,8 @@ describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
 
     expect(nuxtConfig).toContain('ssr: true')
     expect(nuxtConfig).toContain('@olydor/ui/theme.css')
+    expect(nuxtConfig).toContain("transpile: ['@olydor/ui', '@olydor/engine']")
+    expect(nuxtConfig).toContain("include: ['lucide-vue-next']")
     expect(layoutSrc).toContain('<BetaTesterBanner')
     expect(layoutSrc).toContain('active-app="arena"')
     expect(layoutSrc).toContain('<AppFooter')

@@ -5,7 +5,12 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   css: ['@olydor/ui/theme.css'],
   build: {
-    transpile: ['@olydor/ui', '@olydor/engine', 'lucide-vue-next'],
+    transpile: ['@olydor/ui', '@olydor/engine'],
+  },
+  vite: {
+    optimizeDeps: {
+      include: ['lucide-vue-next'],
+    },
   },
   runtimeConfig: {
     public: {

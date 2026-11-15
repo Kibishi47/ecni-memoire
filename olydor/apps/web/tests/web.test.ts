@@ -27,6 +27,8 @@ describe('@olydor/web hub & SEO configuration', () => {
     const nuxtConfig = readFileSync(resolve(WEB_ROOT, 'nuxt.config.ts'), 'utf8')
     expect(nuxtConfig).toContain('ssr: true')
     expect(nuxtConfig).toContain("css: ['@olydor/ui/theme.css']")
+    expect(nuxtConfig).toContain("transpile: ['@olydor/ui']")
+    expect(nuxtConfig).toContain("include: ['lucide-vue-next']")
     expect(nuxtConfig).toContain("href: '/favicon.svg'")
     expect(nuxtConfig).toContain("content: '#0c0f16'")
   })
