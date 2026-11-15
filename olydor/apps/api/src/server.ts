@@ -90,6 +90,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     origin: buildCorsOriginHandler(options.corsOrigins),
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+    exposedHeaders: ['Retry-After'],
   })
 
   await registerHealthRoutes(app, { pool })

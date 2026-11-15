@@ -1,12 +1,15 @@
 import { ref } from 'vue'
+import { formatRetryAfterDuration } from '@olydor/ui'
 import { ApiError, submitBugReport, type BugReportPayload, type BugReportResponse } from './apiClient'
-import { t } from '../utils/i18n'
+import { currentLang, t } from '../utils/i18n'
 
 export function formatBugReportError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 429) {
-      const seconds = err.retryAfterSeconds ?? 60
-      return t('reportRateLimitError', { sec: seconds })
+      const seconds = err.retryAfterSeconds ?? 3600
+      return t('reportRateLimitError', {
+        retry: formatRetryAfterDuration(seconds, currentLang.value),
+      })
     }
     return err.message || t('reportErrorGeneric')
   }

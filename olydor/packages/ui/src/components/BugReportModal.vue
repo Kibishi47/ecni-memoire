@@ -117,7 +117,7 @@ import { computed, ref, watch } from 'vue'
 import { AlertCircle, Bug, CheckCircle2, Loader2, X } from 'lucide-vue-next'
 import type { BugReportPayload, BugReportResponse, BugReportType } from '@olydor/types'
 import { resolvePlatformUrls } from '../urls'
-import { useUiI18n, type OlydorLang } from '../i18n'
+import { formatRetryAfterDuration, useUiI18n, type OlydorLang } from '../i18n'
 
 export interface BugReportModalProps {
   modelValue: boolean
@@ -141,7 +141,7 @@ const emit = defineEmits<{
   submitted: [response: BugReportResponse]
 }>()
 
-const { t } = useUiI18n(() => props.lang)
+const { t, activeLang } = useUiI18n(() => props.lang)
 
 const resolvedApiBaseUrl = computed(
   () => resolvePlatformUrls({ apiUrl: props.apiBaseUrl }).apiUrl,
@@ -207,16 +207,36 @@ async function handleSubmit() {
 
     if (!response.ok) {
       let msg = t('bugErrorServer', { status: response.status })
+      const headerRetryRaw = response.headers.get('retry-after')
+      const headerRetry = headerRetryRaw ? Number.parseInt(headerRetryRaw, 10) : Number.NaN
+      let retrySeconds = Number.isFinite(headerRetry) && headerRetry > 0 ? headerRetry : 3600
+
       try {
-        const errJson = (await response.json()) as { message?: string; error?: string }
+        const errJson = (await response.json()) as {
+          message?: string
+          error?: string
+          retryAfterSeconds?: number
+        }
+        if (
+          typeof errJson.retryAfterSeconds === 'number' &&
+          Number.isFinite(errJson.retryAfterSeconds) &&
+          errJson.retryAfterSeconds > 0
+        ) {
+          retrySeconds = errJson.retryAfterSeconds
+        }
         if (response.status === 429) {
-          const retry = response.headers.get('retry-after') || '60'
-          msg = t('bugErrorRateLimit', { retry })
+          msg = t('bugErrorRateLimit', {
+            retry: formatRetryAfterDuration(retrySeconds, activeLang.value),
+          })
         } else if (errJson.message || errJson.error) {
           msg = errJson.message || errJson.error || msg
         }
       } catch {
-        // fallback message
+        if (response.status === 429) {
+          msg = t('bugErrorRateLimit', {
+            retry: formatRetryAfterDuration(retrySeconds, activeLang.value),
+          })
+        }
       }
       errorMessage.value = msg
       return

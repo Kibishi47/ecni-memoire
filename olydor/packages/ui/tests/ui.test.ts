@@ -16,6 +16,7 @@ import {
   createI18n,
   currentOlydorLang,
   currentTheme,
+  formatRetryAfterDuration,
   LegalMentionsContent,
   OLYDOR_SVG,
   OlydorLogo,
@@ -193,6 +194,50 @@ describe('@olydor/ui Design System & Shared Components', () => {
       expect(requestCapture.body?.userComment).toBe('Le filtre decklist bug')
       expect(wrapper.text()).toContain('42')
       expect(wrapper.find('a[href*="github"]').exists()).toBe(false)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('formats 429 rate-limit retry durations as 1 hour / 1 heure cleanly in both FR and EN', async () => {
+    expect(formatRetryAfterDuration(3600, 'fr')).toBe('1 heure')
+    expect(formatRetryAfterDuration(3600, 'en')).toBe('1 hour')
+    expect(formatRetryAfterDuration(1800, 'fr')).toBe('30 minutes')
+    expect(formatRetryAfterDuration(45, 'en')).toBe('45s')
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Too Many Requests' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch
+
+    try {
+      const frWrapper = mount(BugReportModal, {
+        props: { modelValue: true, lang: 'fr', apiBaseUrl: 'http://localhost:3000' },
+        global: { stubs: { Teleport: true } },
+      })
+      await frWrapper.find('#mo-bug-comment').setValue('Test rate limit FR')
+      await frWrapper.find('form').trigger('submit.prevent')
+      await frWrapper.vm.$nextTick()
+      await Promise.resolve()
+      await frWrapper.vm.$nextTick()
+
+      expect(frWrapper.text()).toContain('Réessayez dans 1 heure.')
+      expect(frWrapper.text()).not.toContain('60s')
+
+      const enWrapper = mount(BugReportModal, {
+        props: { modelValue: true, lang: 'en', apiBaseUrl: 'http://localhost:3000' },
+        global: { stubs: { Teleport: true } },
+      })
+      await enWrapper.find('#mo-bug-comment').setValue('Test rate limit EN')
+      await enWrapper.find('form').trigger('submit.prevent')
+      await enWrapper.vm.$nextTick()
+      await Promise.resolve()
+      await enWrapper.vm.$nextTick()
+
+      expect(enWrapper.text()).toContain('Please try again in 1 hour.')
+      expect(enWrapper.text()).not.toContain('60s')
     } finally {
       globalThis.fetch = originalFetch
     }

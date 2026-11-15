@@ -159,7 +159,7 @@ export const uiTranslations = {
     bugDescPlaceholder: 'Décrivez directement le problème rencontré ou ce qui devrait être corrigé...',
     bugErrorEmptyComment: 'Veuillez écrire un commentaire avant d’envoyer votre signalement.',
     bugErrorServer: 'Erreur serveur ({status})',
-    bugErrorRateLimit: 'Trop de signalements envoyés. Réessayez dans {retry}s.',
+    bugErrorRateLimit: 'Trop de signalements envoyés. Réessayez dans {retry}.',
     bugErrorNetwork: 'Impossible de joindre l’API Olydor.',
     bugSuccessMsg: 'Signalement #{id} enregistré avec succès.',
     bugCancel: 'Fermer',
@@ -293,7 +293,7 @@ export const uiTranslations = {
     bugDescPlaceholder: 'Describe the issue you ran into or what needs to be fixed...',
     bugErrorEmptyComment: 'Please write a comment before submitting your report.',
     bugErrorServer: 'Server error ({status})',
-    bugErrorRateLimit: 'Too many reports sent. Please wait {retry}s.',
+    bugErrorRateLimit: 'Too many reports sent. Please try again in {retry}.',
     bugErrorNetwork: 'Unable to reach Olydor API.',
     bugSuccessMsg: 'Report #{id} recorded successfully.',
     bugCancel: 'Close',
@@ -374,4 +374,23 @@ export function useUiI18n(langOverride?: () => OlydorLang | undefined) {
     instance.initLanguage();
   }
   return instance;
+}
+
+/**
+ * Formats a retry-after delay (in seconds) into a human-readable localized duration.
+ */
+export function formatRetryAfterDuration(seconds: number, lang: OlydorLang): string {
+  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 3600;
+  if (safeSeconds >= 3540) {
+    const hours = Math.max(1, Math.round(safeSeconds / 3600));
+    if (lang === 'en') {
+      return hours === 1 ? '1 hour' : `${hours} hours`;
+    }
+    return hours === 1 ? '1 heure' : `${hours} heures`;
+  }
+  if (safeSeconds >= 60) {
+    const minutes = Math.round(safeSeconds / 60);
+    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+  }
+  return `${safeSeconds}s`;
 }
