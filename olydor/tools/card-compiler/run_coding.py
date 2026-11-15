@@ -75,6 +75,14 @@ def main() -> None:
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes ligne par ligne (déduplication automatique).",
     )
     parser.add_argument(
+        "-s",
+        "--sets",
+        "--set",
+        type=str,
+        default=None,
+        help="Un ou plusieurs codes d'extension séparés par des virgules (ex: 'me05,me06'), en ignorant legal.standard.",
+    )
+    parser.add_argument(
         "--intensity",
         choices=["soft", "intense"],
         default=os.environ.get("INTENSITY_MODE", "soft"),
@@ -126,14 +134,15 @@ def main() -> None:
 
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=FetcherProvider.sdk)
     with console.status("[bold blue]Récupération des données TCGdex...[/bold blue]"):
-        bundles = asyncio.run(
-            fetcher.fetch_batch(
-                mode=effective_mode,
-                custom_ids=custom_ids,
-                force=args.force,
-                standard_limit=args.limit,
-            )
-        )
+        fetch_kwargs = {
+            "mode": effective_mode,
+            "custom_ids": custom_ids,
+            "force": args.force,
+            "standard_limit": args.limit,
+        }
+        if args.sets:
+            fetch_kwargs["set_ids"] = [args.sets]
+        bundles = asyncio.run(fetcher.fetch_batch(**fetch_kwargs))
 
     if not bundles:
         console.print("[yellow]Aucune carte à coder.[/yellow]")

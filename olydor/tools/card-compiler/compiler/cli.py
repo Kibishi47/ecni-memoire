@@ -79,6 +79,7 @@ from compiler.tcgdex_fetcher import (
     FetchedCardBundle,
     FetcherProvider,
     TCGdexFetcher,
+    parse_set_codes,
 )
 from compiler.two_pass_pipeline import (
     run_coding_phase,
@@ -244,12 +245,15 @@ def get_remaining_cards_summary(
     provider: FetcherProvider = FetcherProvider.sdk,
     reasoned: bool = False,
     custom_ids: Optional[List[str]] = None,
+    sets: Optional[Union[str, List[str]]] = None,
+    ignore_standard: bool = False,
 ) -> Dict[str, Any]:
     """Calcule le statut et le nombre de cartes restant à compiler ou à raisonner.
 
     Retourne un dictionnaire contenant les statistiques globales et par extension :
-    - mode : 'standard', 'test', 'all', ou 'custom'
+    - mode : 'standard', 'test', 'all', 'sets', ou 'custom'
     - set_filter : préfixe de set filtré (si spécifié)
+    - sets : liste des sets ciblés en ignorant legal.standard (si spécifiée)
     - reasoned : True si l'on inspecte data/reasoning_texts/ (Passe 1), False pour data/compiled_cards/ (Passe 2)
     - total_target : nombre total de cartes visées
     - total_compiled : nombre de cartes cibles déjà traitées (conservé pour rétrocompatibilité)
@@ -270,12 +274,25 @@ def get_remaining_cards_summary(
 
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
 
+    parsed_sets = parse_set_codes(sets)
+    if ignore_standard and set_filter and not parsed_sets:
+        parsed_sets = parse_set_codes(set_filter)
+
     effective_mode = mode.lower().strip()
+    if ignore_standard and effective_mode == "standard" and not parsed_sets and custom_ids is None:
+        effective_mode = "all"
+
     target_ids: List[str] = []
 
     if custom_ids is not None:
         target_ids = list(dict.fromkeys(cid.strip() for cid in custom_ids if cid.strip()))
         effective_mode = "custom"
+    elif parsed_sets:
+        async def _resolve_sets():
+            async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, follow_redirects=True) as client:
+                return await fetcher.resolve_set_card_ids(client, set_ids=parsed_sets)
+        target_ids = asyncio.run(_resolve_sets())
+        effective_mode = "sets"
     elif effective_mode == "test":
         target_ids = list(TEST_CARD_IDS)
     elif effective_mode == "all":
@@ -316,7 +333,7 @@ def get_remaining_cards_summary(
             target_ids = asyncio.run(_resolve_std())
 
     # Application du filtre par extension / set
-    if set_filter:
+    if set_filter and not parsed_sets:
         s_clean = set_filter.strip().lower()
         target_ids = [
             cid for cid in target_ids
@@ -652,8 +669,9 @@ def _execute_run_pipeline(
     ids_file: Optional[Path] = None,
     batch_size: Optional[int] = None,
     max_tokens: Optional[int] = None,
+    sets: Optional[Union[str, List[str]]] = None,
 ) -> None:
-    """Implémentation partagée pour les commandes `run` et `compile`."""
+    """Implémentation partagée pour les commandes `run`, `compile` et `compile-sets`."""
     eff_batch_size = batch_size if isinstance(batch_size, int) else None
     eff_max_tokens = max_tokens if isinstance(max_tokens, int) else None
     effective_mode = mode.value
@@ -694,6 +712,7 @@ def _execute_run_pipeline(
     )
 
     custom_ids: Optional[List[str]] = resolve_card_ids(ids=ids, ids_file=ids_file)
+    parsed_sets: List[str] = parse_set_codes(sets)
 
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
@@ -701,7 +720,11 @@ def _execute_run_pipeline(
     mode_label = (
         f"IDs personnalisés ({len(custom_ids)} carte(s) unique(s))"
         if custom_ids
-        else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
+        else (
+            f"Extensions {', '.join(s.upper() for s in parsed_sets)} (legal.standard ignoré)"
+            if parsed_sets
+            else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
+        )
     )
 
     if llm_provider == LLMProvider.lm_studio:
@@ -828,14 +851,15 @@ def _execute_run_pipeline(
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
 
     with console.status("[bold blue]Étape 1 & 2 : Récupération de l'index global TCGdex et des données brutes FR/EN...[/bold blue]"):
-        bundles = asyncio.run(
-            fetcher.fetch_batch(
-                mode=effective_mode,
-                custom_ids=custom_ids,
-                force=False,
-                standard_limit=limit,
-            )
-        )
+        fetch_kwargs: Dict[str, Any] = {
+            "mode": effective_mode,
+            "custom_ids": custom_ids,
+            "force": False,
+            "standard_limit": limit,
+        }
+        if parsed_sets:
+            fetch_kwargs["set_ids"] = parsed_sets
+        bundles = asyncio.run(fetcher.fetch_batch(**fetch_kwargs))
 
     console.print(
         f"[green]✓[/green] {len(bundles)} carte(s) récupérée(s) et mise(s) en cache dans [bold]data/raw_tcgdex/[/bold]."
@@ -1299,6 +1323,13 @@ def run_command(
         "-f",
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes ligne par ligne (déduplication automatique).",
     ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        "--set",
+        "-s",
+        help="Un ou plusieurs codes d'extension à compiler séparés par des virgules (ex: 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
+    ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
         "--provider",
@@ -1441,6 +1472,7 @@ def run_command(
         ids_file=ids_file,
         batch_size=batch_size,
         max_tokens=max_tokens,
+        sets=sets,
     )
 
 
@@ -1455,6 +1487,13 @@ def compile_alias(
         "--ids-file",
         "-f",
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        "--set",
+        "-s",
+        help="Un ou plusieurs codes d'extension à compiler séparés par des virgules (ex: 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
     ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
@@ -1575,6 +1614,7 @@ def compile_alias(
         intensity=intensity,
         phase=phase,
         ids_file=ids_file,
+        sets=sets,
     )
 
 
@@ -1589,6 +1629,13 @@ def reason_command(
         "--ids-file",
         "-f",
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        "--set",
+        "-s",
+        help="Un ou plusieurs codes d'extension à compiler séparés par des virgules (ex: 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
     ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
@@ -1665,6 +1712,7 @@ def reason_command(
         ids_file=ids_file,
         batch_size=batch_size,
         max_tokens=max_tokens,
+        sets=sets,
     )
 
 
@@ -1679,6 +1727,13 @@ def code_command(
         "--ids-file",
         "-f",
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
+    ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        "--set",
+        "-s",
+        help="Un ou plusieurs codes d'extension à compiler séparés par des virgules (ex: 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
     ),
     provider: FetcherProvider = typer.Option(
         FetcherProvider.sdk,
@@ -1748,6 +1803,196 @@ def code_command(
         phase="code",
         ids_file=ids_file,
         batch_size=batch_size,
+        sets=sets,
+    )
+
+
+@app.command("compile-sets")
+def compile_sets_command(
+    sets: List[str] = typer.Argument(
+        ...,
+        help="Un ou plusieurs codes d'extension à compiler (ex: 'me05 me06' ou 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
+    ),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès aux cartes TCGdex : 'sdk' (défaut) ou 'rest'.",
+    ),
+    llm_provider: LLMProvider = typer.Option(
+        LLMProvider.local,
+        "--llm-provider",
+        "-lp",
+        envvar=["LLM_PROVIDER"],
+        help="Fournisseur d'inférence LLM : 'local' ou 'lm_studio'.",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        envvar=["LLM_MODEL", "MODEL", "LM_STUDIO_MODEL"],
+        help="Modèle LLM complet (LM Studio ou Local).",
+    ),
+    tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t", hidden=True),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Force le re-téléchargement et la recompilation même si le fichier JSON existe déjà.",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        help="Nombre maximum de cartes à traiter sur l'ensemble des sets fournis.",
+    ),
+    hf_token: Optional[str] = typer.Option(
+        None,
+        "--hf-token",
+        envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
+        help="Jeton Hugging Face (HF_TOKEN).",
+    ),
+    no_think: bool = typer.Option(
+        False,
+        "--no-think",
+        "--disable-thinking",
+        envvar=["LM_STUDIO_NO_THINK", "LM_STUDIO_DISABLE_THINKING", "NO_THINK", "DISABLE_THINKING"],
+        help="Désactive le mode thinking des modèles raisonnants.",
+    ),
+    thinking: Optional[str] = typer.Option(
+        None,
+        "--thinking",
+        "-tk",
+        envvar=["LM_STUDIO_THINKING", "THINKING", "THINKING_LEVEL", "LM_STUDIO_THINKING_LEVEL"],
+        help="Niveau de réflexion ('null', 'low', 'medium', 'high', ou nombre de tokens).",
+    ),
+    parallel: int = typer.Option(
+        1,
+        "--parallel",
+        "-j",
+        "--concurrency",
+        envvar=["LM_STUDIO_PARALLEL", "PARALLEL", "CONCURRENCY", "COMPILER_CONCURRENCY"],
+        help="Nombre de cartes à compiler en parallèle (LM Studio uniquement).",
+    ),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        "-k",
+        "--ignore-errors",
+        "--skip-errors",
+        envvar=["CONTINUE_ON_ERROR", "IGNORE_ERRORS", "SKIP_ERRORS"],
+        help="Ignore les erreurs d'une carte et passe à la suivante.",
+    ),
+    local_backend: Optional[str] = typer.Option(
+        None,
+        "--local-backend",
+        "--local-opt",
+        envvar=["LOCAL_BACKEND", "LOCAL_OPTIMIZATION"],
+        help="Backend d'optimisation locale ('mlx' ou 'llama_cpp').",
+    ),
+    pipeline: Optional[str] = typer.Option(
+        None,
+        "--pipeline",
+        "-pl",
+        envvar=["PIPELINE_MODE"],
+        help="Mode de pipeline : 'single' ou 'two_pass'.",
+    ),
+    intensity: Optional[str] = typer.Option(
+        None,
+        "--intensity",
+        "-it",
+        envvar=["INTENSITY_MODE"],
+        help="Niveau d'intensité : 'soft' ou 'intense'.",
+    ),
+    phase: Optional[str] = typer.Option(
+        None,
+        "--phase",
+        envvar=["PIPELINE_PHASE"],
+        help="Phase en mode two_pass : 'all', 'reason', 'code'.",
+    ),
+    batch_size: Optional[int] = typer.Option(
+        None,
+        "--batch-size",
+        "-bs",
+        envvar=["MLX_BATCH_SIZE"],
+        help="Taille de lot MLX pour l'inférence parallèle continue.",
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-tokens",
+        envvar=["REASONING_MAX_TOKENS"],
+        help="Nombre maximum de tokens générés en Passe 1.",
+    ),
+) -> None:
+    """Compile toutes les cartes d'un ou plusieurs sets TCGdex en ignorant le filtre `legal.standard`."""
+    effective_thinking = "null" if no_think else thinking
+    _execute_run_pipeline(
+        mode=RunMode.standard,
+        test_flag=False,
+        standard_flag=False,
+        ids=None,
+        provider=provider,
+        llm_provider=llm_provider,
+        tier=tier,
+        fast=False,
+        force=force,
+        limit=limit,
+        hf_token=hf_token,
+        disable_thinking=no_think,
+        thinking=effective_thinking,
+        parallel=parallel,
+        continue_on_error=continue_on_error,
+        model=model,
+        local_backend=local_backend,
+        pipeline=pipeline,
+        intensity=intensity,
+        phase=phase,
+        ids_file=None,
+        batch_size=batch_size,
+        max_tokens=max_tokens,
+        sets=sets,
+    )
+
+
+@app.command("run-sets", hidden=True)
+def run_sets_alias(
+    sets: List[str] = typer.Argument(...),
+    provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p", envvar=["TCGDEX_PROVIDER"]),
+    llm_provider: LLMProvider = typer.Option(LLMProvider.local, "--llm-provider", "-lp", envvar=["LLM_PROVIDER"]),
+    model: Optional[str] = typer.Option(None, "--model", envvar=["LLM_MODEL", "MODEL", "LM_STUDIO_MODEL"]),
+    tier: ModelTier = typer.Option(ModelTier.qwen3, "--tier", "-t", hidden=True),
+    force: bool = typer.Option(False, "--force"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token", envvar=["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]),
+    no_think: bool = typer.Option(False, "--no-think", "--disable-thinking"),
+    thinking: Optional[str] = typer.Option(None, "--thinking", "-tk"),
+    parallel: int = typer.Option(1, "--parallel", "-j", "--concurrency"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error", "-k", "--ignore-errors", "--skip-errors"),
+    local_backend: Optional[str] = typer.Option(None, "--local-backend", "--local-opt"),
+    pipeline: Optional[str] = typer.Option(None, "--pipeline", "-pl"),
+    intensity: Optional[str] = typer.Option(None, "--intensity", "-it"),
+    phase: Optional[str] = typer.Option(None, "--phase"),
+    batch_size: Optional[int] = typer.Option(None, "--batch-size", "-bs"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
+) -> None:
+    """Alias de la commande `compile-sets`."""
+    compile_sets_command(
+        sets=sets,
+        provider=provider,
+        llm_provider=llm_provider,
+        model=model,
+        tier=tier,
+        force=force,
+        limit=limit,
+        hf_token=hf_token,
+        no_think=no_think,
+        thinking=thinking,
+        parallel=parallel,
+        continue_on_error=continue_on_error,
+        local_backend=local_backend,
+        pipeline=pipeline,
+        intensity=intensity,
+        phase=phase,
+        batch_size=batch_size,
+        max_tokens=max_tokens,
     )
 
 
@@ -2860,6 +3105,16 @@ def remaining_command(
         "-s",
         help="Filtre sur une extension spécifique (ex: 'sv01', 'sv05', 'sve').",
     ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        help="Un ou plusieurs codes d'extension séparés par des virgules (ex: 'me05,me06'), en ignorant legal.standard.",
+    ),
+    ignore_standard: bool = typer.Option(
+        False,
+        "--ignore-standard",
+        help="Ignore le filtre legal.standard (utile avec --set sur une extension récente pas encore marquée Standard).",
+    ),
     ids: Optional[str] = typer.Option(
         None,
         "--ids",
@@ -2894,6 +3149,7 @@ def remaining_command(
     """Calcule et affiche le nombre de cartes Pokémon TCG restant à compiler ou à raisonner (globalement ou par extension)."""
     data_dir = get_data_dir()
     custom_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+    parsed_sets = parse_set_codes(sets)
     try:
         summary = get_remaining_cards_summary(
             data_dir=data_dir,
@@ -2901,6 +3157,8 @@ def remaining_command(
             set_filter=set_name,
             reasoned=reasoned,
             custom_ids=custom_ids,
+            sets=parsed_sets or None,
+            ignore_standard=ignore_standard,
         )
     except Exception as e:
         console.print(f"[bold red]✗ Erreur lors du calcul des cartes restantes :[/bold red] {e}")
@@ -2919,6 +3177,10 @@ def remaining_command(
 
     if custom_ids is not None:
         mode_label = f"Liste personnalisée ({total_target} carte(s) unique(s))"
+    elif parsed_sets:
+        mode_label = f"Extension(s) {', '.join(s.upper() for s in parsed_sets)} (legal.standard ignoré)"
+    elif set_name and ignore_standard:
+        mode_label = f"Extension spécifique ({set_name.upper()}, legal.standard ignoré)"
     elif set_name:
         mode_label = f"Extension spécifique ({set_name.upper()})"
     elif mode == "standard":
@@ -3018,6 +3280,8 @@ def remaining_command(
 def todo_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    sets: Optional[str] = typer.Option(None, "--sets"),
+    ignore_standard: bool = typer.Option(False, "--ignore-standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
@@ -3025,13 +3289,15 @@ def todo_alias(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, sets=sets, ignore_standard=ignore_standard, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("left", hidden=True)
 def left_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    sets: Optional[str] = typer.Option(None, "--sets"),
+    ignore_standard: bool = typer.Option(False, "--ignore-standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
@@ -3039,13 +3305,15 @@ def left_alias(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, sets=sets, ignore_standard=ignore_standard, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("pending", hidden=True)
 def pending_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    sets: Optional[str] = typer.Option(None, "--sets"),
+    ignore_standard: bool = typer.Option(False, "--ignore-standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
@@ -3053,13 +3321,15 @@ def pending_alias(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, sets=sets, ignore_standard=ignore_standard, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
 
 
 @app.command("a-compiler", hidden=True)
 def a_compiler_alias(
     mode: str = typer.Option("standard", "--mode", "-m"),
     set_name: Optional[str] = typer.Option(None, "--set", "-s"),
+    sets: Optional[str] = typer.Option(None, "--sets"),
+    ignore_standard: bool = typer.Option(False, "--ignore-standard"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
     reasoned: bool = typer.Option(False, "--reasoned", "--reason", "-r"),
@@ -3067,7 +3337,132 @@ def a_compiler_alias(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ) -> None:
     """Alias de la commande `remaining`."""
-    remaining_command(mode=mode, set_name=set_name, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+    remaining_command(mode=mode, set_name=set_name, sets=sets, ignore_standard=ignore_standard, ids=ids, ids_file=ids_file, reasoned=reasoned, details=details, quiet=quiet)
+
+
+def _download_raw_cards_with_progress(
+    fetcher: TCGdexFetcher,
+    target_raw_ids: List[str],
+    force_raw: bool = False,
+    concurrency: int = 5,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Télécharge et met en cache les fiches détaillées `raw_tcgdex/{id}.json` avec barre de progression Rich."""
+    if limit is not None and limit > 0:
+        target_raw_ids = target_raw_ids[:limit]
+
+    already_cached_initial = sum(1 for cid in target_raw_ids if (fetcher.raw_dir / f"{cid}.json").exists())
+    to_download_est = len(target_raw_ids) - already_cached_initial if not force_raw else len(target_raw_ids)
+
+    console.print(
+        f"\n[bold cyan]⚡ Téléchargement des fiches détaillées dans [yellow]{fetcher.raw_dir}/[/yellow] "
+        f"({len(target_raw_ids)} carte(s) ciblée(s), ~{to_download_est} à télécharger, {already_cached_initial} déjà en cache)...[/bold cyan]"
+    )
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("[cyan]Mise en cache raw_tcgdex...", total=len(target_raw_ids))
+
+        def on_progress(cid: str, cname: str, newly_downloaded: bool, err_msg: Optional[str]) -> None:
+            if err_msg:
+                status_lbl = f"[bold red]ÉCHEC ({err_msg})[/bold red]"
+            elif newly_downloaded:
+                status_lbl = f"[bold green]Téléchargée ✓[/bold green]"
+            else:
+                status_lbl = f"[dim blue]En cache[/dim blue]"
+            progress.update(
+                task_id,
+                advance=1,
+                description=f"[cyan]Fiche [bold]{cid}[/bold] ({cname[:20]}) : {status_lbl}",
+            )
+
+        async def _do_download():
+            return await fetcher.download_raw_cards(
+                card_ids=target_raw_ids,
+                force=force_raw,
+                concurrency=concurrency,
+                progress_callback=on_progress,
+            )
+
+        stats = asyncio.run(_do_download())
+
+    speed = stats["downloaded"] / stats["elapsed_seconds"] if stats["elapsed_seconds"] > 0 else 0
+    fail_style = "bold red" if stats["failed"] > 0 else "bold green"
+    console.print(
+        Panel.fit(
+            f"• [bold]Cartes ciblées[/bold] : [bold]{stats['total']}[/bold]\n"
+            f"• [bold]Nouvelles fiches téléchargées[/bold] : [bold green]{stats['downloaded']}[/bold green]"
+            + (f" ({speed:.1f} cartes/s)" if stats["downloaded"] > 0 else "") + "\n"
+            f"• [bold]Fiches déjà en cache (réutilisées)[/bold] : [bold blue]{stats['cached']}[/bold blue]\n"
+            f"• [bold]Échecs de téléchargement[/bold] : [{fail_style}]{stats['failed']}[/{fail_style}]\n"
+            f"• [bold]Temps total d'exécution[/bold] : [cyan]{stats['elapsed_seconds']:.2f}s[/cyan]\n"
+            f"• [bold]Répertoire de stockage[/bold] : [cyan]{fetcher.raw_dir}[/cyan]",
+            title="[bold green]✓ Mise à Jour du Cache raw_tcgdex Terminée[/bold green]",
+            border_style="green",
+        )
+    )
+
+    if stats["failed_cards"]:
+        err_table = Table(title="Détail des Cartes en Échec", style="red")
+        err_table.add_column("ID Carte", style="bold yellow")
+        err_table.add_column("Détail de l'Erreur", style="white")
+        for cid, emsg in list(stats["failed_cards"].items())[:20]:
+            err_table.add_row(cid, emsg)
+        console.print(err_table)
+
+    return stats
+
+
+def _render_sets_summary(
+    distinct_ids: List[str],
+    provider: FetcherProvider,
+    title: str,
+    desc: str,
+    target_file_or_sets: str,
+    show_table: bool = True,
+) -> None:
+    """Affiche le récapitulatif par extension d'une liste d'identifiants résolus."""
+    by_set: Counter[str] = Counter()
+    for cid in distinct_ids:
+        prefix = cid.split("-")[0].lower() if "-" in cid else "autres"
+        by_set[prefix] += 1
+
+    console.print(
+        Panel.fit(
+            f"• [bold]{desc}[/bold] : [bold green]{len(distinct_ids)}[/bold green]\n"
+            f"• [bold]Nombre d'extensions représentées[/bold] : [bold cyan]{len(by_set)}[/bold cyan] sets\n"
+            f"• [bold]Fournisseur utilisé[/bold] : [magenta]{provider.value.upper()}[/magenta] ({'SDK officiel tcgdex-sdk' if provider == FetcherProvider.sdk else 'HTTP REST httpx'})\n"
+            f"• [bold]Source / Cible[/bold] : [cyan]{target_file_or_sets}[/cyan]",
+            title=title,
+            border_style="green",
+        )
+    )
+
+    if by_set and show_table:
+        table = Table(
+            title=f"Répartition par Extension ({len(by_set)} sets répertoriés)",
+            header_style="bold cyan",
+            show_lines=False,
+        )
+        table.add_column("Code Set", style="bold yellow")
+        table.add_column("Nom de l'Extension", style="white")
+        table.add_column("Nombre de Cartes", justify="right", style="green")
+
+        for s_code, cnt in by_set.most_common(25):
+            s_name = SV_SET_NAMES.get(s_code, s_code.upper())
+            table.add_row(s_code, s_name, str(cnt))
+
+        if len(by_set) > 25:
+            table.add_row("...", f"et {len(by_set) - 25} autre(s) extension(s)", "...")
+
+        console.print(table)
 
 
 @app.command("fetch-cards")
@@ -3106,6 +3501,13 @@ def fetch_cards_command(
         "-f",
         help="Chemin vers un fichier texte contenant une liste d'identifiants de cartes (un par ligne, déduplication automatique).",
     ),
+    sets: Optional[str] = typer.Option(
+        None,
+        "--sets",
+        "--set",
+        "-s",
+        help="Un ou plusieurs codes d'extension à récupérer (ex: 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
+    ),
     limit: Optional[int] = typer.Option(
         None,
         "--limit",
@@ -3136,7 +3538,7 @@ def fetch_cards_command(
         help="Force le re-téléchargement des fiches individuelles même si data/raw_tcgdex/{card_id}.json existe déjà sur le disque.",
     ),
 ) -> None:
-    """Récupère et met à jour depuis l'API TCGdex la liste officielle des cartes (Standard légales ou index global) et télécharge les fiches détaillées dans raw_tcgdex."""
+    """Récupère et met à jour depuis l'API TCGdex la liste officielle des cartes (Standard légales, sets ciblés, ou index global) et télécharge les fiches détaillées dans raw_tcgdex."""
     data_dir = get_data_dir()
     fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
     effective_mode = "all" if all_flag else ("standard" if standard_flag else mode.lower().strip())
@@ -3148,13 +3550,31 @@ def fetch_cards_command(
 
     # Si l'utilisateur fournit des IDs spécifiques ou un fichier d'IDs, on active automatiquement le mode raw
     explicit_ids = resolve_card_ids(ids=ids, ids_file=ids_file)
+    parsed_sets = parse_set_codes(sets)
     effective_raw = raw or (explicit_ids is not None and len(explicit_ids) > 0)
 
-    # 1. Récupération / Mise à jour de l'index si nécessaire (mode global ou Standard)
+    # 1. Récupération / Mise à jour de l'index si nécessaire (sets ciblés, mode global ou Standard)
     cards: List[Dict[str, Any]] = []
     distinct_ids: List[str] = []
 
-    if explicit_ids is None:
+    if explicit_ids is None and parsed_sets:
+        with console.status(
+            f"[bold blue]Résolution des extensions {', '.join(s.upper() for s in parsed_sets)} (legal.standard ignoré) via {provider.value.upper()}...[/bold blue]"
+        ):
+            async def _fetch_sets():
+                async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, headers=headers, follow_redirects=True) as client:
+                    return await fetcher.resolve_set_card_ids(client, set_ids=parsed_sets, force=force)
+            distinct_ids = asyncio.run(_fetch_sets())
+
+        _render_sets_summary(
+            distinct_ids=distinct_ids,
+            provider=provider,
+            title="[bold green]Résolution des Extensions TCGdex (legal.standard ignoré)[/bold green]",
+            desc="Cartes trouvées dans les extensions ciblées",
+            target_file_or_sets=", ".join(s.upper() for s in parsed_sets),
+            show_table=not effective_raw,
+        )
+    elif explicit_ids is None:
         if effective_mode == "all":
             with console.status(f"[bold blue]Téléchargement de l'index global TCGdex via {provider.value.upper()}...[/bold blue]"):
                 async def _fetch():
@@ -3220,79 +3640,113 @@ def fetch_cards_command(
     # 2. Si option --raw demandée (ou IDs spécifiques), télécharger les fiches individuelles dans data/raw_tcgdex/{id}.json
     if effective_raw:
         target_raw_ids = explicit_ids if explicit_ids is not None else distinct_ids
-        if limit is not None and limit > 0:
-            target_raw_ids = target_raw_ids[:limit]
-
-        already_cached_initial = sum(1 for cid in target_raw_ids if (fetcher.raw_dir / f"{cid}.json").exists())
-        to_download_est = len(target_raw_ids) - already_cached_initial if not force_raw else len(target_raw_ids)
-
-        console.print(
-            f"\n[bold cyan]⚡ Téléchargement des fiches détaillées dans [yellow]{fetcher.raw_dir}/[/yellow] "
-            f"({len(target_raw_ids)} carte(s) ciblée(s), ~{to_download_est} à télécharger, {already_cached_initial} déjà en cache)...[/bold cyan]"
+        _download_raw_cards_with_progress(
+            fetcher=fetcher,
+            target_raw_ids=target_raw_ids,
+            force_raw=force_raw,
+            concurrency=concurrency,
+            limit=limit,
         )
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-        ) as progress:
-            task_id = progress.add_task("[cyan]Mise en cache raw_tcgdex...", total=len(target_raw_ids))
-
-            def on_progress(cid: str, cname: str, newly_downloaded: bool, err_msg: Optional[str]) -> None:
-                if err_msg:
-                    status_lbl = f"[bold red]ÉCHEC ({err_msg})[/bold red]"
-                elif newly_downloaded:
-                    status_lbl = f"[bold green]Téléchargée ✓[/bold green]"
-                else:
-                    status_lbl = f"[dim blue]En cache[/dim blue]"
-                progress.update(
-                    task_id,
-                    advance=1,
-                    description=f"[cyan]Fiche [bold]{cid}[/bold] ({cname[:20]}) : {status_lbl}",
-                )
-
-            async def _do_download():
-                return await fetcher.download_raw_cards(
-                    card_ids=target_raw_ids,
-                    force=force_raw,
-                    concurrency=concurrency,
-                    progress_callback=on_progress,
-                )
-
-            stats = asyncio.run(_do_download())
-
-        speed = stats["downloaded"] / stats["elapsed_seconds"] if stats["elapsed_seconds"] > 0 else 0
-        fail_style = "bold red" if stats["failed"] > 0 else "bold green"
-        console.print(
-            Panel.fit(
-                f"• [bold]Cartes ciblées[/bold] : [bold]{stats['total']}[/bold]\n"
-                f"• [bold]Nouvelles fiches téléchargées[/bold] : [bold green]{stats['downloaded']}[/bold green]"
-                + (f" ({speed:.1f} cartes/s)" if stats["downloaded"] > 0 else "") + "\n"
-                f"• [bold]Fiches déjà en cache (réutilisées)[/bold] : [bold blue]{stats['cached']}[/bold blue]\n"
-                f"• [bold]Échecs de téléchargement[/bold] : [{fail_style}]{stats['failed']}[/{fail_style}]\n"
-                f"• [bold]Temps total d'exécution[/bold] : [cyan]{stats['elapsed_seconds']:.2f}s[/cyan]\n"
-                f"• [bold]Répertoire de stockage[/bold] : [cyan]{fetcher.raw_dir}[/cyan]",
-                title="[bold green]✓ Mise à Jour du Cache raw_tcgdex Terminée[/bold green]",
-                border_style="green",
-            )
-        )
-
-        if stats["failed_cards"]:
-            err_table = Table(title="Détail des Cartes en Échec", style="red")
-            err_table.add_column("ID Carte", style="bold yellow")
-            err_table.add_column("Détail de l'Erreur", style="white")
-            for cid, emsg in list(stats["failed_cards"].items())[:20]:
-                err_table.add_row(cid, emsg)
-            console.print(err_table)
     else:
         console.print(
             "\n[dim]💡 Astuce : Pour télécharger également les fiches détaillées de chaque carte dans data/raw_tcgdex/{id}.json,\n"
-            "   ajoutez l'option [cyan]--raw[/cyan] (ex: [cyan]python -m compiler.cli fetch-cards --raw[/cyan] ou [cyan]-f data/target_ids.txt[/cyan]).[/dim]"
+            "   ajoutez l'option [cyan]--raw[/cyan] (ex: [cyan]python -m compiler.cli fetch-cards --raw[/cyan] ou [cyan]fetch-sets <set1> <set2>[/cyan]).[/dim]"
         )
+
+
+@app.command("fetch-sets")
+def fetch_sets_command(
+    sets: List[str] = typer.Argument(
+        ...,
+        help="Un ou plusieurs codes d'extension à récupérer depuis TCGdex (ex: 'me05 me06' ou 'me05,me06' ou 'DLR'), en ignorant legal.standard.",
+    ),
+    raw: bool = typer.Option(
+        True,
+        "--raw/--no-raw",
+        help="Télécharge et enregistre chaque fiche détaillée dans data/raw_tcgdex/{card_id}.json (True par défaut).",
+    ),
+    force_raw: bool = typer.Option(
+        False,
+        "--force-raw",
+        help="Force le re-téléchargement même si data/raw_tcgdex/{card_id}.json existe déjà.",
+    ),
+    concurrency: int = typer.Option(
+        5,
+        "--concurrency",
+        "-j",
+        help="Nombre de téléchargements simultanés.",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        "-l",
+        help="Nombre maximum de fiches individuelles à télécharger.",
+    ),
+    provider: FetcherProvider = typer.Option(
+        FetcherProvider.sdk,
+        "--provider",
+        "-p",
+        envvar=["TCGDEX_PROVIDER"],
+        help="Fournisseur d'accès TCGdex ('sdk' ou 'rest').",
+    ),
+    out_file: Optional[Path] = typer.Option(
+        None,
+        "--out-file",
+        "-o",
+        help="Enregistre la liste d'IDs résolus dans un fichier texte (compatible avec -f / --ids-file).",
+    ),
+) -> None:
+    """Récupère les cartes d'un ou plusieurs sets TCGdex en ignorant `legal.standard` (et télécharge les fiches raw_tcgdex)."""
+    parsed_sets = parse_set_codes(sets)
+    if not parsed_sets:
+        console.print("[bold red]✗ Veuillez indiquer au moins un code d'extension.[/bold red]")
+        raise typer.Exit(code=1)
+
+    data_dir = get_data_dir()
+    fetcher = TCGdexFetcher(data_dir=data_dir, provider=provider)
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "pokemon-tcg-card-compiler/0.1.0",
+    }
+
+    try:
+        with console.status(
+            f"[bold blue]Résolution des extensions {', '.join(s.upper() for s in parsed_sets)} (legal.standard ignoré) via {provider.value.upper()}...[/bold blue]"
+        ):
+            async def _fetch_sets():
+                async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, headers=headers, follow_redirects=True) as client:
+                    return await fetcher.resolve_set_card_ids(client, set_ids=parsed_sets, force=True)
+            distinct_ids = asyncio.run(_fetch_sets())
+    except Exception as e:
+        console.print(f"[bold red]✗ Erreur lors de la résolution des extensions :[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    _render_sets_summary(
+        distinct_ids=distinct_ids,
+        provider=provider,
+        title="[bold green]Résolution des Extensions TCGdex (legal.standard ignoré)[/bold green]",
+        desc="Cartes trouvées dans les extensions ciblées",
+        target_file_or_sets=", ".join(s.upper() for s in parsed_sets),
+        show_table=True,
+    )
+
+    if out_file is not None:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text("\n".join(distinct_ids) + "\n", encoding="utf-8")
+        console.print(f"[green]✓ Liste des {len(distinct_ids)} ID(s) enregistrée dans [cyan]{out_file}[/cyan].[/green]")
+
+    if raw and distinct_ids:
+        _download_raw_cards_with_progress(
+            fetcher=fetcher,
+            target_raw_ids=distinct_ids,
+            force_raw=force_raw,
+            concurrency=concurrency,
+            limit=limit,
+        )
+
+    console.print(
+        f"\n[dim]💡 Pour compiler ces extensions maintenant : [cyan]python -m compiler.cli compile-sets {' '.join(parsed_sets)}[/cyan][/dim]"
+    )
 
 
 @app.command("update-cards")
@@ -3303,6 +3757,7 @@ def update_cards_alias(
     raw: bool = typer.Option(False, "--raw", "--download-raw", "--cache-raw"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    sets: Optional[str] = typer.Option(None, "--sets", "--set", "-s"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l"),
     concurrency: int = typer.Option(5, "--concurrency", "-j"),
     provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
@@ -3317,6 +3772,7 @@ def update_cards_alias(
         raw=raw,
         ids=ids,
         ids_file=ids_file,
+        sets=sets,
         limit=limit,
         concurrency=concurrency,
         provider=provider,
@@ -3332,6 +3788,7 @@ def fetch_raw_alias(
     all_flag: bool = typer.Option(False, "--all"),
     ids: Optional[str] = typer.Option(None, "--ids"),
     ids_file: Optional[Path] = typer.Option(None, "--ids-file", "-f"),
+    sets: Optional[str] = typer.Option(None, "--sets", "--set", "-s"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l"),
     concurrency: int = typer.Option(5, "--concurrency", "-j"),
     provider: FetcherProvider = typer.Option(FetcherProvider.sdk, "--provider", "-p"),
@@ -3346,6 +3803,7 @@ def fetch_raw_alias(
         raw=True,
         ids=ids,
         ids_file=ids_file,
+        sets=sets,
         limit=limit,
         concurrency=concurrency,
         provider=provider,
@@ -3375,6 +3833,7 @@ def cache_raw_alias(
         raw=True,
         ids=ids,
         ids_file=ids_file,
+        sets=None,
         limit=limit,
         concurrency=concurrency,
         provider=provider,
@@ -3405,6 +3864,7 @@ def refresh_cards_alias(
         raw=raw,
         ids=ids,
         ids_file=ids_file,
+        sets=None,
         limit=limit,
         concurrency=concurrency,
         provider=provider,
@@ -3435,6 +3895,7 @@ def fetch_index_alias(
         raw=raw,
         ids=ids,
         ids_file=ids_file,
+        sets=None,
         limit=limit,
         concurrency=concurrency,
         provider=provider,
@@ -3465,6 +3926,7 @@ def update_index_alias(
         raw=raw,
         ids=ids,
         ids_file=ids_file,
+        sets=None,
         limit=limit,
         concurrency=concurrency,
         provider=provider,

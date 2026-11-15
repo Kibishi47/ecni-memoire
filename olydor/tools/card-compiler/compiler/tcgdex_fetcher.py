@@ -20,7 +20,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import httpx
 
@@ -39,6 +39,86 @@ from compiler.schemas import (
 )
 
 TCGDEX_API_BASE = "https://api.tcgdex.net/v2"
+
+PTCGL_SET_CODE_ALIASES: Dict[str, str] = {
+    "MEG": "me01",
+    "ME01": "me01",
+    "ME1": "me01",
+    "PFL": "me02",
+    "PFF": "me02",
+    "ME02": "me02",
+    "ME2": "me02",
+    "ASC": "me02.5",
+    "HER": "me02.5",
+    "ME02.5": "me02.5",
+    "ME2.5": "me02.5",
+    "POR": "me03",
+    "ORP": "me03",
+    "ME03": "me03",
+    "ME3": "me03",
+    "CRI": "me04",
+    "CHA": "me04",
+    "ME04": "me04",
+    "ME4": "me04",
+    "PBL": "me05",
+    "DKN": "me05",
+    "PIT": "me05",
+    "ME05": "me05",
+    "ME5": "me05",
+    "SVI": "sv01",
+    "SV1": "sv01",
+    "PAL": "sv02",
+    "SV2": "sv02",
+    "OBF": "sv03",
+    "SV3": "sv03",
+    "MEW": "sv03.5",
+    "151": "sv03.5",
+    "SV3.5": "sv03.5",
+    "PAR": "sv04",
+    "SV4": "sv04",
+    "PAF": "sv04.5",
+    "SV4.5": "sv04.5",
+    "TEF": "sv05",
+    "SV5": "sv05",
+    "TWM": "sv06",
+    "SV6": "sv06",
+    "SFA": "sv06.5",
+    "SV6.5": "sv06.5",
+    "SCR": "sv07",
+    "SV7": "sv07",
+    "SSP": "sv08",
+    "SV8": "sv08",
+    "PRE": "sv08.5",
+    "SV8.5": "sv08.5",
+    "JTG": "sv09",
+    "SV9": "sv09",
+    "DRI": "sv10",
+    "SV10": "sv10",
+    "WHT": "sv10.5w",
+    "BLK": "sv10.5b",
+    "PR-SV": "svp",
+    "SVE": "sve",
+    "MEE": "mee",
+    "MEP": "mep",
+    "30C": "30th",
+    "30TH": "30th",
+}
+
+
+def parse_set_codes(sets: Optional[Union[str, List[str]]]) -> List[str]:
+    """Normalise un ou plusieurs codes d'extension (séparés par virgules, espaces ou liste) en liste dédupliquée."""
+    if not sets:
+        return []
+    raw_items = [sets] if isinstance(sets, str) else list(sets)
+    parsed: List[str] = []
+    for item in raw_items:
+        if not item:
+            continue
+        for token in str(item).replace(",", " ").split():
+            cleaned = token.strip()
+            if cleaned:
+                parsed.append(cleaned)
+    return list(dict.fromkeys(parsed))
 
 
 class FetcherProvider(str, Enum):
@@ -647,10 +727,181 @@ class TCGdexFetcher:
             return unique_ids[:limit]
         return unique_ids
 
+    async def _fetch_set_payload(
+        self,
+        client: httpx.AsyncClient,
+        set_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Récupère les métadonnées et la liste des cartes d'un set TCGdex (en ignorant legal.standard)."""
+        encoded_id = urllib.parse.quote(set_id, safe="")
+
+        if self.provider == FetcherProvider.sdk:
+            for sdk_instance in (self._sdk_fr, self._sdk_en):
+                if sdk_instance is None:
+                    continue
+                try:
+                    set_obj = await asyncio.to_thread(sdk_instance.set.getSync, set_id)
+                    if set_obj is not None:
+                        cleaned = _clean_tcgdex_dict(asdict(set_obj))
+                        if isinstance(cleaned, dict) and cleaned.get("cards"):
+                            return cleaned
+                except Exception:
+                    pass
+
+        for lang in ("fr", "en"):
+            url = f"{TCGDEX_API_BASE}/{lang}/sets/{encoded_id}"
+            try:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, dict) and payload.get("cards"):
+                    return payload
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    continue
+                raise
+            except Exception:
+                continue
+
+        return None
+
+    async def _fetch_sets_catalog(
+        self,
+        client: httpx.AsyncClient,
+    ) -> List[Dict[str, Any]]:
+        """Récupère la liste complète des extensions disponibles sur TCGdex (SDK puis REST)."""
+        if self.provider == FetcherProvider.sdk:
+            for sdk_instance in (self._sdk_fr, self._sdk_en):
+                if sdk_instance is None:
+                    continue
+                try:
+                    sets_list = await asyncio.to_thread(sdk_instance.set.listSync)
+                    if sets_list and isinstance(sets_list, list):
+                        return [
+                            _clean_tcgdex_dict(asdict(s))
+                            for s in sets_list
+                            if hasattr(s, "id")
+                        ]
+                except Exception:
+                    pass
+
+        for lang in ("fr", "en"):
+            url = f"{TCGDEX_API_BASE}/{lang}/sets"
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, list) and payload:
+                    return [entry for entry in payload if isinstance(entry, dict)]
+            except Exception:
+                continue
+
+        return []
+
+    async def resolve_set_card_ids(
+        self,
+        client: httpx.AsyncClient,
+        set_ids: List[str],
+        limit: Optional[int] = None,
+        force: bool = False,
+    ) -> List[str]:
+        """Résout tous les identifiants de cartes d'un ou plusieurs sets en ignorant `legal.standard`.
+
+        Interroge directement l'endpoint `/sets/{id}` de TCGdex (SDK puis REST FR/EN),
+        avec résolution d'alias PTCGL/abréviations et repli sur l'index global `_cards_index.json`.
+        """
+        requested_sets = parse_set_codes(set_ids)
+        if not requested_sets:
+            return []
+
+        resolved_ids: List[str] = []
+        catalog_cache: Optional[List[Dict[str, Any]]] = None
+        global_index_cache: Optional[List[Dict[str, Any]]] = None
+
+        for raw_set in requested_sets:
+            s_lower = raw_set.lower()
+            s_upper = raw_set.upper()
+            candidates: List[str] = [raw_set]
+            if s_lower not in candidates:
+                candidates.append(s_lower)
+            mapped_alias = PTCGL_SET_CODE_ALIASES.get(s_upper)
+            if mapped_alias and mapped_alias not in candidates:
+                candidates.append(mapped_alias)
+
+            found_for_set: List[str] = []
+
+            for cand in candidates:
+                payload = await self._fetch_set_payload(client, cand)
+                if payload and isinstance(payload.get("cards"), list):
+                    for card_entry in payload["cards"]:
+                        if isinstance(card_entry, dict) and card_entry.get("id"):
+                            found_for_set.append(str(card_entry["id"]).strip())
+                    if found_for_set:
+                        break
+
+            # Si non trouvé directement, recherche via le catalogue complet des sets TCGdex (id / tcgOnline / abbreviation / nom)
+            if not found_for_set:
+                if catalog_cache is None:
+                    catalog_cache = await self._fetch_sets_catalog(client)
+                matched_set_id: Optional[str] = None
+                for s_entry in catalog_cache:
+                    entry_id = str(s_entry.get("id") or "").strip()
+                    tcg_online = str(s_entry.get("tcgOnline") or "").strip()
+                    entry_name = str(s_entry.get("name") or "").strip()
+                    abbr = s_entry.get("abbreviations") if isinstance(s_entry.get("abbreviations"), dict) else {}
+                    abbr_vals = [str(v).strip().lower() for v in abbr.values() if v]
+                    if (
+                        entry_id.lower() == s_lower
+                        or (tcg_online and tcg_online.lower() == s_lower)
+                        or s_lower in abbr_vals
+                        or (entry_name and entry_name.lower() == s_lower)
+                    ):
+                        matched_set_id = entry_id
+                        break
+
+                if matched_set_id:
+                    payload = await self._fetch_set_payload(client, matched_set_id)
+                    if payload and isinstance(payload.get("cards"), list):
+                        for card_entry in payload["cards"]:
+                            if isinstance(card_entry, dict) and card_entry.get("id"):
+                                found_for_set.append(str(card_entry["id"]).strip())
+
+            # Repli final sur l'index global _cards_index.json (préfixe '{set}-')
+            if not found_for_set:
+                if global_index_cache is None:
+                    try:
+                        global_index_cache = await self.fetch_cards_index(client, force=force)
+                    except Exception:
+                        global_index_cache = []
+                prefix_candidates = [c.lower() for c in candidates]
+                for entry in global_index_cache:
+                    if not isinstance(entry, dict) or not entry.get("id"):
+                        continue
+                    cid = str(entry["id"]).strip()
+                    cid_lower = cid.lower()
+                    if any(cid_lower.startswith(f"{p}-") for p in prefix_candidates):
+                        found_for_set.append(cid)
+
+            if not found_for_set:
+                raise ValueError(
+                    f"Extension introuvable ou vide sur TCGdex : '{raw_set}'. "
+                    "Vérifiez le code TCGdex (ex: 'me05', 'sv10', 'sv08.5') ou la connectivité réseau."
+                )
+
+            resolved_ids.extend(found_for_set)
+
+        unique_ids = list(dict.fromkeys(resolved_ids))
+        if limit is not None and limit > 0:
+            return unique_ids[:limit]
+        return unique_ids
+
     async def fetch_batch(
         self,
         mode: str = "test",
         custom_ids: Optional[List[str]] = None,
+        set_ids: Optional[List[str]] = None,
         force: bool = False,
         standard_limit: Optional[int] = None,
     ) -> List[FetchedCardBundle]:
@@ -659,13 +910,25 @@ class TCGdexFetcher:
             "Accept": "application/json",
             "User-Agent": "pokemon-tcg-card-compiler/0.1.0",
         }
+        parsed_sets = parse_set_codes(set_ids)
         async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers, follow_redirects=True) as client:
             # Étape 1 : Liste globale systématiquement assurée dans data/raw_tcgdex/_cards_index.json
-            await self.fetch_cards_index(client, force=False)
+            try:
+                await self.fetch_cards_index(client, force=False)
+            except Exception:
+                if not custom_ids and not parsed_sets:
+                    raise
 
             # Détermination des IDs cibles selon le mode
             if custom_ids:
                 target_ids = [cid.strip() for cid in custom_ids if cid.strip()]
+            elif parsed_sets:
+                target_ids = await self.resolve_set_card_ids(
+                    client,
+                    set_ids=parsed_sets,
+                    limit=standard_limit,
+                    force=force,
+                )
             elif mode == "standard":
                 target_ids = await self.resolve_standard_card_ids(client, limit=standard_limit)
             else:
@@ -678,7 +941,7 @@ class TCGdexFetcher:
                 async with semaphore:
                     try:
                         bundle = await self.fetch_card_by_id(client, cid, force=force)
-                        if mode == "standard" and not bundle.identity.legalStandard:
+                        if mode == "standard" and not custom_ids and not parsed_sets and not bundle.identity.legalStandard:
                             return None
                         return bundle
                     except Exception:
