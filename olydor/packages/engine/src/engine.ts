@@ -2037,7 +2037,7 @@ export function startTurn(state: MatchState): { drawnCard: EngineCardModel | nul
 }
 
 /**
- * Injecte une perturbation de test (Mode Debug `?debug=true`) au début d'un tour donné.
+ * Injecte une perturbation de simulation configurée au début d'un tour donné.
  */
 export function applyDebugPerturbationIfConfigured(
   state: MatchState,

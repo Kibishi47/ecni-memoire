@@ -133,14 +133,14 @@ function closeCardZoom() {
             type="button"
             :disabled="!localText.trim() || Boolean(isResolving)"
             @click="handleValidateClick"
-            class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-900 bg-[#ff6b00] py-3 text-sm font-bold text-white shadow-xs transition hover:bg-[#ff8a00] disabled:cursor-not-allowed disabled:bg-[#263044] disabled:border-[#263044]"
+            class="flex w-full items-center justify-center gap-2 rounded-xl border border-[#ff6b00] bg-[#ff6b00] py-3 text-sm font-bold text-white shadow-xs transition hover:bg-[#ff8a00] disabled:cursor-not-allowed disabled:bg-[#263044] disabled:border-[#263044] disabled:text-[#8a93a2]"
           >
             <span
               v-if="isResolving"
               class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
             ></span>
             <span>{{ isResolving ? t('resolvingDeckApi') : t('importButton') }}</span>
-            <span v-if="!isResolving && localText.trim()" class="rounded bg-[#131823]/20 px-2 py-0.5 text-xs">
+            <span v-if="!isResolving && localText.trim()" class="rounded bg-black/25 px-2 py-0.5 text-xs text-white">
               {{ validatedDeck.totalCards }} / 60
             </span>
           </button>
@@ -185,8 +185,8 @@ function closeCardZoom() {
             validatedDeck.totalCards === 0
               ? 'border-[#263044] bg-[#131823]'
               : validatedDeck.isValid60 && validatedDeck.isFullyResolved
-                ? 'border-emerald-500/35 bg-emerald-950/45/70 text-emerald-100'
-                : 'border-amber-500/35 bg-amber-950/45/70 text-amber-100',
+                ? 'border-emerald-500/45 bg-emerald-950/45 text-emerald-100'
+                : 'border-red-500/45 bg-red-950/45 text-red-100',
           ]"
         >
           <div class="flex flex-wrap items-center justify-between gap-3">
@@ -198,7 +198,7 @@ function closeCardZoom() {
                     ? 'bg-[#1b2232] text-[#8a93a2]'
                     : validatedDeck.isValid60 && validatedDeck.isFullyResolved
                       ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-amber-950/450 text-white shadow-xs',
+                      : 'bg-red-600 text-white shadow-xs',
                 ]"
               >
                 <svg v-if="validatedDeck.isValid60 && validatedDeck.isFullyResolved" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -256,7 +256,7 @@ function closeCardZoom() {
                 :key="unres.uid"
                 type="button"
                 @click="openCardZoomList(validatedDeck.unresolvedCards, uIdx)"
-                class="flex items-center gap-2 rounded-lg border border-red-500/35 bg-[#131823] p-1.5 text-xs text-red-200 shadow-2xs transition hover:border-red-400 hover:bg-red-950/45/40"
+                class="flex items-center gap-2 rounded-lg border border-red-500/35 bg-[#131823] p-1.5 text-xs text-red-200 shadow-2xs transition hover:border-red-400 hover:bg-red-950/60"
                 :title="t('clickToEnlarge')"
               >
                 <CardFanThumbnail :cards="[unres]" size="sm" @select="openCardZoomList(validatedDeck.unresolvedCards, uIdx)" />
@@ -291,8 +291,8 @@ function closeCardZoom() {
               class="rounded-lg border px-2.5 py-1 text-xs font-bold"
               :class="
                 validatedDeck.synergyAudit.every((s) => s.satisfied)
-                  ? 'border-emerald-500/35 bg-emerald-950/45 text-[#10b981]'
-                  : 'border-amber-500/35 bg-amber-950/45 text-[#f59e0b]'
+                  ? 'border-emerald-500/45 bg-emerald-950/45 text-emerald-300'
+                  : 'border-red-500/45 bg-red-950/45 text-red-300'
               "
             >
               {{ t('synergiesValidated', { done: validatedDeck.synergyAudit.filter((s) => s.satisfied).length, total: validatedDeck.synergyAudit.length }) }}
@@ -308,7 +308,7 @@ function closeCardZoom() {
               :class="[
                 item.satisfied
                   ? 'border-[#263044] bg-[#0c0f16]/60 hover:border-[#ff8a00]/60 hover:bg-[#1b2232]'
-                  : 'border-amber-500/35 bg-amber-950/35 hover:border-amber-400',
+                  : 'border-red-500/45 bg-red-950/30 hover:border-red-400',
                 getSynergyAuditCards(item).length > 0 ? 'cursor-pointer' : '',
               ]"
             >
@@ -330,7 +330,7 @@ function closeCardZoom() {
               </div>
               <span
                 class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
-                :class="item.satisfied ? 'bg-emerald-950/60 text-emerald-300' : 'bg-amber-950/60 text-amber-300'"
+                :class="item.satisfied ? 'bg-emerald-950/60 text-emerald-300' : 'bg-red-950/60 text-red-300'"
               >
                 {{ item.satisfied ? t('synergySatisfied') : t('synergyMissing') }}
               </span>
@@ -367,7 +367,7 @@ function closeCardZoom() {
                 <span class="rounded bg-[#ff6b00] px-1.5 py-0.5 font-bold text-white text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-[#ff6b00]">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 flex items-center gap-2 text-[11px] text-[#8a93a2]">
                 <span>{{ getLocalizedSubCategory(card.subCategory) }}</span>
@@ -401,10 +401,10 @@ function closeCardZoom() {
 
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="rounded bg-slate-800 px-1.5 py-0.5 font-bold text-white text-[11px]">
+                <span class="rounded border border-[#263044] bg-[#1b2232] px-1.5 py-0.5 font-bold text-[#f8fafc] text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-[#ff6b00]">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 text-[11px] text-[#8a93a2]">
                 {{ getLocalizedSubCategory(card.subCategory) }}
@@ -436,10 +436,10 @@ function closeCardZoom() {
 
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="rounded bg-slate-700 px-1.5 py-0.5 font-bold text-white text-[11px]">
+                <span class="rounded border border-[#263044] bg-[#1b2232] px-1.5 py-0.5 font-bold text-[#f8fafc] text-[11px]">
                   {{ card.quantity }}×
                 </span>
-                <span class="truncate font-bold text-[#f8fafc] group-hover:text-sky-100">{{ getLocalizedCardName(card) }}</span>
+                <span class="truncate font-bold text-[#f8fafc] group-hover:text-[#ff6b00]">{{ getLocalizedCardName(card) }}</span>
               </div>
               <div class="mt-1 text-[11px] text-[#8a93a2]">
                 {{ getLocalizedSubCategory(card.subCategory) }}

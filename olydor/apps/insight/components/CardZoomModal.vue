@@ -183,7 +183,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
 <template>
   <div
     v-if="isOpen && activeCard"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-2 sm:p-4 backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-2 sm:p-4 backdrop-blur-sm"
     @click.self="emit('close')"
   >
     <div class="relative flex w-full max-w-5xl items-center justify-center gap-2 sm:gap-4" @click.self="emit('close')">
@@ -234,13 +234,13 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           type="button"
           @click="emit('close')"
           :aria-label="t('closeModal')"
-          class="absolute right-3.5 top-3.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-[#8a93a2] transition hover:bg-slate-700 hover:text-white"
+          class="absolute right-3.5 top-3.5 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[#263044] bg-[#1b2232] text-[#8a93a2] transition hover:bg-[#263044] hover:text-[#f8fafc]"
         >
           ✕
         </button>
 
         <!-- Colonne Gauche : Visuel Haute Résolution + Sélecteur rapide multi-cartes -->
-        <div class="flex flex-col items-center justify-center gap-3 bg-slate-950 p-5 sm:w-5/12 sm:p-6">
+        <div class="flex flex-col items-center justify-center gap-3 border-b border-[#263044] bg-[#0c0f16] p-5 sm:w-5/12 sm:border-b-0 sm:border-r sm:p-6">
           <img
             v-if="getCardImageUrl(activeCard, 'high') && !highImgFailed"
             :src="getCardImageUrl(activeCard, 'high')!"
@@ -250,14 +250,14 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           />
           <div
             v-else
-            class="flex h-72 w-52 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 p-4 text-center font-mono text-sm text-[#8a93a2]"
+            class="flex h-72 w-52 items-center justify-center rounded-xl border border-[#263044] bg-[#131823] p-4 text-center font-mono text-sm text-[#8a93a2]"
           >
             {{ getLocalizedCardName(activeCard) }}
           </div>
 
           <!-- Navigation compacte multi-cartes sous l'image -->
           <div v-if="hasMultipleCards" class="flex flex-wrap items-center justify-center gap-1.5">
-            <span class="rounded-full bg-slate-800 px-2.5 py-0.5 font-mono text-[11px] font-bold text-indigo-300">
+            <span class="rounded-full border border-[#263044] bg-[#1b2232] px-2.5 py-0.5 font-mono text-[11px] font-bold text-indigo-300">
               {{ t('cardCounter', { current: activeIndex + 1, total: resolvedCards.length }) }}
             </span>
             <div class="flex flex-wrap justify-center gap-1">
@@ -266,11 +266,11 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                 :key="cIdx"
                 type="button"
                 @click="selectCardAt(cIdx)"
-                class="max-w-[130px] truncate rounded-md px-2 py-0.5 text-[10px] font-semibold transition"
+                class="max-w-[130px] truncate rounded-md border px-2 py-0.5 text-[10px] font-semibold transition"
                 :class="
                   cIdx === activeIndex
-                    ? 'bg-[#38bdf8] text-white'
-                    : 'bg-slate-800/80 text-[#8a93a2] hover:bg-slate-700 hover:text-white'
+                    ? 'border-[#ff6b00] bg-[#ff6b00] text-white'
+                    : 'border-[#263044] bg-[#131823] text-[#8a93a2] hover:bg-[#1b2232] hover:text-[#f8fafc]'
                 "
               >
                 {{ getLocalizedCardName(cItem) }}
@@ -293,12 +293,12 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
               >
                 {{ getCardHp(activeCard) }} {{ t('cardHp') }}
               </span>
-              <span v-if="hasMultipleCards" class="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-[#8a93a2]">
+              <span v-if="hasMultipleCards" class="rounded border border-[#263044] bg-[#1b2232] px-2 py-0.5 font-mono text-[10px] text-[#8a93a2]">
                 {{ t('cardCounter', { current: activeIndex + 1, total: resolvedCards.length }) }}
               </span>
             </div>
 
-            <h3 class="mt-2 text-2xl font-black text-white">
+            <h3 class="mt-2 text-2xl font-black text-[#f8fafc]">
               {{ getLocalizedCardName(activeCard) }}
             </h3>
 
@@ -308,15 +308,15 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           </div>
 
           <!-- BARRE DES 2 ONGLETS -->
-          <div class="mt-4 flex gap-1.5 border-b border-slate-800 pb-2.5">
+          <div class="mt-4 flex gap-1.5 border-b border-[#263044] pb-2.5">
             <button
               type="button"
               @click="activeTab = 'info'"
-              class="rounded-lg px-3.5 py-1.5 text-xs font-bold transition"
+              class="rounded-lg border px-3.5 py-1.5 text-xs font-bold transition"
               :class="
                 activeTab === 'info'
-                  ? 'bg-[#38bdf8] text-white shadow-xs'
-                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#1b2232] hover:text-white'
+                  ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-xs'
+                  : 'border-[#263044] bg-[#1b2232] text-[#8a93a2] hover:bg-[#263044] hover:text-[#f8fafc]'
               "
             >
               {{ t('tabCardInfo') }}
@@ -324,11 +324,11 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
             <button
               type="button"
               @click="activeTab = 'ai'"
-              class="rounded-lg px-3.5 py-1.5 text-xs font-bold transition"
+              class="rounded-lg border px-3.5 py-1.5 text-xs font-bold transition"
               :class="
                 activeTab === 'ai'
-                  ? 'bg-[#38bdf8] text-white shadow-xs'
-                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#1b2232] hover:text-white'
+                  ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-xs'
+                  : 'border-[#263044] bg-[#1b2232] text-[#8a93a2] hover:bg-[#263044] hover:text-[#f8fafc]'
               "
             >
               {{ t('tabCardAiLogic') }}
@@ -342,11 +342,11 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
               <h4 class="text-xs font-bold uppercase tracking-wider text-[#8a93a2]">
                 {{ t('rulesAndEffects') }}
               </h4>
-              <div class="space-y-2 text-xs leading-relaxed text-[#8a93a2]">
+              <div class="space-y-2 text-xs leading-relaxed text-[#f8fafc]">
                 <p
                   v-for="(rule, idx) in getLocalizedCardRules(activeCard)"
                   :key="idx"
-                  class="rounded-lg border border-slate-700/60 bg-slate-800/80 p-3 shadow-2xs"
+                  class="rounded-lg border border-[#263044] bg-[#0c0f16] p-3 shadow-2xs"
                 >
                   {{ rule }}
                 </p>
@@ -425,7 +425,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                           {{ phase.badge }} ({{ phase.pct }} %)
                         </span>
                       </div>
-                      <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-950">
+                      <div class="h-2 w-full overflow-hidden rounded-full bg-[#263044]">
                         <div
                           class="h-full rounded-full transition-all"
                           :class="
@@ -433,7 +433,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                               ? 'bg-emerald-500'
                               : phase.tier === 'medium'
                                 ? 'bg-sky-500'
-                                : 'bg-slate-600'
+                                : 'bg-slate-500'
                           "
                           :style="{ width: `${phase.pct}%` }"
                         ></div>
@@ -501,7 +501,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                     class="rounded-xl border border-slate-700/70 bg-slate-800/70 p-3.5 text-xs space-y-2"
                   >
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                      <div class="font-bold text-white">{{ act.title }}</div>
+                      <div class="font-bold text-[#f8fafc]">{{ act.title }}</div>
                       <span class="rounded bg-sky-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
                         {{ act.actionTypeLabel }}
                       </span>
@@ -626,7 +626,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
             <button
               type="button"
               @click="emit('close')"
-              class="w-full rounded-xl bg-slate-800 py-2.5 text-xs font-bold text-white transition hover:bg-slate-700"
+              class="w-full rounded-xl border border-[#263044] bg-[#1b2232] py-2.5 text-xs font-bold text-[#f8fafc] transition hover:bg-[#263044]"
             >
               {{ t('closeModal') }}
             </button>

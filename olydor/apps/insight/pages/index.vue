@@ -55,7 +55,6 @@ const resolvedUrls = computed(() =>
 setApiBaseUrl(resolvedUrls.value.apiUrl)
 
 const currentStep = ref<1 | 2 | 3>(1)
-const isDebugMode = ref<boolean>(false)
 const { t, currentLang } = useI18n()
 
 const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
@@ -83,7 +82,7 @@ const simConfig = ref<SimulationConfig>({
   selectedOpponentIds: [],
   firstPlayerMode: 'RANDOM',
   fixedSeed: null,
-  debugMode: false,
+  debugMode: true,
   perturbationType: 'NONE',
   perturbationTurn: 2,
   stressTestOhkoEachTurn: false,
@@ -116,10 +115,7 @@ const workerPool = new SimulationWorkerPool()
 
 function detectUrlParams() {
   if (typeof window === 'undefined') return
-  const params = new URLSearchParams(window.location.search)
-  const debugActive = params.get('debug') === 'true' || params.get('debug') === '1'
-  isDebugMode.value = debugActive
-  simConfig.value.debugMode = debugActive
+  simConfig.value.debugMode = true
 }
 
 async function applyInitialDeckFromUrl() {
@@ -248,7 +244,7 @@ function handleSelectStep(step: 1 | 2 | 3) {
 function handleUpdateConfig(updated: SimulationConfig) {
   simConfig.value = {
     ...updated,
-    debugMode: isDebugMode.value,
+    debugMode: true,
   }
 }
 
@@ -269,7 +265,7 @@ async function executeInitialSimulation() {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
     const rawDeck = toRaw(baselineDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
+    const rawConfig = { ...toRaw(simConfig.value), debugMode: true }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -359,7 +355,7 @@ async function executeComparisonSimulation() {
       throw new Error(metaError.value || t('noMetaDecksAvailable'))
     }
     const rawDeck = toRaw(editableDeck.value)
-    const rawConfig = { ...toRaw(simConfig.value), debugMode: isDebugMode.value }
+    const rawConfig = { ...toRaw(simConfig.value), debugMode: true }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
       JSON.parse(JSON.stringify(rawDeck)),
@@ -521,7 +517,6 @@ useSeoMeta({
       :current-step="currentStep"
       :can-go-step2="canGoStep2"
       :can-go-step3="canGoStep3"
-      :is-debug-mode="isDebugMode"
       :deck-total-cards="currentStep === 3 ? editableDeck.totalCards : baselineDeck.totalCards"
       @select-step="handleSelectStep"
     />
@@ -531,8 +526,8 @@ useSeoMeta({
       v-if="isSimulating"
       class="sticky top-16 z-30 border-b backdrop-blur"
       style="
-        border-color: rgba(255, 107, 0, 0.4);
-        background-color: rgba(19, 24, 35, 0.96);
+        border-color: rgba(255, 107, 0, 0.45);
+        background-color: var(--bg-navbar);
         box-shadow: var(--brand-glow);
       "
     >
@@ -562,7 +557,7 @@ useSeoMeta({
           </div>
 
           <div class="flex items-center gap-4 font-mono text-xs" style="color: var(--text-secondary)">
-            <span style="color: var(--brand-amber)">
+            <span class="font-bold" style="color: var(--brand-primary)">
               {{
                 t('simThroughputRate', {
                   rate: liveThroughput.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
@@ -599,7 +594,7 @@ useSeoMeta({
         style="background-color: var(--bg-surface); border-color: var(--border-subtle); color: var(--text-secondary)"
       >
         <span>{{ cancelNotice }}</span>
-        <button type="button" @click="cancelNotice = null" class="hover:text-white">
+        <button type="button" @click="cancelNotice = null" class="font-semibold text-[#f8fafc] hover:underline">
           {{ t('closeModal') }}
         </button>
       </div>
@@ -608,18 +603,16 @@ useSeoMeta({
     <!-- Bannière d'Erreur -->
     <div v-if="simulationError" class="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
       <div
-        class="flex items-center justify-between gap-3 rounded-xl border-2 p-4"
-        style="border-color: rgba(239, 68, 68, 0.55); background-color: rgba(127, 29, 29, 0.25); color: #fecaca"
+        class="flex items-center justify-between gap-3 rounded-xl border-2 border-red-500/55 bg-red-950/45 p-4 text-red-200"
       >
         <div>
           <div class="text-sm font-bold">{{ t('simulationErrorHeading') }}</div>
-          <div class="mt-0.5 font-mono text-xs opacity-90">{{ simulationError }}</div>
+          <div class="mt-0.5 font-mono text-xs">{{ simulationError }}</div>
         </div>
         <button
           type="button"
           @click="simulationError = null"
-          class="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
-          style="border-color: rgba(239, 68, 68, 0.5)"
+          class="rounded-lg border border-red-500/50 bg-[#131823] px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-950/60"
         >
           {{ t('closeAlert') }}
         </button>
@@ -642,7 +635,6 @@ useSeoMeta({
         v-else-if="currentStep === 2"
         :config="simConfig"
         :deck="baselineDeck"
-        :is-debug-mode="isDebugMode"
         :hardware-profile="hardwareProfile"
         :max-hardware-workers="maxHardwareWorkers"
         :meta-opponents="metaOpponents"
@@ -667,7 +659,6 @@ useSeoMeta({
         :progress-completed="progressCompleted"
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
-        :is-debug-mode="isDebugMode"
         :arena-url="resolvedUrls.arenaUrl"
         :deck-versions="deckVersions"
         :active-version-id="activeVersionId"

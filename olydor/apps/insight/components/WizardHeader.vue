@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Bug, Database } from 'lucide-vue-next'
+import { Database } from 'lucide-vue-next'
 import { isUsingOfflineCatalog } from '../services/apiClient'
 import { useI18n } from '../utils/i18n'
 
@@ -9,7 +9,6 @@ defineProps<{
   canGoStep2: boolean
   canGoStep3: boolean
   deckTotalCards: number
-  isDebugMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -46,36 +45,22 @@ const navSteps = computed(() => [
             currentStep === step.num
               ? 'background: var(--brand-gradient); color: #ffffff; border-color: transparent; box-shadow: var(--brand-glow)'
               : (step.num === 2 && !canGoStep2) || (step.num === 3 && !canGoStep3)
-                ? 'background-color: transparent; border-color: var(--border-subtle); color: var(--text-muted); cursor: not-allowed; opacity: 0.6'
-                : 'background-color: var(--bg-elevated); border-color: var(--border-subtle); color: var(--text-secondary)'
+                ? 'background-color: transparent; border-color: var(--border-subtle); color: var(--text-muted); cursor: not-allowed; opacity: 0.65'
+                : 'background-color: var(--bg-elevated); border-color: var(--border-subtle); color: var(--text-primary)'
           "
         >
           {{ step.label }}
         </button>
       </nav>
 
-      <!-- Statut technique (Debug / Offline) & Compteur Deck -->
+      <!-- Statut technique (Offline) & Compteur Deck -->
       <div class="flex items-center gap-2.5">
-        <span
-          v-if="isDebugMode"
-          class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-bold"
-          style="
-            border-color: rgba(245, 158, 11, 0.45);
-            background-color: rgba(245, 158, 11, 0.14);
-            color: var(--brand-primary);
-          "
-          title="Mode debug actif via ?debug=true"
-        >
-          <Bug class="h-3 w-3" />
-          {{ t('debugModeBadge') }}
-        </span>
-
         <span
           v-if="isUsingOfflineCatalog"
           class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold"
           style="
             border-color: rgba(56, 189, 248, 0.35);
-            background-color: rgba(56, 189, 248, 0.1);
+            background-color: rgba(56, 189, 248, 0.12);
             color: var(--ai-accent);
           "
           :title="t('offlineCatalogBanner')"
@@ -90,7 +75,9 @@ const navSteps = computed(() => [
           :style="
             deckTotalCards === 60
               ? 'border-color: rgba(16, 185, 129, 0.45); background-color: rgba(16, 185, 129, 0.14); color: var(--status-positive)'
-              : 'border-color: rgba(245, 158, 11, 0.45); background-color: rgba(245, 158, 11, 0.14); color: var(--brand-primary)'
+              : deckTotalCards > 0
+                ? 'border-color: rgba(239, 68, 68, 0.45); background-color: rgba(239, 68, 68, 0.14); color: var(--status-negative)'
+                : 'border-color: var(--border-subtle); background-color: var(--bg-elevated); color: var(--text-secondary)'
           "
         >
           {{ deckTotalCards }} / 60

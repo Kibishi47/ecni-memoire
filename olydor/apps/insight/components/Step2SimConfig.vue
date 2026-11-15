@@ -33,7 +33,6 @@ const props = defineProps<{
   metaError?: string | null
   isSimulating?: boolean
   progressPercent?: number
-  isDebugMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -185,6 +184,12 @@ function selectVolumePreset(id: StatisticalVolumePreset) {
 
 function selectAiPreset(id: AiIntelligencePreset) {
   patchConfig(computeAiIntelligence(id))
+}
+
+function rangePct(value: number, min: number, max: number): string {
+  if (max <= min) return '100%'
+  const pct = ((value - min) / (max - min)) * 100
+  return `${Math.min(100, Math.max(0, pct))}%`
 }
 
 function resetToHardwareRecommended() {
@@ -371,7 +376,7 @@ const launchButtonState = computed(() => {
             <span
               v-if="isCustomAdvancedActive"
               class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-              :class="activeConfigTab === 'advanced' ? 'bg-amber-400 text-[#f8fafc]' : 'bg-amber-950/60 text-amber-300'"
+              :class="activeConfigTab === 'advanced' ? 'bg-black/25 text-white' : 'bg-amber-950/60 text-amber-300'"
             >
               {{ t('advancedCustomBadge') }}
             </span>
@@ -410,7 +415,7 @@ const launchButtonState = computed(() => {
             class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
             :class="[
               activeCpuPreset === opt.id
-                ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+                ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
                 : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
             ]"
           >
@@ -418,17 +423,21 @@ const launchButtonState = computed(() => {
               <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
               <span
                 v-if="recommendedPresets.cpu === opt.id"
-                class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                :class="activeCpuPreset === opt.id ? 'bg-[#38bdf8] text-[#f8fafc]' : 'bg-sky-950/60 text-sky-200'"
+                class="rounded border border-[#38bdf8]/40 bg-sky-950/60 px-1.5 py-0.5 text-[10px] font-bold text-sky-200"
               >
                 {{ t('recommended') }}
               </span>
             </div>
             <div class="mt-2 flex items-center justify-between text-xs">
-              <span :class="activeCpuPreset === opt.id ? 'text-[#8a93a2]' : 'text-[#8a93a2]'">
+              <span class="text-[#8a93a2]">
                 {{ t(opt.descKey) }}
               </span>
-              <span class="font-mono font-bold">{{ opt.workerCount }} Workers</span>
+              <span
+                class="font-mono font-bold"
+                :class="activeCpuPreset === opt.id ? 'text-[#ff8a00]' : 'text-[#f8fafc]'"
+              >
+                {{ opt.workerCount }} Workers
+              </span>
             </div>
           </button>
         </div>
@@ -455,7 +464,7 @@ const launchButtonState = computed(() => {
             class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
             :class="[
               activeVolumePreset === opt.id
-                ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+                ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
                 : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
             ]"
           >
@@ -463,13 +472,12 @@ const launchButtonState = computed(() => {
               <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
               <span
                 v-if="recommendedPresets.volume === opt.id"
-                class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                :class="activeVolumePreset === opt.id ? 'bg-[#38bdf8] text-[#f8fafc]' : 'bg-sky-950/60 text-sky-200'"
+                class="rounded border border-[#38bdf8]/40 bg-sky-950/60 px-1.5 py-0.5 text-[10px] font-bold text-sky-200"
               >
                 {{ t('recommended') }}
               </span>
             </div>
-            <p class="mt-1.5 text-xs" :class="activeVolumePreset === opt.id ? 'text-[#8a93a2]' : 'text-[#8a93a2]'">
+            <p class="mt-1.5 text-xs text-[#8a93a2]">
               {{ t(opt.descKey) }}
             </p>
           </button>
@@ -497,7 +505,7 @@ const launchButtonState = computed(() => {
             class="flex flex-col justify-between rounded-xl border p-4 text-left transition"
             :class="[
               activeAiPreset === opt.id
-                ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+                ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
                 : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
             ]"
           >
@@ -505,13 +513,12 @@ const launchButtonState = computed(() => {
               <span class="text-sm font-bold">{{ t(opt.labelKey) }}</span>
               <span
                 v-if="recommendedPresets.ai === opt.id"
-                class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                :class="activeAiPreset === opt.id ? 'bg-[#38bdf8] text-[#f8fafc]' : 'bg-sky-950/60 text-sky-200'"
+                class="rounded border border-[#38bdf8]/40 bg-sky-950/60 px-1.5 py-0.5 text-[10px] font-bold text-sky-200"
               >
                 {{ t('recommended') }}
               </span>
             </div>
-            <p class="mt-1.5 text-xs" :class="activeAiPreset === opt.id ? 'text-[#8a93a2]' : 'text-[#8a93a2]'">
+            <p class="mt-1.5 text-xs text-[#8a93a2]">
               {{ t(opt.descKey) }}
             </p>
           </button>
@@ -567,8 +574,9 @@ const launchButtonState = computed(() => {
                 max="16"
                 step="1"
                 :value="config.beamWidth ?? 8"
+                :style="{ '--range-pct': rangePct(config.beamWidth ?? 8, 2, 16) }"
                 @input="patchConfig({ beamWidth: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
@@ -583,8 +591,9 @@ const launchButtonState = computed(() => {
                 max="8"
                 step="1"
                 :value="config.topKCandidates ?? 3"
+                :style="{ '--range-pct': rangePct(config.topKCandidates ?? 3, 1, 8) }"
                 @input="patchConfig({ topKCandidates: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
@@ -599,8 +608,9 @@ const launchButtonState = computed(() => {
                 max="14"
                 step="1"
                 :value="config.maxActionDepth ?? 8"
+                :style="{ '--range-pct': rangePct(config.maxActionDepth ?? 8, 4, 14) }"
                 @input="patchConfig({ maxActionDepth: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
@@ -615,8 +625,9 @@ const launchButtonState = computed(() => {
                 max="12"
                 step="1"
                 :value="config.rolloutMaxActions ?? 8"
+                :style="{ '--range-pct': rangePct(config.rolloutMaxActions ?? 8, 3, 12) }"
                 @input="patchConfig({ rolloutMaxActions: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
@@ -689,7 +700,7 @@ const launchButtonState = computed(() => {
                   type="button"
                   @click="patchConfig({ iterations: presetIter })"
                   class="rounded border border-[#263044] px-1.5 py-0.5 font-mono text-[10px] font-semibold transition"
-                  :class="config.iterations === presetIter ? 'bg-[#ff6b00] text-white border-[#ff6b00]' : 'bg-[#0c0f16] text-[#8a93a2] hover:text-white'"
+                  :class="config.iterations === presetIter ? 'bg-[#ff6b00] text-white border-[#ff6b00]' : 'bg-[#0c0f16] text-[#8a93a2] hover:text-[#f8fafc]'"
                 >
                   {{ presetIter.toLocaleString('fr-FR') }}
                 </button>
@@ -707,22 +718,21 @@ const launchButtonState = computed(() => {
                 max="20"
                 step="1"
                 :value="config.maxTurns"
+                :style="{ '--range-pct': rangePct(config.maxTurns, 1, 20) }"
                 @input="patchConfig({ maxTurns: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
-            <!-- 11. fixedSeed (?debug=true) -->
+            <!-- 11. fixedSeed -->
             <label class="flex flex-col gap-1.5 rounded-xl border border-[#263044] bg-[#131823] p-3.5">
-              <span v-if="!isDebugMode" class="text-[10px] font-mono text-amber-600">?debug=true requis</span>
               <span class="text-xs font-semibold text-slate-200">{{ t('advFixedSeed') }}</span>
               <input
                 type="number"
                 :placeholder="t('advFixedSeedPlaceholder')"
-                :disabled="!isDebugMode"
                 :value="config.fixedSeed ?? ''"
                 @input="handleSeedInput(($event.target as HTMLInputElement).value)"
-                class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1.5 font-mono text-xs text-[#f8fafc] disabled:opacity-50 disabled:cursor-not-allowed"
+                class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1.5 font-mono text-xs text-[#f8fafc]"
               />
             </label>
           </div>
@@ -734,21 +744,20 @@ const launchButtonState = computed(() => {
             {{ t('advGroupWorkersTitle') }}
           </h4>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <!-- 12. workerCount (?debug=true pour réglage fin) -->
+            <!-- 12. workerCount -->
             <label class="flex flex-col gap-1.5 rounded-xl border border-[#263044] bg-[#131823] p-3.5">
-              <span v-if="!isDebugMode" class="text-[10px] font-mono text-amber-600">?debug=true pour réglage manuel</span>
               <span class="text-xs font-semibold text-slate-200">
                 {{ t('advWorkerCount', { n: config.workerCount, max: maxHardwareWorkers }) }}
               </span>
               <input
                 type="range"
                 min="1"
-                :disabled="!isDebugMode"
                 :max="maxHardwareWorkers"
                 step="1"
                 :value="config.workerCount"
+                :style="{ '--range-pct': rangePct(config.workerCount, 1, maxHardwareWorkers) }"
                 @input="patchConfig({ workerCount: Number(($event.target as HTMLInputElement).value) })"
-                class="accent-[#ff6b00]"
+                class="w-full cursor-pointer accent-[#ff6b00]"
               />
             </label>
 
@@ -811,12 +820,10 @@ const launchButtonState = computed(() => {
               </label>
             </div>
 
-            <!-- perturbationType (?debug=true) -->
+            <!-- perturbationType -->
             <label class="flex flex-col gap-1.5 rounded-xl border border-[#263044] bg-[#131823] p-3.5">
-              <span v-if="!isDebugMode" class="text-[10px] font-mono text-amber-600">?debug=true requis</span>
               <span class="text-xs font-semibold text-slate-200">{{ t('advPerturbation') }}</span>
               <select
-                :disabled="!isDebugMode"
                 :value="config.perturbationType ?? 'NONE'"
                 @change="patchConfig({ perturbationType: ($event.target as HTMLSelectElement).value as DebugPerturbationType })"
                 class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1.5 text-xs text-[#f8fafc]"
@@ -835,7 +842,7 @@ const launchButtonState = computed(() => {
                 type="number"
                 min="1"
                 max="10"
-                :disabled="!isDebugMode || (config.perturbationType ?? 'NONE') === 'NONE'"
+                :disabled="(config.perturbationType ?? 'NONE') === 'NONE'"
                 :value="config.perturbationTurn ?? 2"
                 @change="patchConfig({ perturbationTurn: Math.max(1, Math.min(10, Number(($event.target as HTMLInputElement).value) || 2)) })"
                 class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1.5 font-mono text-xs text-[#f8fafc] disabled:opacity-50"
@@ -864,12 +871,12 @@ const launchButtonState = computed(() => {
           class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'RANDOM'
-              ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+              ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
               : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderRandom') }}</span>
-          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderRandomDesc') }}</span>
+          <span class="mt-1 text-xs text-[#8a93a2]">{{ t('turnOrderRandomDesc') }}</span>
         </button>
 
         <button
@@ -878,12 +885,12 @@ const launchButtonState = computed(() => {
           class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'PLAYER'
-              ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+              ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
               : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderFirst') }}</span>
-          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderFirstDesc') }}</span>
+          <span class="mt-1 text-xs text-[#8a93a2]">{{ t('turnOrderFirstDesc') }}</span>
         </button>
 
         <button
@@ -892,12 +899,12 @@ const launchButtonState = computed(() => {
           class="flex flex-col items-start rounded-xl border p-4 text-left transition"
           :class="[
             config.firstPlayerMode === 'OPPONENT'
-              ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
+              ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
               : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
           ]"
         >
           <span class="text-sm font-bold">{{ t('turnOrderSecond') }}</span>
-          <span class="mt-1 text-xs opacity-75">{{ t('turnOrderSecondDesc') }}</span>
+          <span class="mt-1 text-xs text-[#8a93a2]">{{ t('turnOrderSecondDesc') }}</span>
         </button>
       </div>
     </div>
@@ -963,7 +970,7 @@ const launchButtonState = computed(() => {
           :class="[
             config.selectedOpponentIds.includes(opp.id)
               ? 'border-[#ff6b00] bg-[#1b2232] ring-2 ring-[#ff6b00]/70 shadow-xs'
-              : 'border-[#263044] bg-[#0c0f16]/50 text-[#8a93a2] opacity-60 hover:opacity-100 hover:bg-[#1b2232]',
+              : 'border-[#263044] bg-[#0c0f16]/60 text-[#8a93a2] opacity-80 hover:opacity-100 hover:bg-[#1b2232]',
           ]"
         >
           <div>

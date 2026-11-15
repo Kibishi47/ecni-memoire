@@ -95,18 +95,18 @@ function formatWinReason(reason: string | null): string {
 
 <template>
   <section
-    class="rounded-2xl border-2 border-amber-500/45 bg-[#131823] p-5 shadow-xs"
-    aria-label="Inspecteur granulaire Mode Debug"
+    class="rounded-2xl border-2 border-[#ff6b00]/45 bg-[#131823] p-5 shadow-xs"
+    aria-label="Inspecteur granulaire de parties"
   >
-    <!-- En-tête de l'Inspecteur Debug -->
+    <!-- En-tête de l'Inspecteur de Parties -->
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[#263044] pb-4">
       <div>
         <div class="flex items-center gap-2">
-          <span class="rounded-md border border-amber-500/40 bg-amber-950/60 px-2 py-0.5 font-mono text-xs font-bold text-amber-200">
-            INSPECTEUR ?debug=true
+          <span class="rounded-md border border-[#ff6b00]/40 bg-[#ff6b00]/15 px-2 py-0.5 font-mono text-xs font-bold text-[#ff8a00]">
+            {{ t('debugModeBadge') }}
           </span>
           <h3 class="text-base font-bold text-[#f8fafc]">
-            Inspection Granulaire : Partie → Timeline par Tour → Branches 3-Ply ($T \rightarrow T_{\text{adv}} \rightarrow T+1$)
+            Inspection Granulaire : Partie → Timeline par Tour → Branches 3-Ply (T → T_adv → T+1)
           </h3>
         </div>
         <p class="mt-1 text-xs text-[#8a93a2]">
@@ -290,7 +290,7 @@ function formatWinReason(reason: string | null): string {
                 <span
                   v-for="(pName, idx) in activeGame.playerInitialPrizes"
                   :key="idx"
-                  class="rounded border border-amber-500/35 bg-amber-950/45/70 px-2 py-0.5 font-mono text-[11px] font-medium text-amber-200"
+                  class="rounded border border-amber-500/35 bg-amber-950/45 px-2 py-0.5 font-mono text-[11px] font-medium text-amber-200"
                 >
                   #{{ idx + 1 }} {{ pName }}
                 </span>
@@ -321,7 +321,7 @@ function formatWinReason(reason: string | null): string {
                 <span
                   v-for="(pName, idx) in activeGame.opponentInitialPrizes"
                   :key="idx"
-                  class="rounded border border-rose-500/35 bg-rose-950/45/60 px-2 py-0.5 font-mono text-[11px] font-medium text-rose-200"
+                  class="rounded border border-rose-500/35 bg-rose-950/45 px-2 py-0.5 font-mono text-[11px] font-medium text-rose-200"
                 >
                   #{{ idx + 1 }} {{ pName }}
                 </span>
@@ -378,12 +378,12 @@ function formatWinReason(reason: string | null): string {
               selectedTurnIndex === idx
                 ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
                 : t.actingPlayer === 'PLAYER'
-                  ? 'border-emerald-500/35 bg-emerald-950/45/70 text-emerald-200 hover:bg-emerald-950/60/70'
-                  : 'border-rose-500/35 bg-rose-950/45/70 text-rose-200 hover:bg-rose-950/60/70'
+                  ? 'border-emerald-500/40 bg-emerald-950/45 text-emerald-200 hover:bg-emerald-950/60'
+                  : 'border-rose-500/40 bg-rose-950/45 text-rose-200 hover:bg-rose-950/60'
             "
           >
             <span>T{{ t.turnNumber }}</span>
-            <span class="text-[10px] opacity-80">
+            <span class="text-[10px]">
               ({{ t.actingPlayer === 'PLAYER' ? 'Joueur' : 'Adv' }})
             </span>
           </button>
@@ -399,7 +399,7 @@ function formatWinReason(reason: string | null): string {
               TOUR {{ activeTurn.turnNumber }} — {{ activeTurn.actingPlayer === 'PLAYER' ? 'TOUR DU JOUEUR' : 'TOUR DE L’ADVERSAIRE' }}
             </span>
             <span v-if="activeTurn.drawnCardName" class="text-xs text-[#8a93a2]">
-              Pioche du tour : <strong class="text-white">{{ activeTurn.drawnCardName }}</strong>
+              Pioche du tour : <strong class="text-[#f8fafc]">{{ activeTurn.drawnCardName }}</strong>
             </span>
             <span
               v-if="activeTurn.perturbationNote"
@@ -419,8 +419,8 @@ function formatWinReason(reason: string | null): string {
         <!-- Grille Double Plateau : Joueur (Gauche) vs Adversaire (Droite) -->
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <!-- Plateau Joueur -->
-          <div class="rounded-xl border border-emerald-500/35 bg-emerald-950/45/25 p-4">
-            <div class="flex items-center justify-between border-b border-emerald-500/35/70 pb-2.5">
+          <div class="rounded-xl border border-emerald-500/40 bg-emerald-950/30 p-4">
+            <div class="flex items-center justify-between border-b border-emerald-500/35 pb-2.5">
               <div class="flex items-center gap-2">
                 <span class="h-2.5 w-2.5 rounded-full bg-emerald-600"></span>
                 <h4 class="text-xs font-bold uppercase tracking-wider text-emerald-100">
@@ -527,7 +527,7 @@ function formatWinReason(reason: string | null): string {
             </div>
 
             <!-- Main Joueur -->
-            <div class="mt-3 border-t border-emerald-500/35/60 pt-2.5">
+            <div class="mt-3 border-t border-emerald-500/35 pt-2.5">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
                 Main ({{ displayedPlayerBoard.hand.length }} cartes)
               </div>
@@ -547,8 +547,8 @@ function formatWinReason(reason: string | null): string {
           </div>
 
           <!-- Plateau Adversaire -->
-          <div class="rounded-xl border border-rose-500/35 bg-rose-950/45/25 p-4">
-            <div class="flex items-center justify-between border-b border-rose-500/35/70 pb-2.5">
+          <div class="rounded-xl border border-rose-500/40 bg-rose-950/30 p-4">
+            <div class="flex items-center justify-between border-b border-rose-500/35 pb-2.5">
               <div class="flex items-center gap-2">
                 <span class="h-2.5 w-2.5 rounded-full bg-rose-600"></span>
                 <h4 class="text-xs font-bold uppercase tracking-wider text-rose-100">
@@ -655,7 +655,7 @@ function formatWinReason(reason: string | null): string {
             </div>
 
             <!-- Main Adversaire -->
-            <div class="mt-3 border-t border-rose-500/35/60 pt-2.5">
+            <div class="mt-3 border-t border-rose-500/35 pt-2.5">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
                 Main Adverse ({{ displayedOpponentBoard.hand.length }} cartes)
               </div>
@@ -698,7 +698,7 @@ function formatWinReason(reason: string | null): string {
               class="rounded-xl border p-3.5 transition"
               :class="
                 branch.isChosen
-                  ? 'border-emerald-500 bg-emerald-950/45/50 shadow-2xs'
+                  ? 'border-emerald-500 bg-emerald-950/45 shadow-2xs'
                   : 'border-[#263044] bg-[#131823]'
               "
             >

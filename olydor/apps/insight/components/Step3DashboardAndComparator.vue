@@ -42,12 +42,10 @@ const props = withDefaults(
     deckVersions?: DeckVersionEntry[]
     activeVersionId?: string
     metaOpponents?: MetaOpponentDeck[]
-    isDebugMode?: boolean
     arenaUrl?: string
   }>(),
   {
     deckVersions: () => [],
-    isDebugMode: false,
     arenaUrl: undefined,
     activeVersionId: '',
     metaOpponents: () => [],
@@ -67,7 +65,7 @@ const emit = defineEmits<{
   (e: 'cancel-simulation'): void
 }>()
 
-const { t, pickLocalizedField, getLocalizedCardName, getLocalizedCardRules, getLocalizedSubCategory } = useI18n()
+const { t, currentLang, pickLocalizedField, getLocalizedCardName, getLocalizedCardRules, getLocalizedSubCategory } = useI18n()
 
 // Onglets de navigation dans l'Étape 3
 type Step3Tab = 'overview' | 'detailed' | 'audit'
@@ -581,9 +579,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             </span>
           </div>
 
-          <div class="mt-3 flex items-baseline gap-4">
-            <!-- Win rate global correctement normalisé (sans multiplication en double) -->
-            <span class="text-4xl font-black tracking-tight text-[#f8fafc] sm:text-5xl">
+          <div class="mt-3 flex flex-wrap items-baseline gap-4">
+            <!-- Win rate global correctement normalisé -->
+            <span
+              class="text-4xl font-black tracking-tight sm:text-5xl"
+              :class="(currentSummary?.globalWinRate ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary?.globalWinRate) }} %
             </span>
             <span class="text-sm font-semibold text-[#8a93a2]">
@@ -597,12 +598,21 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               :class="[
                 currentSummary!.globalWinRate >= baselineSummary.globalWinRate
                   ? 'border border-emerald-500/45 bg-emerald-950/45 text-emerald-300'
-                  : 'border border-rose-500/45 bg-rose-950/45 text-rose-300',
+                  : 'border border-red-500/45 bg-red-950/45 text-red-300',
               ]"
             >
               <span>{{ formatSignedDelta(currentSummary!.globalWinRate - baselineSummary.globalWinRate, ' %') }}</span>
               <span class="text-xs font-medium">{{ t('vsBaseline') }} ({{ formatRate(baselineSummary.globalWinRate) }} %)</span>
             </div>
+          </div>
+
+          <!-- Jauge visuelle du Win Rate global -->
+          <div class="mt-3 h-2.5 w-full max-w-md overflow-hidden rounded-full bg-[#263044]">
+            <div
+              class="h-full rounded-full transition-all duration-300"
+              :class="(currentSummary?.globalWinRate ?? 0) >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+              :style="{ width: `${Math.min(100, Math.max(0, currentSummary?.globalWinRate ?? 0))}%` }"
+            ></div>
           </div>
 
           <p class="mt-2 text-xs text-[#8a93a2]">
@@ -637,7 +647,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             type="button"
             :disabled="compareButtonState.disabled"
             @click="emit('rerun-and-compare')"
-            class="flex items-center gap-2 rounded-xl border border-slate-900 bg-[#ff6b00] px-5 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-[#ff8a00] disabled:cursor-not-allowed disabled:bg-[#263044] disabled:border-[#263044]"
+            class="flex items-center gap-2 rounded-xl border border-[#ff6b00] bg-[#ff6b00] px-5 py-3 text-sm font-bold text-white shadow-xs transition hover:bg-[#ff8a00] disabled:cursor-not-allowed disabled:bg-[#263044] disabled:border-[#263044] disabled:text-[#8a93a2]"
           >
             <span>{{ compareButtonState.label }}</span>
           </button>
@@ -708,16 +718,16 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           class="flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 transition"
           :class="[
             activeVersionId === v.id
-              ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
-              : 'border-[#263044] bg-[#1b2232]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
+              ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_20px_rgba(255,107,0,0.2)]'
+              : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
           ]"
         >
           <div class="flex items-center gap-1.5 font-bold text-xs">
             <span>{{ v.versionNumber === 1 ? `${t('versionLabel', { v: 1 })} (${t('initialVersion')})` : t('versionLabel', { v: v.versionNumber }) }}</span>
             <span
               v-if="v.isBaseline"
-              class="rounded px-1.5 py-0.2 text-[10px]"
-              :class="activeVersionId === v.id ? 'bg-[#131823]/20 text-white' : 'bg-[#263044] text-slate-200'"
+              class="rounded px-1.5 py-0.5 text-[10px]"
+              :class="activeVersionId === v.id ? 'border border-[#ff6b00]/40 bg-[#ff6b00]/15 text-[#ff8a00]' : 'bg-[#263044] text-slate-200'"
             >
               {{ t('baselineRef') }}
             </span>
@@ -726,11 +736,11 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- Taux de victoire de cette version si simulée -->
           <span
             v-if="v.summary"
-            class="rounded px-2 py-0.5 font-mono text-[11px] font-black"
+            class="rounded border px-2 py-0.5 font-mono text-[11px] font-black"
             :class="[
-              activeVersionId === v.id
-                ? 'bg-emerald-400 text-[#f8fafc]'
-                : 'bg-emerald-950/60 text-emerald-200',
+              v.summary.globalWinRate >= 50
+                ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300'
+                : 'border-red-500/40 bg-red-950/60 text-red-300',
             ]"
           >
             {{ formatRate(v.summary.globalWinRate) }} %
@@ -741,7 +751,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <button
               type="button"
               @click="emit('set-baseline-version', v.id)"
-              class="rounded bg-[#131823]/20 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-[#1b2232]/30"
+              class="rounded border border-[#263044] bg-[#131823] px-2 py-0.5 text-[10px] font-semibold text-slate-200 hover:border-[#ff6b00] hover:bg-[#263044]"
               :title="t('setAsBaseline')"
             >
               {{ t('setAsBaseline') }}
@@ -785,7 +795,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
         </div>
 
         <div class="mt-3 flex items-baseline justify-between">
-          <span class="text-2xl font-black" :class="m.winRate >= 50 ? 'text-[#10b981]' : 'text-amber-300'">
+          <span class="text-2xl font-black" :class="m.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'">
             {{ formatRate(m.winRate) }} %
           </span>
           <span class="text-xs text-[#8a93a2] font-medium">
@@ -793,11 +803,11 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           </span>
         </div>
 
-        <!-- Jauge visuelle de victoire (correctement ramenée à 0..100) -->
-        <div class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-[#1b2232]">
+        <!-- Jauge visuelle de victoire (0..100, Vert >= 50%, Rouge < 50%) -->
+        <div class="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-[#263044]">
           <div
-            class="h-full rounded-full transition-all"
-            :class="m.winRate >= 50 ? 'bg-emerald-600' : m.winRate >= 40 ? 'bg-amber-950/450' : 'bg-rose-950/450'"
+            class="h-full rounded-full transition-all duration-300"
+            :class="m.winRate >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
             :style="{ width: `${Math.min(100, Math.max(0, m.winRate))}%` }"
           ></div>
         </div>
@@ -851,10 +861,20 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- KPI 1 : Vitesse de Setup -->
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('kpiSetupSpeed') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="(currentSummary?.turn2AttackerReadyRate ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary?.turn2AttackerReadyRate) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="(currentSummary?.turn2AttackerReadyRate ?? 0) >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary?.turn2AttackerReadyRate ?? 0))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('kpiSetupSpeedDesc') }}
             </p>
           </div>
@@ -862,10 +882,20 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- KPI 2 : Enchaînement des Attaquants -->
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('kpiAttackStreaming') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="(currentSummary?.attackerStreamingRate ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary?.attackerStreamingRate) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="(currentSummary?.attackerStreamingRate ?? 0) >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary?.attackerStreamingRate ?? 0))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('kpiAttackStreamingDesc') }}
             </p>
           </div>
@@ -873,10 +903,20 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- KPI 3 : Résilience aux Perturbations -->
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('kpiDisruptionResilience') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="(currentSummary?.postDisruptionResilience?.postDisruptionAttackRate ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary?.postDisruptionResilience?.postDisruptionAttackRate) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="(currentSummary?.postDisruptionResilience?.postDisruptionAttackRate ?? 0) >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary?.postDisruptionResilience?.postDisruptionAttackRate ?? 0))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('kpiDisruptionResilienceDesc') }}
             </p>
           </div>
@@ -884,10 +924,20 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           <!-- KPI 4 : Flexibilité Supporter -->
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('kpiBossFlexibility') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="(currentSummary?.bossFlexibilityRate ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary?.bossFlexibilityRate) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="(currentSummary?.bossFlexibilityRate ?? 0) >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary?.bossFlexibilityRate ?? 0))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('kpiBossFlexibilityDesc') }}
             </p>
           </div>
@@ -907,8 +957,8 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               class="rounded-lg border px-2.5 py-1 text-xs font-bold"
               :class="
                 editableDeck.totalCards === 60
-                  ? 'border-emerald-500/35 bg-emerald-950/45 text-emerald-300'
-                  : 'border-amber-500/35 bg-amber-950/45 text-amber-300'
+                  ? 'border-emerald-500/45 bg-emerald-950/45 text-emerald-300'
+                  : 'border-red-500/45 bg-red-950/45 text-red-300'
               "
             >
               {{ editableDeck.totalCards }} / 60
@@ -924,8 +974,8 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-2.5 transition"
               :class="[
                 selectedCardId === card.cardId
-                  ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
-                  : 'border-[#263044] bg-[#1b2232]/60 text-[#f8fafc] hover:border-[#263044] hover:bg-[#1b2232]/70',
+                  ? 'border-[#ff6b00] bg-[#1b2232] text-[#f8fafc] ring-2 ring-[#ff6b00]/75 shadow-[0_0_16px_rgba(255,107,0,0.2)]'
+                  : 'border-[#263044] bg-[#0c0f16]/60 text-[#f8fafc] hover:border-[#ff8a00]/60 hover:bg-[#1b2232]',
               ]"
             >
               <div class="flex items-center gap-2.5 min-w-0">
@@ -945,21 +995,13 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     <!-- INDICATEUR VISUEL D'ALTERNATIVES SUGGÉRÉES (BADGE) -->
                     <span
                       v-if="cardAlternativesCountMap[card.cardId] && cardAlternativesCountMap[card.cardId] > 0"
-                      class="rounded-full px-1.5 py-0.2 text-[9px] font-bold shrink-0"
-                      :class="[
-                        selectedCardId === card.cardId
-                          ? 'bg-[#38bdf8] text-[#f8fafc]'
-                          : 'bg-sky-950/60 text-sky-200',
-                      ]"
+                      class="rounded-full border border-[#38bdf8]/40 bg-sky-950/60 px-1.5 py-0.5 text-[9px] font-bold text-sky-200 shrink-0"
                     >
                       {{ t('altCountBadge', { n: cardAlternativesCountMap[card.cardId] }) }}
                     </span>
                   </div>
 
-                  <div
-                    class="text-[10px]"
-                    :class="selectedCardId === card.cardId ? 'text-[#8a93a2]' : 'text-[#8a93a2]'"
-                  >
+                  <div class="text-[10px] text-[#8a93a2]">
                     {{ getLocalizedSubCategory(card.subCategory) }}
                   </div>
                 </div>
@@ -971,7 +1013,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   type="button"
                   @click="emit('adjust-card-qty', card.cardId, -1)"
                   class="flex h-7 w-7 items-center justify-center rounded-lg border font-bold text-xs transition"
-                  :class="selectedCardId === card.cardId ? 'border-white/30 bg-[#131823]/10 text-white hover:bg-[#1b2232]/20' : 'border-[#263044] bg-[#131823] text-slate-200 hover:bg-[#263044]'"
+                  :class="selectedCardId === card.cardId ? 'border-[#ff6b00]/60 bg-[#131823] text-[#f8fafc] hover:bg-[#263044]' : 'border-[#263044] bg-[#131823] text-slate-200 hover:bg-[#263044]'"
                 >
                   -
                 </button>
@@ -982,7 +1024,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                   type="button"
                   @click="emit('adjust-card-qty', card.cardId, 1)"
                   class="flex h-7 w-7 items-center justify-center rounded-lg border font-bold text-xs transition"
-                  :class="selectedCardId === card.cardId ? 'border-white/30 bg-[#131823]/10 text-white hover:bg-[#1b2232]/20' : 'border-[#263044] bg-[#131823] text-slate-200 hover:bg-[#263044]'"
+                  :class="selectedCardId === card.cardId ? 'border-[#ff6b00]/60 bg-[#131823] text-[#f8fafc] hover:bg-[#263044]' : 'border-[#263044] bg-[#131823] text-slate-200 hover:bg-[#263044]'"
                 >
                   +
                 </button>
@@ -1175,7 +1217,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <button
                   type="button"
                   @click="handleReplaceWithAlternative(selectedCardEntry!.cardId, alt)"
-                  class="shrink-0 rounded-xl border border-slate-900 bg-[#ff6b00] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#ff8a00]"
+                  class="shrink-0 rounded-xl border border-[#ff6b00] bg-[#ff6b00] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#ff8a00]"
                 >
                   {{ t('replaceInDeck') }}
                 </button>
@@ -1202,20 +1244,40 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('winRateJ1') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="currentSummary.turnOrderSplitStats.winRateGoingFirst >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingFirst) }} %
             </div>
-            <p class="mt-1 text-xs text-[#8a93a2] font-mono">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="currentSummary.turnOrderSplitStats.winRateGoingFirst >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary.turnOrderSplitStats.winRateGoingFirst))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-xs text-[#8a93a2] font-mono">
               {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}{{ t('winInitial') }} / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} {{ t('gamesUnit') }}
             </p>
           </div>
 
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('winRateJ2') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#38bdf8]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="currentSummary.turnOrderSplitStats.winRateGoingSecond >= 50 ? 'text-emerald-400' : 'text-red-400'"
+            >
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingSecond) }} %
             </div>
-            <p class="mt-1 text-xs text-[#8a93a2] font-mono">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="currentSummary.turnOrderSplitStats.winRateGoingSecond >= 50 ? 'bg-emerald-500' : 'bg-red-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary.turnOrderSplitStats.winRateGoingSecond))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-xs text-[#8a93a2] font-mono">
               {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}{{ t('winInitial') }} / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} {{ t('gamesUnit') }}
             </p>
           </div>
@@ -1225,7 +1287,13 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <div class="mt-2 text-2xl font-black text-[#f8fafc]">
               {{ formatRate(currentSummary.turnOrderSplitStats.turn1AttackOrItemLockRateJ2) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary.turnOrderSplitStats.turn1AttackOrItemLockRateJ2))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('turn1ItemLockDesc') }} {{ formatRate(currentSummary.turnOrderSplitStats.turn1ItemLockRateJ2) }} %
             </p>
           </div>
@@ -1253,12 +1321,18 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('avgPlayerPrizes') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#10b981]">
+            <div class="mt-2 text-2xl font-black text-emerald-400">
               {{ formatRate(currentSummary.avgPlayerPrizesWon, 2) }} / 6.00
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                :style="{ width: `${Math.min(100, Math.max(0, (currentSummary.avgPlayerPrizesWon / 6) * 100))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('netPrizeDifferential') }}
-              <strong :class="currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'">
+              <strong :class="currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon >= 0 ? 'text-emerald-400' : 'text-red-400'">
                 {{ formatSignedDelta(currentSummary.avgPlayerPrizesWon - currentSummary.avgOpponentPrizesWon) }}
               </strong>
             </p>
@@ -1266,20 +1340,36 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
 
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('avgOpponentPrizes') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#ef4444]">
+            <div class="mt-2 text-2xl font-black text-red-400">
               {{ formatRate(currentSummary.avgOpponentPrizesWon, 2) }} / 6.00
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full bg-red-500 transition-all duration-300"
+                :style="{ width: `${Math.min(100, Math.max(0, (currentSummary.avgOpponentPrizesWon / 6) * 100))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ t('prizesConcededPerMatch') }}
             </p>
           </div>
 
           <div class="rounded-xl border border-[#263044] bg-[#1b2232]/60 p-4">
             <div class="text-xs font-bold text-[#8a93a2]">{{ t('mulliganRate') }}</div>
-            <div class="mt-2 text-2xl font-black text-[#f8fafc]">
+            <div
+              class="mt-2 text-2xl font-black"
+              :class="currentSummary.gamesWithMulliganRate >= 25 ? 'text-red-400' : 'text-emerald-400'"
+            >
               {{ formatRate(currentSummary.gamesWithMulliganRate) }} %
             </div>
-            <p class="mt-1 text-[11px] text-[#8a93a2]">
+            <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#263044]">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="currentSummary.gamesWithMulliganRate >= 25 ? 'bg-red-500' : 'bg-emerald-500'"
+                :style="{ width: `${Math.min(100, Math.max(0, currentSummary.gamesWithMulliganRate))}%` }"
+              ></div>
+            </div>
+            <p class="mt-2 text-[11px] text-[#8a93a2]">
               {{ currentSummary.gamesWithMulliganCount }} {{ t('gamesWithMulligan') }}
             </p>
           </div>
@@ -1411,12 +1501,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                 <!-- Taux de Jeu Effectif -->
                 <td class="px-3.5 py-3">
                   <div class="flex items-center gap-2">
-                    <span class="w-12 font-mono text-xs font-bold text-[#10b981]">
+                    <span class="w-12 font-mono text-xs font-bold text-emerald-400">
                       {{ formatRate(item.effectivePlayRate) }} %
                     </span>
-                    <div class="h-2 w-24 overflow-hidden rounded-full bg-[#263044]">
+                    <div class="h-2.5 w-24 overflow-hidden rounded-full bg-[#263044]">
                       <div
-                        class="h-full rounded-full bg-emerald-950/450"
+                        class="h-full rounded-full bg-emerald-500 transition-all duration-300"
                         :style="{ width: `${Math.min(100, Math.max(0, item.effectivePlayRate))}%` }"
                       ></div>
                     </div>
@@ -1432,20 +1522,20 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                     <span
                       class="w-12 font-mono text-xs font-bold"
                       :class="
-                        item.discardedUnusedRate + item.deadHandTurnRate >= 25
-                          ? 'text-[#ef4444]'
-                          : item.discardedUnusedRate + item.deadHandTurnRate >= 10
-                            ? 'text-[#f59e0b]'
+                        item.discardedUnusedRate + item.deadHandTurnRate >= 15
+                          ? 'text-red-400'
+                          : item.discardedUnusedRate + item.deadHandTurnRate > 0
+                            ? 'text-amber-300'
                             : 'text-[#8a93a2]'
                       "
                     >
                       {{ formatRate(item.discardedUnusedRate) }} %
                     </span>
-                    <div class="h-2 w-24 overflow-hidden rounded-full bg-[#263044]">
+                    <div class="h-2.5 w-24 overflow-hidden rounded-full bg-[#263044]">
                       <div
-                        class="h-full rounded-full"
+                        class="h-full rounded-full transition-all duration-300"
                         :style="{ width: `${Math.min(100, Math.max(0, item.discardedUnusedRate + item.deadHandTurnRate))}%` }"
-                        :class="item.discardedUnusedRate >= 25 ? 'bg-rose-950/450' : 'bg-amber-950/450'"
+                        :class="item.discardedUnusedRate + item.deadHandTurnRate >= 15 ? 'bg-red-500' : 'bg-amber-500'"
                       ></div>
                     </div>
                     <span class="font-mono text-[10px] text-[#8a93a2]">
@@ -1462,7 +1552,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                       class="rounded px-1.5 py-0.5 text-[10px] font-bold"
                       :class="
                         item.winRateImpactWhenAllPrized < 0
-                          ? 'bg-rose-950/60 text-rose-300'
+                          ? 'bg-red-950/60 text-red-300'
                           : 'bg-[#1b2232] text-slate-200'
                       "
                     >
@@ -1573,9 +1663,9 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       @close="closeZoom"
     />
 
-    <!-- Inspecteur granulaire ?debug=true -->
+    <!-- Inspecteur granulaire de parties -->
     <DebugInspectorPanel
-      v-if="isDebugMode && currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
+      v-if="currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
       :traced-games="currentSummary.tracedGames"
     />
   </div>
