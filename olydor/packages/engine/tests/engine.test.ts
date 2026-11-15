@@ -2190,5 +2190,94 @@ describe('Engine — Data-Driven State Machine & Legal Move Generator', () => {
       expect(afterLost.opponent.lostZone.length).toBe(2)
       expect(afterLost.opponent.discard.length).toBe(prevOppDiscard)
     })
+
+    it('scales PLACE_DAMAGE_COUNTERS attacks using scalingMetric (e.g. PER_CARD_IN_OWN_HAND)', () => {
+      const baseModel = Object.values(UNIFIED_CARD_REGISTRY).find((c) => c.category === 'POKEMON')!
+      const alakazamLike: EngineCardModel = {
+        ...baseModel,
+        cardId: 'test-alakazam-hand-counters',
+        category: 'POKEMON',
+        subCategory: 'STAGE_2',
+        pokemonStats: {
+          ...baseModel.pokemonStats!,
+          hp: 140,
+          stage: 'STAGE_2',
+          evolvesFrom: 'Kadabra',
+          rootBasicName: 'Abra',
+        },
+        playableActions: [
+          {
+            actionId: 'powerful_hand',
+            label: 'Main Puissante',
+            actionType: 'ATTACK',
+            timingPhase: 'ATTACK_PHASE',
+            cost: { PSYCHIC: 1 },
+            canUseTurn1GoingFirst: false,
+            canUseTurn1GoingSecond: true,
+            preconditions: [],
+            effects: [
+              {
+                primitive: 'PLACE_DAMAGE_COUNTERS',
+                target: 'OPPONENT_ACTIVE',
+                value: 20,
+                scalingMetric: 'PER_CARD_IN_OWN_HAND',
+                scalingOperator: 'MULTIPLY',
+                bonusValue: 20,
+              } as any,
+            ],
+          },
+        ],
+      }
+
+      const rawDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+      const deck: EngineCardModel[] = []
+      for (const c of rawDeck.cards) {
+        for (let i = 0; i < c.quantity; i++) deck.push(c.model)
+      }
+
+      const state = createInitialMatchState(deck, deck, { seed: 919, firstPlayerIndex: 0, maxTurns: 16 })
+      state.turnNumber = 3
+      state.activePlayerIndex = 0
+      const psychic = createNativeBasicEnergyModel('Psy')
+      state.player.activePokemon = {
+        instanceId: 'atk-alakazam',
+        card: alakazamLike,
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [psychic],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+        preventDamageOrEffectsNextTurn: false,
+      }
+      state.opponent.activePokemon = {
+        instanceId: 'def-target',
+        card: { ...baseModel, pokemonStats: { ...baseModel.pokemonStats!, hp: 200 } },
+        previousStages: [],
+        damage: 0,
+        attachedEnergies: [],
+        attachedTools: [],
+        turnPlayed: 1,
+        evolvedThisTurn: false,
+        specialConditions: [],
+        cantAttackNextTurn: false,
+        preventDamageOrEffectsNextTurn: false,
+      }
+      // 6 cards in hand -> 6 * 20 = 120 damage (12 counters)
+      state.player.hand = Array.from({ length: 6 }, () => psychic)
+
+      const atkAction = alakazamLike.playableActions[0]!
+      const preview = computeAttackDamageToActive(state.player, state.opponent, atkAction, state)
+      expect(preview.expectedActiveDamage).toBe(120)
+
+      const legal = getLegalActions(state).find((a) => a.type === 'DECLARE_ATTACK' && a.actionId === 'powerful_hand')
+      expect(legal).toBeDefined()
+      expect(legal!.estimatedDamage).toBe(120)
+
+      const afterAttack = applyAction(state, legal!)
+      expect(afterAttack.opponent.activePokemon!.damage).toBe(120)
+    })
   })
 })

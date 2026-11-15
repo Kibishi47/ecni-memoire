@@ -1005,6 +1005,7 @@ export function computeAttackDamageToActive(
 
   let activeDamage = 0
   let expectedActiveDamage = 0
+  let activeCountersDamage = 0
   let benchDamage = 0
   let expectedBenchDamage = 0
   let selfRecoilDamage = 0
@@ -1217,7 +1218,17 @@ export function computeAttackDamageToActive(
         targetUpper === 'OWN_ALL_POKEMON' ||
         targetUpper === 'SELF'
       if (!isOwnBenchOnly) {
-        let bDmg = eff.value ?? eff.baseDamage ?? (eff.count ? eff.count * 10 : 0)
+        const rawVal = eff.value ?? eff.baseDamage ?? null
+        const counterBasedDmg = eff.count && eff.count > 0 ? eff.count * 10 : null
+        let bDmg =
+          eff.primitive === 'PLACE_DAMAGE_COUNTERS' &&
+          rawVal != null &&
+          counterBasedDmg != null &&
+          eff.count! > 1 &&
+          rawVal === 10 &&
+          counterBasedDmg > 10
+            ? counterBasedDmg
+            : (rawVal ?? counterBasedDmg ?? 0)
         if (eff.scalingMetric) {
           const { units } = resolveEffectScalingUnits(
             eff.scalingMetric,
@@ -1243,8 +1254,16 @@ export function computeAttackDamageToActive(
           }
           bDmg = Math.max(0, bDmg - dtPenalty)
         }
-        benchDamage += Math.max(0, bDmg)
-        expectedBenchDamage += Math.max(0, bDmg)
+        if (eff.primitive === 'PLACE_DAMAGE_COUNTERS' && targetUpper === 'OPPONENT_ACTIVE') {
+          activeCountersDamage += Math.max(0, bDmg)
+        } else if (eff.primitive === 'PLACE_DAMAGE_COUNTERS' && targetUpper === 'OPPONENT_ALL_POKEMON') {
+          activeCountersDamage += Math.max(0, bDmg)
+          benchDamage += Math.max(0, bDmg)
+          expectedBenchDamage += Math.max(0, bDmg)
+        } else {
+          benchDamage += Math.max(0, bDmg)
+          expectedBenchDamage += Math.max(0, bDmg)
+        }
       }
     }
   }
@@ -1406,6 +1425,12 @@ export function computeAttackDamageToActive(
 
     activeDamage = applyPipeline(activeDamage)
     expectedActiveDamage = applyPipeline(expectedActiveDamage)
+  }
+
+  // Les marqueurs de dégâts sur l'Actif adverse ignorent Faiblesse/Résistance/Outils de réduction,
+  // mais restent bloqués par preventDamageOrEffectsNextTurn.
+  if (activeCountersDamage > 0 && !defender.preventDamageOrEffectsNextTurn) {
+    expectedActiveDamage += activeCountersDamage
   }
 
   return {
@@ -2962,12 +2987,13 @@ export function getLegalActions(state: MatchState): GameAction[] {
 
       const dmgInfo = computeAttackDamageToActive(activeBoard, passiveBoard, pAction, state)
       const isDoubleAtk = canPokemonAttackTwice(activePoke, state)
-      const totalEstimatedActiveDmg = isDoubleAtk ? dmgInfo.activeDamage * 2 : dmgInfo.activeDamage
+      const effectiveActiveEstimate = Math.max(dmgInfo.activeDamage, Math.round(dmgInfo.expectedActiveDamage))
+      const totalEstimatedActiveDmg = isDoubleAtk ? effectiveActiveEstimate * 2 : effectiveActiveEstimate
       const totalEstimatedBenchDmg = isDoubleAtk ? dmgInfo.benchDamage * 2 : dmgInfo.benchDamage
       const oppActiveName = passiveBoard.activePokemon?.card.identity.nameFr || 'Actif adverse'
       const dmgLabel =
-        dmgInfo.activeDamage > 0
-          ? `${dmgInfo.activeDamage}${isDoubleAtk ? ' ×2 (Fête Battante)' : ''} dégâts sur ${oppActiveName}${dmgInfo.benchDamage > 0 ? ` + ${dmgInfo.benchDamage} Banc` : ''}`
+        effectiveActiveEstimate > 0
+          ? `${effectiveActiveEstimate}${isDoubleAtk ? ' ×2 (Fête Battante)' : ''} dégâts sur ${oppActiveName}${dmgInfo.benchDamage > 0 ? ` + ${dmgInfo.benchDamage} Banc` : ''}`
           : 'Effet tactique'
 
       actions.push({
@@ -3760,7 +3786,7 @@ export function applyAction(
               activeBoard,
               passiveBoard,
               eff,
-              action,
+              pAction,
               dmgInfo.benchDamage,
               true,
             )
@@ -3986,7 +4012,7 @@ function placeDamageCountersEffect(
   attackerBoard: PlayerBoardState,
   defenderBoard: PlayerBoardState,
   eff: AtomicEffect,
-  _action: GameAction,
+  action: GameAction | PlayableAction,
   fallbackBenchDmg = 0,
   deferKnockOuts = false,
 ): boolean {
@@ -3994,16 +4020,36 @@ function placeDamageCountersEffect(
   const rawVal = eff.value ?? eff.baseDamage ?? null
   const counterBasedDmg = eff.count && eff.count > 0 ? eff.count * 10 : null
   // Certain LLM compilations encode 10 (per-counter value) alongside count > 1 (e.g. 6 counters = 60 dmg).
-  const totalDmg =
+  const baseCounterDmg =
     rawVal != null && counterBasedDmg != null && eff.count! > 1 && rawVal === 10 && counterBasedDmg > 10
       ? counterBasedDmg
-      : (rawVal ?? counterBasedDmg ?? fallbackBenchDmg)
+      : (rawVal ?? counterBasedDmg ?? 0)
+  let totalDmg = baseCounterDmg
+  if (eff.scalingMetric && attackerBoard.activePokemon) {
+    const scalingAction =
+      'effects' in action && 'preconditions' in action
+        ? action
+        : ({ effects: [eff], preconditions: [] } as unknown as PlayableAction)
+    const { units } = resolveEffectScalingUnits(
+      eff.scalingMetric,
+      eff,
+      scalingAction,
+      attackerBoard,
+      defenderBoard,
+      state,
+    )
+    const bonusVal = eff.bonusValue ?? baseCounterDmg
+    totalDmg = eff.scalingOperator === 'MULTIPLY' ? units * bonusVal : totalDmg + units * bonusVal
+  }
+  if (totalDmg <= 0 && fallbackBenchDmg > 0) {
+    totalDmg = fallbackBenchDmg
+  }
   if (totalDmg <= 0) return false
 
   const targetUpper = (eff.target || '').toUpperCase()
 
   if (targetUpper === 'OPPONENT_ALL_POKEMON') {
-    if (defenderBoard.activePokemon) {
+    if (defenderBoard.activePokemon && !defenderBoard.activePokemon.preventDamageOrEffectsNextTurn) {
       defenderBoard.activePokemon.damage += totalDmg
       if (
         !deferKnockOuts &&
@@ -4133,7 +4179,7 @@ function placeDamageCountersEffect(
     targetUpper !== 'OPPONENT_BENCH_SINGLE' && targetUpper !== 'OPPONENT_BENCH'
   const allowBench = targetUpper !== 'OPPONENT_ACTIVE'
   const picked = pickBestOpponentPokeSlot(defenderBoard, totalDmg, allowActive, allowBench)
-  if (!picked) return false
+  if (!picked || picked.poke.preventDamageOrEffectsNextTurn) return false
 
   picked.poke.damage += totalDmg
   if (!deferKnockOuts && picked.poke.damage >= getPokemonMaxHp(picked.poke, state)) {
