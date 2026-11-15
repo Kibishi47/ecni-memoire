@@ -246,7 +246,7 @@
       </div>
     </section>
 
-    <!-- INTERACTIVE BATTLE BOARD MOCKUP + PYTHIA ENGINE -->
+    <!-- INTERACTIVE 1v1 BOT BATTLE BOARD PREVIEW -->
     <section class="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
       <div
         class="rounded-2xl border p-5 sm:p-7 shadow-2xl"
@@ -259,7 +259,7 @@
               class="flex h-10 w-10 items-center justify-center rounded-xl border"
               style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1); color: var(--ai-accent)"
             >
-              <BrainCircuit class="h-5 w-5" />
+              <Swords class="h-5 w-5" />
             </div>
             <div>
               <div class="flex items-center gap-2">
@@ -297,49 +297,11 @@
           </div>
         </div>
 
-        <!-- LIVE WIN PROBABILITY BAR -->
-        <div class="mt-6 rounded-xl border p-4" style="border-color: var(--border-subtle); background-color: var(--bg-canvas)">
-          <div class="flex items-center justify-between text-xs sm:text-sm font-bold mb-2">
-            <div class="flex items-center gap-2">
-              <span class="inline-block h-2.5 w-2.5 rounded-full" style="background-color: var(--status-positive)" />
-              <span style="color: var(--text-primary)">{{ t('playerLabel') }} ({{ activeScenario.playerDeck }})</span>
-              <span class="font-mono" style="color: var(--status-positive)">{{ activeScenario.playerWinPct }}%</span>
-            </div>
-
-            <div class="rounded-full border px-3 py-0.5 text-[11px] font-mono" style="border-color: var(--border-subtle); background-color: var(--bg-surface); color: var(--brand-primary)">
-              Win Probability Bar : {{ activeScenario.playerWinPct }}% - {{ activeScenario.pythiaWinPct }}%
-            </div>
-
-            <div class="flex items-center gap-2">
-              <span class="font-mono" style="color: var(--ai-accent)">{{ activeScenario.pythiaWinPct }}%</span>
-              <span style="color: var(--ai-accent)">{{ t('pythiaLabel') }}</span>
-              <span class="inline-block h-2.5 w-2.5 rounded-full" style="background-color: var(--ai-accent)" />
-            </div>
-          </div>
-
-          <div class="h-3.5 w-full overflow-hidden rounded-full flex" style="background-color: var(--bg-elevated)">
-            <div
-              class="h-full transition-all duration-500"
-              :style="{
-                width: `${activeScenario.playerWinPct}%`,
-                background: 'linear-gradient(90deg, #10b981, #34d399)',
-              }"
-            />
-            <div
-              class="h-full transition-all duration-500"
-              :style="{
-                width: `${activeScenario.pythiaWinPct}%`,
-                background: 'linear-gradient(90deg, #0284c7, #38bdf8)',
-              }"
-            />
-          </div>
-        </div>
-
-        <!-- BOARD MOCKUP + 3-PLY THOUGHT LOG + BLUNDER ANALYSIS -->
+        <!-- BOARD MOCKUP + TURN ACTION LOG (NO PLAN EXPOSURE OR COACHING) -->
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <!-- Left 7 cols: Player vs Pythia tactical board -->
+          <!-- Left 7 cols: Player vs Pythia Bot board -->
           <div class="lg:col-span-7 space-y-4">
-            <!-- Pythia Zone -->
+            <!-- Pythia Bot Zone -->
             <div
               class="rounded-xl border p-4"
               style="border-color: rgba(56, 189, 248, 0.35); background-color: var(--bg-elevated)"
@@ -440,9 +402,9 @@
             </div>
           </div>
 
-          <!-- Right 5 cols: 3-Ply Thought Log + Blunder Analysis -->
+          <!-- Right 5 cols: Factual Turn Action Log + Unassisted Match Rules -->
           <div class="lg:col-span-5 flex flex-col gap-4">
-            <!-- Pythia 3-Ply Thought Log -->
+            <!-- Turn Action Log -->
             <div
               class="rounded-xl border p-4 flex-1"
               style="border-color: var(--border-subtle); background-color: var(--bg-canvas)"
@@ -451,77 +413,72 @@
                 <div class="flex items-center gap-2">
                   <Sparkles class="h-4 w-4" style="color: var(--ai-accent)" />
                   <h3 class="text-xs font-bold uppercase tracking-wider" style="color: var(--ai-accent)">
-                    {{ t('thoughtLogTitle') }}
+                    {{ t('matchLogTitle') }}
                   </h3>
                 </div>
-                <span class="font-mono text-[10px]" style="color: var(--text-muted)">Zobrist 53-bit TT</span>
+                <span class="font-mono text-[10px]" style="color: var(--text-muted)">1v1 Bot Match</span>
               </div>
 
               <div class="space-y-2.5 text-xs">
                 <div
-                  v-for="(branch, bIdx) in activeScenario.thoughtLog"
-                  :key="bIdx"
+                  v-for="(entry, eIdx) in activeScenario.actionLog"
+                  :key="eIdx"
                   class="rounded-lg border p-2.5"
-                  :style="
-                    bIdx === 0
-                      ? 'border-color: rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.08)'
-                      : 'border-color: var(--border-subtle); background: var(--bg-surface)'
-                  "
+                  style="border-color: var(--border-subtle); background: var(--bg-surface)"
                 >
                   <div class="flex items-center justify-between font-mono text-[11px]">
-                    <span class="font-bold" :style="{ color: bIdx === 0 ? 'var(--ai-accent)' : 'var(--text-primary)' }">
-                      {{ branch.ply }}
-                    </span>
                     <span
                       class="font-bold"
-                      :style="{ color: branch.delta.startsWith('+') ? 'var(--status-positive)' : 'var(--status-negative)' }"
+                      :style="{ color: entry.actor === 'PYTHIA' ? 'var(--ai-accent)' : 'var(--brand-primary)' }"
                     >
-                      {{ branch.delta }} EV
+                      {{ entry.actor === 'PYTHIA' ? t('pythiaTag') : t('playerLabel') }}
+                    </span>
+                    <span style="color: var(--text-muted)">
+                      {{ entry.phase }}
                     </span>
                   </div>
                   <p class="mt-1 leading-snug" style="color: var(--text-secondary)">
-                    {{ branch.detail }}
+                    {{ entry.action }}
                   </p>
                 </div>
               </div>
             </div>
 
-            <!-- Blunder Analysis Preview -->
+            <!-- Unassisted Duel Rules -->
             <div
               class="rounded-xl border p-4"
-              style="border-color: rgba(225, 29, 72, 0.35); background-color: var(--bg-elevated)"
+              style="border-color: var(--border-subtle); background-color: var(--bg-elevated)"
             >
               <div class="flex items-center justify-between mb-2.5">
                 <div class="flex items-center gap-2">
-                  <ShieldAlert class="h-4 w-4" style="color: var(--brand-crimson)" />
-                  <h3 class="text-xs font-bold uppercase tracking-wider" style="color: var(--brand-crimson)">
-                    {{ t('blunderTitle') }}
+                  <Bot class="h-4 w-4" style="color: var(--brand-primary)" />
+                  <h3 class="text-xs font-bold uppercase tracking-wider" style="color: var(--text-primary)">
+                    {{ t('matchRulesTitle') }}
                   </h3>
                 </div>
                 <span
                   class="rounded px-2 py-0.5 font-mono text-[10px] font-bold"
-                  style="background: rgba(239, 68, 68, 0.16); color: var(--status-negative)"
+                  style="background: rgba(56, 189, 248, 0.14); color: var(--ai-accent)"
                 >
-                  -14.8% EV
+                  {{ t('matchRulesBadge') }}
                 </span>
               </div>
 
               <div class="space-y-2 text-xs">
-                <div class="rounded-lg border p-2.5" style="border-color: rgba(239, 68, 68, 0.3); background-color: var(--bg-canvas)">
-                  <div class="font-semibold" style="color: var(--status-negative)">
-                    {{ t('blunderBadTitle') }}
+                <div class="rounded-lg border p-2.5" style="border-color: var(--border-subtle); background-color: var(--bg-canvas)">
+                  <div class="font-semibold" style="color: var(--text-primary)">
+                    {{ t('matchRulesItem1Title') }}
                   </div>
                   <p class="mt-0.5 text-[11px]" style="color: var(--text-secondary)">
-                    {{ t('blunderBadDesc') }}
+                    {{ t('matchRulesItem1Desc') }}
                   </p>
                 </div>
-                <div class="rounded-lg border p-2.5" style="border-color: rgba(16, 185, 129, 0.35); background-color: var(--bg-canvas)">
-                  <div class="flex items-center justify-between font-semibold" style="color: var(--status-positive)">
-                    <span>{{ t('blunderGoodTitle') }}</span>
-                    <span class="font-mono">+9.2% EV</span>
+                <div class="rounded-lg border p-2.5" style="border-color: var(--border-subtle); background-color: var(--bg-canvas)">
+                  <div class="font-semibold" style="color: var(--text-primary)">
+                    {{ t('matchRulesItem2Title') }}
                   </div>
                   <p class="mt-0.5 text-[11px]" style="color: var(--text-secondary)">
-                    {{ t('blunderGoodDesc') }}
+                    {{ t('matchRulesItem2Desc') }}
                   </p>
                 </div>
               </div>
@@ -650,10 +607,8 @@ import {
   AlertTriangle,
   ArrowRight,
   Bot,
-  BrainCircuit,
   CheckCircle2,
   Cpu,
-  ShieldAlert,
   Sparkles,
   Swords,
   Vote,
@@ -723,15 +678,13 @@ interface ArenaScenario {
   turnLabel: string
   playerDeck: string
   pythiaDeck: string
-  playerWinPct: number
-  pythiaWinPct: number
   playerPrizes: number
   pythiaPrizes: number
   playerActive: { name: string; hp: string; energy: string; status: string }
   pythiaActive: { name: string; hp: string; energy: string; status: string }
   playerBench: string[]
   pythiaBench: string[]
-  thoughtLog: { ply: string; delta: string; detail: string }[]
+  actionLog: { actor: 'PLAYER' | 'PYTHIA'; phase: string; action: string }[]
 }
 
 const scenarios: ArenaScenario[] = [
@@ -741,39 +694,37 @@ const scenarios: ArenaScenario[] = [
     turnLabel: 'Tour 3 (Phase Principale)',
     playerDeck: 'Charizard ex / Pidgeot',
     pythiaDeck: 'Dragapult ex / Dusknoir',
-    playerWinPct: 62,
-    pythiaWinPct: 38,
     playerPrizes: 3,
     pythiaPrizes: 4,
     playerActive: {
       name: 'Dracaufeu ex',
       hp: '330 / 330',
       energy: '2x Énergie Feu (Obscurité Téra)',
-      status: 'Prêt : Obscurité Enflammée (270 Dégâts)',
+      status: 'Obscurité Enflammée disponible',
     },
     pythiaActive: {
       name: 'Lanssorien ex',
       hp: '200 / 320',
       energy: '1x Feu + 1x Psy',
-      status: 'Menace Fantôme Plongeante (6 marqueurs)',
+      status: '6 marqueurs de dégâts sur le Banc',
     },
-    playerBench: ['Roucarnage ex (Recherche Rapide dispo)', 'Salamèche · 70 PV', 'Favianos ex (Échange Équitable)'],
-    pythiaBench: ['Dispareptil · 90 PV', 'Skelénox · 60 PV', 'Noctunoir (130 dégâts latents)'],
-    thoughtLog: [
+    playerBench: ['Roucarnage ex', 'Salamèche · 70 PV', 'Favianos ex'],
+    pythiaBench: ['Dispareptil · 90 PV', 'Skelénox · 60 PV', 'Noctunoir'],
+    actionLog: [
       {
-        ply: 'Ply 1 (T) → Super Bonbon + Obscurité Enflammée',
-        delta: '+18.4%',
-        detail: 'Prend le KO sur Lanssorien ex mais laisse Skelénox évoluer au prochain tour.',
+        actor: 'PYTHIA',
+        phase: 'Tour 2 · Attaque',
+        action: 'Lanssorien ex utilise Fantôme Plongeant (200 dégâts sur le Poste Actif).',
       },
       {
-        ply: 'Ply 2 (T_adv) → Riposte Noctunoir + Attrape-Ultime',
-        delta: '-11.2%',
-        detail: 'Pythia anticipe Fantôme Explosif sur Salamèche + sniper sur Roucarnage ex.',
+        actor: 'PLAYER',
+        phase: 'Tour 3 · Action',
+        action: 'Super Bonbon joue Dracaufeu ex depuis Salamèche (Talent Règne Infernal activé).',
       },
       {
-        ply: 'Ply 3 (T+1) → Sceau Forestier + Bribe',
-        delta: '+9.2%',
-        detail: 'L’arbre 3-ply conserve 62% de victoire joueur si Roucarnage survit.',
+        actor: 'PLAYER',
+        phase: 'Tour 3 · Attaque',
+        action: 'Dracaufeu ex prépare Obscurité Enflammée sur Lanssorien ex.',
       },
     ],
   },
@@ -783,8 +734,6 @@ const scenarios: ArenaScenario[] = [
     turnLabel: 'Tour 1 Joueur 2',
     playerDeck: 'Gardevoir ex / Munkidori',
     pythiaDeck: 'Gholdengo ex / Budew',
-    playerWinPct: 54,
-    pythiaWinPct: 46,
     playerPrizes: 6,
     pythiaPrizes: 6,
     playerActive: {
@@ -797,25 +746,25 @@ const scenarios: ArenaScenario[] = [
       name: 'Rozbouton (Budew)',
       hp: '30 / 30',
       energy: '0 Énergie',
-      status: 'Pollen Démangeant (0 coût · Item-Lock)',
+      status: 'Pollen Démangeant actif',
     },
-    playerBench: ['Fortusimia (Adrena-Brain)', 'Tarsal · 70 PV'],
+    playerBench: ['Fortusimia', 'Tarsal · 70 PV'],
     pythiaBench: ['Mordudor · 70 PV', 'Mordudor · 70 PV', 'Amphinobi Radieux'],
-    thoughtLog: [
+    actionLog: [
       {
-        ply: 'Ply 1 (T) → Appel Famille + Pollen Démangeant',
-        delta: '+7.6%',
-        detail: 'Pythia bloque Super Bonbon / Faiblo Ball adverses dès le T1 J2.',
+        actor: 'PLAYER',
+        phase: 'Tour 1 · Préparation',
+        action: 'Pose Tarsal en Actif, attache 1 Énergie Psy et passe le tour.',
       },
       {
-        ply: 'Ply 2 (T_adv) → Recherche Professorale + Kirlia',
-        delta: '-4.1%',
-        detail: 'L’IA évalue la probabilité que le joueur pioche un Supporter de déblocage.',
+        actor: 'PYTHIA',
+        phase: 'Tour 1 J2 · Banc',
+        action: 'Joue Poffin Copain-Copain et place deux Mordudor sur le Banc.',
       },
       {
-        ply: 'Ply 3 (T+1) → Gromago ex (Pièce Bonus x2)',
-        delta: '+10.5%',
-        detail: 'Snowball vers l’avance aux cartes dès que le verrou saute.',
+        actor: 'PYTHIA',
+        phase: 'Tour 1 J2 · Attaque',
+        action: 'Rozbouton utilise Pollen Démangeant (10 dégâts, Objets bloqués au prochain tour).',
       },
     ],
   },

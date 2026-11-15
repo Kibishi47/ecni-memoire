@@ -4,16 +4,16 @@ import { createI18n, type OlydorLang } from '@olydor/ui'
 export const arenaTranslations = {
   fr: {
     comingSoonSuperTitle: 'COMING SOON',
-    heroBadge: 'ARÈNE TACTIQUE 1v1 — EN DÉVELOPPEMENT (COMING SOON)',
-    heroTitlePrefix: 'Affrontez ',
-    heroTitleMiddle: ', l’IA Lookahead 3-Ply de ',
+    heroBadge: 'ARÈNE 1v1 VS BOT PYTHIA — EN DÉVELOPPEMENT (COMING SOON)',
+    heroTitlePrefix: 'Affrontez le bot ',
+    heroTitleMiddle: ' en duel 1v1 sur ',
     heroSubtitle:
-      'L’Arène interactive 1v1 d’Olydor est actuellement en construction. Entraînez-vous bientôt en duel manuel contre une intelligence artificielle anticipant votre tour, sa contre-attaque et votre riposte (T → T_adv → T+1).',
-    milestone1Label: 'Moteur 3-Ply & Zobrist',
+      'L’Arène interactive d’Olydor est actuellement en construction. Disputez bientôt de vrais matchs 1v1 tour par tour contre le bot autonome Pythia sur un plateau Pokémon TCG complet.',
+    milestone1Label: 'Moteur de Règles Pokémon TCG',
     milestone1Status: 'Opérationnel',
     milestone2Label: 'Olydor Insight Simulator',
     milestone2Status: 'Ouvert en Bêta',
-    milestone3Label: 'Arène Tactique Pythia 1v1',
+    milestone3Label: 'Arène 1v1 vs Bot Pythia',
     milestone3Status: 'Bientôt disponible',
     ctaVoteBeta: 'Voter pour les priorités de l’Arène (Bêta)',
     ctaSimNow: 'Simuler 1 000 parties sur Insight',
@@ -21,9 +21,9 @@ export const arenaTranslations = {
     deckValidBadge: 'Deck PTCGL Importé & Validé via Deep-Link (?deck=)',
     deckDecodedBadge: 'Deck PTCGL Décrypté via Deep-Link (?deck=)',
     deckValidHeadline:
-      "Votre deck de 60 cartes est prêt et validé pour l'Arène ! En attendant l'ouverture des duels interactifs en 1v1, lancez un duel automatisé de 1 000 parties contre Pythia sur le Simulateur.",
+      "Votre deck de 60 cartes est prêt et validé ! En attendant l'ouverture des matchs 1v1 contre le bot Pythia dans l'Arène, testez votre liste sur 1 000 parties automatisées sur Insight.",
     deckIncompleteHeadline:
-      "{count} cartes décodées depuis le Simulateur (format standard attendu : 60 cartes). En attendant l'ouverture des duels interactifs en 1v1, ajustez ou lancez votre liste contre Pythia sur le Simulateur.",
+      "{count} cartes décodées depuis Insight (format standard attendu : 60 cartes). En attendant l'ouverture des duels 1v1 contre le bot Pythia, ajustez ou testez votre liste sur le Simulateur.",
     deckErrorHeadline:
       'Le paramètre ?deck= n’a pas pu être décodé. Vérifiez le lien exporté depuis Insight.',
     deckStatTotal: 'Total :',
@@ -36,73 +36,74 @@ export const arenaTranslations = {
     deckLaunchSimBtn: 'Lancer 1 000 parties sur Insight',
     deckMoreCards: '+{count} autres cartes',
 
-    boardTitle: 'Aperçu Interactif — Plateau de Duel 1v1',
-    boardBadge: 'Simulation Temps Réel',
-    boardSubtitlePrefix: 'Joueur vs ',
-    boardSubtitleSuffix: ' — Moteur @olydor/engine 3-Ply Lookahead',
-    playerLabel: 'Joueur',
-    pythiaLabel: 'Pythia (IA 3-Ply)',
-    pythiaTag: 'Pythia (IA)',
+    boardTitle: 'Aperçu — Plateau de Duel 1v1 vs Bot Pythia',
+    boardBadge: 'Duel Sans Assistance',
+    boardSubtitlePrefix: 'Match Joueur vs ',
+    boardSubtitleSuffix: ' — Plateau Pokémon TCG Standard',
+    playerLabel: 'Vous (Joueur)',
+    pythiaLabel: 'Bot Pythia',
+    pythiaTag: 'Bot Pythia',
     prizesLabel: 'Récompenses :',
     handShortLabel: 'Main :',
-    activeSpotAi: 'Poste Actif (IA)',
-    benchAi: 'Banc (IA)',
-    activeSpotPlayer: 'Poste Actif (Joueur)',
-    benchPlayer: 'Banc (Joueur)',
-    vsDividerSuffix: ' · Zone de Confrontation',
+    activeSpotAi: 'Poste Actif (Adversaire)',
+    benchAi: 'Banc (Adversaire)',
+    activeSpotPlayer: 'Poste Actif (Vous)',
+    benchPlayer: 'Banc (Vous)',
+    vsDividerSuffix: ' · Zone de Combat',
 
-    thoughtLogTitle: 'Journal de Pensée 3-Ply (Pythia)',
-    blunderTitle: 'Blunder Analysis — Aperçu Post-Match',
-    blunderBadTitle: '✕ Coup joué : Ordres du Boss sur Fezandipiti ex',
-    blunderBadDesc:
-      'Expose votre attaquant principal à un contre-KO immédiat (probabilité chute à 47%).',
-    blunderGoodTitle: '✓ Ligne Optimale 3-Ply : Échange + Iono + Bribe',
-    blunderGoodDesc:
-      'Force l’adversaire à 2 cartes en main et sécurise votre Setup T+1 sans bris de prix.',
+    matchLogTitle: 'Journal des Actions du Tour',
+    matchRulesBadge: 'Duel Libre',
+    matchRulesTitle: 'Conditions Réelles de Partie',
+    matchRulesItem1Title: 'Adversaire autonome',
+    matchRulesItem1Desc:
+      'Pythia joue son tour comme un adversaire réel : ses plans et sa main restent entièrement cachés.',
+    matchRulesItem2Title: 'Aucune aide ni coaching',
+    matchRulesItem2Desc:
+      'Pas de suggestion de coup, pas d’indicateur de probabilité de victoire et pas d’indices en direct.',
 
-    archTitle: 'Sous le capot de Pythia 3-Ply',
-    archItem1Title: 'Zobrist 53-bit & Transposition Table',
+    archTitle: 'Ce que proposera l’Arène 1v1',
+    archItem1Title: 'Affrontement 1v1 contre le bot Pythia',
     archItem1Desc:
-      'Hachage commutatif dédupliquant instantanément les permutations d’ordre sur Banc ou en Main.',
-    archItem2Title: 'Moteur Flat Buffer zero-allocation',
+      'Enchaînez des duels complets tour par tour face au bot Pythia pour tester vos sorties et décisions en match.',
+    archItem2Title: 'Sélection du deck joué par Pythia',
     archItem2Desc:
-      'Mutations mutateInPlace zéro-GC permettant d’évaluer des milliers de séquences en millisecondes.',
-    archItem3Title: 'Blunder Analysis Automatisée',
+      'Choisissez librement l’archétype méta que Pythia pilote contre votre deck afin de travailler vos matchups.',
+    archItem3Title: 'Import rapide de vos 60 cartes',
     archItem3Desc:
-      'Compare chaque décision humaine face au Top-3 des branches calculées et chiffre le delta d’EV.',
+      'Importez votre liste depuis Pokémon TCG Live ou Insight et affrontez directement le bot sur plateau.',
 
     roadmapBadge: 'Feuille de route ouverte aux testeurs',
-    roadmapTitle: "Quelle fonctionnalité voulez-vous en premier dans l'Arène ?",
+    roadmapTitle: "Qu'attendez-vous en priorité pour les duels contre Pythia ?",
     roadmapSubtitle:
-      'Priorisez les modules d’entraînement interactifs à déployer dès la fin de la Bêta du Simulateur :',
-    roadmapItem1Title: 'Takeback & Replay de branche',
+      'Priorisez les premiers ajouts pour le mode duel 1v1 contre le bot dès son lancement :',
+    roadmapItem1Title: 'Choix étendu de decks adverses pour Pythia',
     roadmapItem1Desc:
-      'Revenir d’un coup en arrière pour tester une alternative face à Pythia et voir l’évolution de la Win Probability.',
-    roadmapItem2Title: 'Coach en direct (Live Hints)',
+      'Sélectionner n’importe quel deck du format Standard pour que Pythia le joue contre vous.',
+    roadmapItem2Title: 'Choix de l’ordre de jeu (Tour 1 / Tour 2)',
     roadmapItem2Desc:
-      'Affichage temps réel des 3 meilleures séquences suggérées pendant votre tour avec score EV.',
-    roadmapItem3Title: 'Puzzles de fin de partie (Lethal / Prize Map)',
+      'Décider de commencer premier ou deuxième pour entraîner des séquences d’ouverture précises.',
+    roadmapItem3Title: 'Enchaînement rapide en Best-of-3',
     roadmapItem3Desc:
-      'Défis quotidiens issus de vraies parties compétitives où un seul séquençage mène à la victoire.',
+      'Disputer une série de 2 ou 3 manches contre le même adversaire IA sans recharger votre deck.',
     roadmapFooter: 'Sondage communautaire Olydor (30 sec)',
     roadmapVoteBtn: 'Voter via Google Form',
 
-    seoTitle: 'Olydor Arena — Duel 1v1 vs Pythia IA 3-Ply (Coming Soon)',
+    seoTitle: 'Olydor Arena — Duel 1v1 vs Bot Pythia (Coming Soon)',
     seoDescription:
-      'Affrontez Pythia, l’IA 3-Ply Lookahead d’Olydor en duel 1v1 Pokémon TCG : barre de Win Probability, journal tactique T → T_adv → T+1 et Blunder Analysis.',
+      'Affrontez prochainement le bot IA Pythia en duel 1v1 Pokémon TCG sur un plateau interactif sans assistance.',
   },
   en: {
     comingSoonSuperTitle: 'COMING SOON',
-    heroBadge: '1v1 TACTICAL ARENA — UNDER DEVELOPMENT (COMING SOON)',
-    heroTitlePrefix: 'Challenge ',
-    heroTitleMiddle: ", Olydor's 3-Ply Lookahead AI — ",
+    heroBadge: '1v1 ARENA VS PYTHIA BOT — UNDER DEVELOPMENT (COMING SOON)',
+    heroTitlePrefix: 'Battle the ',
+    heroTitleMiddle: ' bot in 1v1 duels on ',
     heroSubtitle:
-      'The interactive 1v1 Olydor Arena is currently under active development. Soon you will play manual duels against a deterministic AI lookahead engine evaluating T → T_opp → T+1 branches live.',
-    milestone1Label: '3-Ply Engine & Zobrist',
+      'The interactive Olydor Arena is currently under active development. Soon you will play full turn-by-turn 1v1 Pokémon TCG matches against the autonomous Pythia bot on an interactive board.',
+    milestone1Label: 'Pokémon TCG Rules Engine',
     milestone1Status: 'Operational',
     milestone2Label: 'Olydor Insight Simulator',
     milestone2Status: 'Open Beta',
-    milestone3Label: 'Pythia 1v1 Tactical Arena',
+    milestone3Label: '1v1 Arena vs Pythia Bot',
     milestone3Status: 'Coming Soon',
     ctaVoteBeta: 'Vote on Arena Roadmap (Beta)',
     ctaSimNow: 'Simulate 1,000 Games on Insight',
@@ -110,9 +111,9 @@ export const arenaTranslations = {
     deckValidBadge: 'PTCGL Deck Validated via Deep-Link (?deck=)',
     deckDecodedBadge: 'PTCGL Deck Decoded via Deep-Link (?deck=)',
     deckValidHeadline:
-      'Your 60-card deck is validated and Arena-ready! While 1v1 interactive duels are in development, run 1,000 automated games against Pythia in the Insight Simulator.',
+      'Your 60-card deck is validated! While 1v1 matches against the Pythia bot are in development, run 1,000 automated benchmark games in the Insight Simulator.',
     deckIncompleteHeadline:
-      '{count} cards decoded from Insight (Standard requires 60 cards). Refine or benchmark your deck against Pythia in the Simulator while 1v1 Arena opens.',
+      '{count} cards decoded from Insight (Standard requires 60 cards). Refine or benchmark your deck in the Simulator while 1v1 Arena vs Pythia opens.',
     deckErrorHeadline:
       'Could not decode the ?deck= query parameter. Check the exported link from Insight.',
     deckStatTotal: 'Total:',
@@ -125,60 +126,61 @@ export const arenaTranslations = {
     deckLaunchSimBtn: 'Run 1,000 Games on Insight',
     deckMoreCards: '+{count} more cards',
 
-    boardTitle: 'Interactive Preview — 1v1 Duel Board',
-    boardBadge: 'Real-Time Mockup',
+    boardTitle: 'Preview — 1v1 Duel Board vs Pythia Bot',
+    boardBadge: 'Unassisted Duel',
     boardSubtitlePrefix: 'Player vs ',
-    boardSubtitleSuffix: ' — @olydor/engine 3-Ply Lookahead',
-    playerLabel: 'Player',
-    pythiaLabel: 'Pythia (3-Ply AI)',
-    pythiaTag: 'Pythia (AI)',
+    boardSubtitleSuffix: ' — Standard Pokémon TCG Board',
+    playerLabel: 'You (Player)',
+    pythiaLabel: 'Pythia Bot',
+    pythiaTag: 'Pythia Bot',
     prizesLabel: 'Prizes:',
     handShortLabel: 'Hand:',
-    activeSpotAi: 'Active Spot (AI)',
-    benchAi: 'Bench (AI)',
-    activeSpotPlayer: 'Active Spot (Player)',
-    benchPlayer: 'Bench (Player)',
-    vsDividerSuffix: ' · Combat Zone',
+    activeSpotAi: 'Active Spot (Opponent)',
+    benchAi: 'Bench (Opponent)',
+    activeSpotPlayer: 'Active Spot (You)',
+    benchPlayer: 'Bench (You)',
+    vsDividerSuffix: ' · Battle Board',
 
-    thoughtLogTitle: '3-Ply Thought Stream (Pythia)',
-    blunderTitle: 'Blunder Analysis — Post-Match Preview',
-    blunderBadTitle: "✕ Played Line: Boss's Orders on Fezandipiti ex",
-    blunderBadDesc:
-      'Exposes your main attacker to an immediate return KO (win odds drop to 47%).',
-    blunderGoodTitle: '✓ Optimal 3-Ply Line: Switch + Iono + Prime Catcher',
-    blunderGoodDesc:
-      'Disrupts opponent hand down to 2 cards and secures your T+1 prize map cleanly.',
+    matchLogTitle: 'Turn Action Log',
+    matchRulesBadge: 'Pure Duel',
+    matchRulesTitle: 'Realistic Match Rules',
+    matchRulesItem1Title: 'Autonomous bot opponent',
+    matchRulesItem1Desc:
+      'Pythia plays its turns like a real opponent — its hidden hand and internal plans are never exposed.',
+    matchRulesItem2Title: 'Pure match conditions (no coaching)',
+    matchRulesItem2Desc:
+      'No move suggestions or tactical coaching — every decision on the board is yours alone.',
 
-    archTitle: 'Inside Pythia 3-Ply Architecture',
-    archItem1Title: 'Zobrist 53-bit & Transposition Table',
+    archTitle: 'What the 1v1 Arena Offers',
+    archItem1Title: 'Head-to-Head Duels vs Pythia Bot',
     archItem1Desc:
-      'Commutative state hashing deduplicating Bench and Hand permutations instantaneously.',
-    archItem2Title: 'Zero-Allocation Flat Buffer Engine',
+      'Play complete turn-by-turn Pokémon TCG matches against Pythia to test your decklist under match pressure.',
+    archItem2Title: 'Pick Pythia’s Meta Decklist',
     archItem2Desc:
-      'In-place zero-GC mutations evaluating thousands of tactical branches per millisecond.',
-    archItem3Title: 'Automated Blunder Analysis',
+      'Select any curated competitive archetype for Pythia to pilot against you and practice key matchups.',
+    archItem3Title: '1-Click 60-Card Deck Import',
     archItem3Desc:
-      'Compares every human action against the Top-3 computed lines and quantifies EV delta.',
+      'Import your list directly from Pokémon TCG Live or Insight and jump into a bot match.',
 
     roadmapBadge: 'Beta Community Roadmap',
-    roadmapTitle: 'Which feature do you want first in the Arena?',
+    roadmapTitle: 'Which feature do you want first for Pythia bot matches?',
     roadmapSubtitle:
-      'Help prioritize the interactive training modules shipping right after Simulator Beta:',
-    roadmapItem1Title: 'Takeback & Branch Replay',
+      'Help prioritize the first features shipping for the 1v1 bot duel mode:',
+    roadmapItem1Title: 'Expanded Meta Deck Roster for Pythia',
     roadmapItem1Desc:
-      'Step back one move to test an alternative sequence against Pythia and watch Win Probability react.',
-    roadmapItem2Title: 'Live Tactical Coach (Hints)',
+      'Choose freely which Standard metagame deck Pythia plays against your list.',
+    roadmapItem2Title: 'Going First / Going Second Selector',
     roadmapItem2Desc:
-      'Real-time EV ranking of the top 3 suggested action sequences during your turn.',
-    roadmapItem3Title: 'Endgame Lethal / Prize Puzzles',
+      'Specifically practice your Turn 1 or Turn 2 setups against the bot.',
+    roadmapItem3Title: 'Quick Best-of-3 Match Flow',
     roadmapItem3Desc:
-      'Daily competitive scenarios extracted from tournament games with one winning line.',
+      'Play a 3-game set back-to-back against the same opponent list without re-importing.',
     roadmapFooter: 'Olydor Community Survey (30 sec)',
     roadmapVoteBtn: 'Vote via Google Form',
 
-    seoTitle: 'Olydor Arena — 1v1 Duel vs Pythia 3-Ply AI (Coming Soon)',
+    seoTitle: 'Olydor Arena — 1v1 Duel vs Pythia Bot (Coming Soon)',
     seoDescription:
-      'Coming soon: battle Pythia, Olydor’s 3-Ply Lookahead Pokémon TCG AI with live Win Probability Bar and post-game Blunder Analysis.',
+      'Coming soon: battle the Pythia AI bot in unassisted 1v1 Pokémon TCG duels on an interactive board.',
   },
 } as const
 

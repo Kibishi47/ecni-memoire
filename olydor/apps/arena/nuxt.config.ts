@@ -37,13 +37,13 @@ export default defineNuxtConfig({
       htmlAttrs: { lang: 'fr', class: 'dark' },
       charset: 'utf-8',
       viewport: 'width=device-width, initial-scale=1',
-      title: 'Olydor Arena — Duel 1v1 vs Pythia IA 3-Ply (Coming Soon)',
+      title: 'Olydor Arena — Duel 1v1 vs Bot Pythia (Coming Soon)',
       meta: [
         { name: 'theme-color', content: '#0c0f16' },
         {
           name: 'description',
           content:
-            'Arène tactique 1v1 Olydor (Coming Soon) : affrontez Pythia, notre IA 3-Ply Lookahead Pokémon TCG avec Win Probability en direct et Blunder Analysis.',
+            'Arène 1v1 Olydor (Coming Soon) : affrontez le bot autonome Pythia en duel Pokémon TCG tour par tour sur un plateau interactif.',
         },
       ],
       link: [

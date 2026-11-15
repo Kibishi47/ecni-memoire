@@ -5,8 +5,8 @@
     :aria-label="t('betaRegionAria')"
     class="relative z-50 border-b text-xs sm:text-sm"
     style="
-      background: linear-gradient(90deg, rgba(225, 29, 72, 0.16) 0%, rgba(255, 107, 0, 0.18) 50%, rgba(255, 194, 26, 0.14) 100%), var(--bg-surface);
-      border-color: rgba(255, 107, 0, 0.35);
+      background-color: var(--bg-surface);
+      border-color: var(--border-subtle);
       color: var(--text-primary);
     "
   >

@@ -101,9 +101,9 @@ export const uiTranslations = {
     // Navbar
     navHub: 'Hub',
     navInsight: 'Insight',
-    navArena: 'Arène IA',
+    navArena: 'Arène Bot',
     navSoonBadge: 'SOON',
-    navArenaDisabledTitle: 'Arène IA Pythia — Bientôt disponible (accès désactivé)',
+    navArenaDisabledTitle: 'Arène 1v1 vs bot Pythia — Bientôt disponible (accès désactivé)',
     navSwitchLangLabel: 'Passer en Anglais',
     navLangCode: 'FR',
     navSwitchThemeToLight: 'Passer au thème clair',
@@ -115,17 +115,17 @@ export const uiTranslations = {
     betaRegionAria: 'Programme Bêta Ouverte Olydor',
     betaBadge: 'BÊTA OUVERTE',
     betaText:
-      'Olydor est en phase Bêta ouverte — contribuez à améliorer le moteur 3-ply et la future Arène IA Pythia !',
+      'Olydor est en phase Bêta ouverte — aidez-nous à améliorer le Simulateur et la future Arène 1v1 contre le bot Pythia !',
     betaFeedbackBtn: 'Devenir Bêta-Testeur',
     betaDismissAria: 'Masquer le bandeau bêta pour cette session',
 
     // Footer
     footerDesc:
-      'Écosystème d’analyse compétitive Pokémon TCG : simulation Monte-Carlo 3-ply haute vélocité et laboratoire d’optimisation de decklists.',
+      'Écosystème d’analyse compétitive Pokémon TCG : simulateur Monte-Carlo haute vélocité et laboratoire d’optimisation de decklists.',
     footerPlatformsHeading: 'Plateforme',
     footerHubLink: 'Hub — olydor.app',
     footerInsightLink: 'Insight & Simulateur — insight.olydor.app',
-    footerArenaDisabled: 'Arène IA Pythia — arena.olydor.app (Bientôt disponible)',
+    footerArenaDisabled: 'Arène 1v1 vs bot Pythia — arena.olydor.app (Bientôt disponible)',
     footerBetaCta: 'Rejoindre le programme Bêta',
     footerLegalHeading: 'Informations Légales',
     footerLegalNotice: 'Mentions Légales',
@@ -134,19 +134,12 @@ export const uiTranslations = {
     footerCopyright: '© {year} Olydor',
 
     // Bug report modal
-    bugModalTitle: 'Signaler un bug ou une carte erronée',
-    bugModalSubtitle: 'Transmis directement à l’équipe Olydor via api.olydor.app',
+    bugModalTitle: 'Signaler un bug',
+    bugModalSubtitle: 'Écrivez directement votre commentaire pour l’équipe Olydor.',
     bugModalCloseAria: 'Fermer',
-    bugTypeLabel: 'Type de signalement',
-    bugTypeCardTitle: 'CARD_MODEL_ERROR',
-    bugTypeCardDesc: 'Modèle ou effet d’une carte',
-    bugTypeEngineTitle: 'ENGINE_RULE_ERROR',
-    bugTypeEngineDesc: 'Règle TCG / décision IA 3-ply',
-    bugCardIdLabel: 'Identifiant de carte (ex: sv03-125)',
-    bugDescLabel: 'Description du problème observé',
-    bugDescPlaceholder: 'Décrivez le comportement attendu vs ce que Olydor a exécuté...',
-    bugErrorMissingCardId:
-      'Veuillez saisir un identifiant de carte (ex: sv03-125) pour une erreur de carte.',
+    bugDescLabel: 'Votre commentaire',
+    bugDescPlaceholder: 'Décrivez directement le problème rencontré ou ce qui devrait être corrigé...',
+    bugErrorEmptyComment: 'Veuillez écrire un commentaire avant d’envoyer votre signalement.',
     bugErrorServer: 'Erreur serveur ({status})',
     bugErrorRateLimit: 'Trop de signalements envoyés. Réessayez dans {retry}s.',
     bugErrorNetwork: 'Impossible de joindre l’API Olydor.',
@@ -157,16 +150,16 @@ export const uiTranslations = {
   },
   en: {
     // Subtitles
-    subtitleInsight: 'Monte Carlo 3-Ply',
-    subtitleArena: 'Pythia AI Arena',
+    subtitleInsight: 'Deck Simulator',
+    subtitleArena: '1v1 Bot Arena',
     subtitleWeb: 'Pokémon TCG Analytics',
 
     // Navbar
     navHub: 'Hub',
     navInsight: 'Insight',
-    navArena: 'AI Arena',
+    navArena: 'Bot Arena',
     navSoonBadge: 'SOON',
-    navArenaDisabledTitle: 'Pythia AI Arena — Coming Soon (disabled)',
+    navArenaDisabledTitle: '1v1 Arena vs Pythia bot — Coming Soon (disabled)',
     navSwitchLangLabel: 'Switch to French',
     navLangCode: 'EN',
     navSwitchThemeToLight: 'Switch to light theme',
@@ -178,17 +171,17 @@ export const uiTranslations = {
     betaRegionAria: 'Olydor Open Beta Program',
     betaBadge: 'OPEN BETA',
     betaText:
-      'Olydor is in open Beta testing — help shape the 3-ply Pokémon TCG engine & Pythia AI Arena.',
+      'Olydor is in open Beta testing — help shape the Simulator and upcoming 1v1 Arena against the Pythia bot!',
     betaFeedbackBtn: 'Become a Beta Tester',
     betaDismissAria: 'Dismiss beta banner',
 
     // Footer
     footerDesc:
-      'High-throughput Monte Carlo simulator and 3-ply lookahead tactical engine built for competitive Pokémon TCG Standard analysis.',
+      'High-throughput Monte Carlo simulator and deck optimization platform built for competitive Pokémon TCG Standard analysis.',
     footerPlatformsHeading: 'Ecosystem',
     footerHubLink: 'Hub — olydor.app',
     footerInsightLink: 'Insight Simulator — insight.olydor.app',
-    footerArenaDisabled: 'AI Arena — arena.olydor.app (Coming Soon)',
+    footerArenaDisabled: '1v1 Arena vs Pythia bot — arena.olydor.app (Coming Soon)',
     footerBetaCta: 'Beta Feedback Form',
     footerLegalHeading: 'Legal & Compliance',
     footerLegalNotice: 'Legal Notice',
@@ -197,18 +190,12 @@ export const uiTranslations = {
     footerCopyright: '© {year} Olydor',
 
     // Bug report modal
-    bugModalTitle: 'Report an Issue',
-    bugModalSubtitle: 'Sent directly to Olydor maintainers',
+    bugModalTitle: 'Report a Bug',
+    bugModalSubtitle: 'Write your feedback directly for the Olydor team.',
     bugModalCloseAria: 'Close',
-    bugTypeLabel: 'Issue Type',
-    bugTypeCardTitle: 'CARD_MODEL_ERROR',
-    bugTypeCardDesc: 'Compiled card effect / stats',
-    bugTypeEngineTitle: 'ENGINE_RULE_ERROR',
-    bugTypeEngineDesc: 'TCG rule / 3-ply AI behavior',
-    bugCardIdLabel: 'Card ID (e.g. sv03-125)',
-    bugDescLabel: 'Description',
-    bugDescPlaceholder: 'Describe the expected behavior vs what Olydor did...',
-    bugErrorMissingCardId: 'Please enter a Card ID (e.g. sv03-125) for a card model report.',
+    bugDescLabel: 'Your comment',
+    bugDescPlaceholder: 'Describe the issue you ran into or what needs to be fixed...',
+    bugErrorEmptyComment: 'Please write a comment before submitting your report.',
     bugErrorServer: 'Server error ({status})',
     bugErrorRateLimit: 'Too many reports sent. Please wait {retry}s.',
     bugErrorNetwork: 'Unable to reach Olydor API.',

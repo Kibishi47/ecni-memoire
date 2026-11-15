@@ -102,7 +102,7 @@ function formatWinReason(reason: string | null): string {
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[#263044] pb-4">
       <div>
         <div class="flex items-center gap-2">
-          <span class="rounded-md bg-amber-950/450 px-2 py-0.5 font-mono text-xs font-bold text-white">
+          <span class="rounded-md border border-amber-500/40 bg-amber-950/60 px-2 py-0.5 font-mono text-xs font-bold text-amber-200">
             INSPECTEUR ?debug=true
           </span>
           <h3 class="text-base font-bold text-[#f8fafc]">
@@ -141,7 +141,7 @@ function formatWinReason(reason: string | null): string {
         <select
           v-model="selectedGameIndex"
           aria-label="Sélectionner la partie tracée"
-          class="rounded-lg border border-slate-900 bg-[#ff6b00] px-3 py-1.5 font-mono text-xs font-bold text-white"
+          class="rounded-lg border border-[#263044] bg-[#0c0f16] px-3 py-1.5 font-mono text-xs font-bold text-[#ff8a00]"
         >
           <option v-for="g in filteredGames" :key="g.gameIndex" :value="g.gameIndex">
             Partie #{{ g.gameIndex }} — {{ g.winner === 'PLAYER' ? 'VICTOIRE' : g.winner === 'OPPONENT' ? 'DÉFAITE' : 'ÉGALITÉ' }} vs {{ g.opponentName }} ({{ g.totalTurns }}t)
@@ -393,9 +393,9 @@ function formatWinReason(reason: string | null): string {
       <!-- 3. DOUBLE PLATEAU (JOUEUR VS ADVERSAIRE) AU TOUR SÉLECTIONNÉ -->
       <div v-if="activeTurn && displayedPlayerBoard && displayedOpponentBoard" class="space-y-5">
         <!-- Bandeau résumé du tour actif -->
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#263044] bg-[#ff6b00] px-4 py-3 text-white">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#263044] bg-[#1b2232] px-4 py-3 text-[#f8fafc]">
           <div class="flex flex-wrap items-center gap-2.5">
-            <span class="rounded bg-[#131823]/15 px-2 py-0.5 font-mono text-xs font-bold">
+            <span class="rounded border border-[#263044] bg-[#0c0f16] px-2 py-0.5 font-mono text-xs font-bold text-[#ff8a00]">
               TOUR {{ activeTurn.turnNumber }} — {{ activeTurn.actingPlayer === 'PLAYER' ? 'TOUR DU JOUEUR' : 'TOUR DE L’ADVERSAIRE' }}
             </span>
             <span v-if="activeTurn.drawnCardName" class="text-xs text-[#8a93a2]">
@@ -403,7 +403,7 @@ function formatWinReason(reason: string | null): string {
             </span>
             <span
               v-if="activeTurn.perturbationNote"
-              class="rounded bg-amber-950/450 px-2 py-0.5 text-xs font-bold text-[#f8fafc]"
+              class="rounded border border-amber-500/40 bg-amber-950/60 px-2 py-0.5 text-xs font-bold text-amber-200"
             >
               [Perturbation] {{ activeTurn.perturbationNote }}
             </span>

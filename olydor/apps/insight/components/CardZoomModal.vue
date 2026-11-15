@@ -194,7 +194,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
         @click.stop="prevCard"
         :aria-label="t('prevCard')"
         :title="t('prevCard')"
-        class="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 bg-[#ff6b00]/95 text-slate-200 shadow-lg transition hover:border-indigo-400 hover:bg-[#38bdf8] hover:text-white focus:outline-none"
+        class="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#263044] bg-[#1b2232]/95 text-[#f8fafc] shadow-lg transition hover:border-[#ff6b00] hover:bg-[#ff6b00] hover:text-white focus:outline-none"
       >
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -203,7 +203,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
 
       <!-- Boîte Modal Principale -->
       <div
-        class="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-[#ff6b00] text-white shadow-2xl sm:flex-row"
+        class="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-[#263044] bg-[#131823] text-[#f8fafc] shadow-2xl sm:flex-row"
       >
         <!-- Flèches mobiles compactes superposées -->
         <button
@@ -211,7 +211,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           type="button"
           @click.stop="prevCard"
           :aria-label="t('prevCard')"
-          class="sm:hidden absolute left-2 top-36 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 bg-[#ff6b00]/90 text-white shadow-md hover:bg-[#38bdf8]"
+          class="sm:hidden absolute left-2 top-36 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-[#263044] bg-[#1b2232]/90 text-[#f8fafc] shadow-md hover:bg-[#ff6b00] hover:text-white"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -222,7 +222,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           type="button"
           @click.stop="nextCard"
           :aria-label="t('nextCard')"
-          class="sm:hidden absolute right-2 top-36 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 bg-[#ff6b00]/90 text-white shadow-md hover:bg-[#38bdf8]"
+          class="sm:hidden absolute right-2 top-36 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-[#263044] bg-[#1b2232]/90 text-[#f8fafc] shadow-md hover:bg-[#ff6b00] hover:text-white"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -284,12 +284,12 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
           <!-- ENTÊTE DE LA CARTE -->
           <div class="pr-8">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="rounded bg-sky-950/400/20 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-300">
+              <span class="rounded bg-sky-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-300">
                 {{ getCardSubCat(activeCard) }}
               </span>
               <span
                 v-if="getCardHp(activeCard)"
-                class="rounded bg-emerald-950/450/20 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300"
+                class="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300"
               >
                 {{ getCardHp(activeCard) }} {{ t('cardHp') }}
               </span>
@@ -316,7 +316,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
               :class="
                 activeTab === 'info'
                   ? 'bg-[#38bdf8] text-white shadow-xs'
-                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#ff8a00] hover:text-white'
+                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#1b2232] hover:text-white'
               "
             >
               {{ t('tabCardInfo') }}
@@ -328,7 +328,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
               :class="
                 activeTab === 'ai'
                   ? 'bg-[#38bdf8] text-white shadow-xs'
-                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#ff8a00] hover:text-white'
+                  : 'bg-slate-800/70 text-[#8a93a2] hover:bg-[#1b2232] hover:text-white'
               "
             >
               {{ t('tabCardAiLogic') }}
@@ -365,7 +365,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                     <span class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
                       {{ t('aiRoleLabel') }}
                     </span>
-                    <span class="rounded-md bg-sky-950/400/25 px-2.5 py-0.5 text-xs font-bold text-indigo-200">
+                    <span class="rounded-md bg-sky-500/15 px-2.5 py-0.5 text-xs font-bold text-indigo-200">
                       {{ aiBreakdown.roleLabel }}
                     </span>
                   </div>
@@ -386,7 +386,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                     </span>
                     <span
                       v-if="aiBreakdown.evolutionChainText"
-                      class="rounded bg-emerald-950/450/15 px-2 py-0.5 font-semibold text-emerald-200"
+                      class="rounded bg-emerald-500/15 px-2 py-0.5 font-semibold text-emerald-200"
                     >
                       {{ t('aiEvolutionLine') }} : {{ aiBreakdown.evolutionChainText }}
                     </span>
@@ -430,9 +430,9 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                           class="h-full rounded-full transition-all"
                           :class="
                             phase.tier === 'high'
-                              ? 'bg-emerald-950/450'
+                              ? 'bg-emerald-500'
                               : phase.tier === 'medium'
-                                ? 'bg-sky-950/400'
+                                ? 'bg-sky-500'
                                 : 'bg-slate-600'
                           "
                           :style="{ width: `${phase.pct}%` }"
@@ -502,26 +502,26 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                   >
                     <div class="flex flex-wrap items-center justify-between gap-2">
                       <div class="font-bold text-white">{{ act.title }}</div>
-                      <span class="rounded bg-sky-950/400/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
+                      <span class="rounded bg-sky-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
                         {{ act.actionTypeLabel }}
                       </span>
                     </div>
 
                     <div class="flex flex-wrap gap-1.5 text-[11px]">
-                      <span class="rounded bg-[#ff6b00] px-2 py-0.5 text-[#8a93a2]">
+                      <span class="rounded border border-[#263044] bg-[#0c0f16] px-2 py-0.5 text-[#8a93a2]">
                         {{ act.timingLabel }}
                       </span>
                       <span
                         v-for="(hint, tIdx) in act.turn1Hints"
                         :key="tIdx"
-                        class="rounded bg-[#ff6b00] px-2 py-0.5 text-[#8a93a2]"
+                        class="rounded border border-[#263044] bg-[#0c0f16] px-2 py-0.5 text-[#8a93a2]"
                       >
                         {{ hint }}
                       </span>
                       <span
                         v-for="(costBadge, cIdx) in act.costs"
                         :key="`c_${cIdx}`"
-                        class="rounded bg-amber-950/450/20 px-2 py-0.5 font-semibold text-amber-200"
+                        class="rounded bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-200"
                       >
                         {{ costBadge }}
                       </span>
@@ -534,7 +534,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                       </div>
                     </div>
 
-                    <div v-if="act.effectSentences.length > 0" class="space-y-1 rounded-lg bg-[#ff6b00]/80 p-2.5 text-slate-200">
+                    <div v-if="act.effectSentences.length > 0" class="space-y-1 rounded-lg border border-[#263044] bg-[#0c0f16]/90 p-2.5 text-[#f8fafc]">
                       <div v-for="(sentence, eIdx) in act.effectSentences" :key="eIdx">
                         {{ sentence }}
                       </div>
@@ -567,7 +567,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
 
             <div
               v-if="bugReport.isPanelOpen.value"
-              class="space-y-2.5 rounded-xl border border-slate-700 bg-slate-950/90 p-3.5 text-xs"
+              class="space-y-2.5 rounded-xl border border-[#263044] bg-[#0c0f16] p-3.5 text-xs"
             >
               <div class="font-bold text-slate-200">
                 {{ t('reportTitleCard', { cardId: cardModel?.cardId || (activeCard && 'cardId' in activeCard ? activeCard.cardId : '') }) }}
@@ -578,7 +578,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                 rows="3"
                 maxlength="1000"
                 :placeholder="t('reportCommentPlaceholder')"
-                class="w-full rounded-lg border border-slate-700 bg-[#ff6b00] p-2 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
+                class="w-full rounded-lg border border-[#263044] bg-[#131823] p-2.5 text-xs text-[#f8fafc] placeholder-[#8a93a2] focus:border-[#ff6b00] focus:outline-none"
               ></textarea>
 
               <div
@@ -608,7 +608,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                 <button
                   type="button"
                   @click="bugReport.togglePanel()"
-                  class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-[#8a93a2] hover:bg-[#ff8a00]"
+                  class="rounded-lg border border-[#263044] px-3 py-1.5 text-xs font-semibold text-[#8a93a2] hover:bg-[#1b2232] hover:text-[#f8fafc]"
                 >
                   {{ t('reportCancelBtn') }}
                 </button>
@@ -616,7 +616,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
                   type="button"
                   :disabled="bugReport.isSubmitting.value"
                   @click="submitCardIssue"
-                  class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-950/450 disabled:opacity-50"
+                  class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 disabled:opacity-50"
                 >
                   {{ bugReport.isSubmitting.value ? t('reportSubmitting') : t('reportSubmitBtn') }}
                 </button>
@@ -641,7 +641,7 @@ function getCardSetNumber(card: ParsedDeckEntry | EngineCardModel): string {
         @click.stop="nextCard"
         :aria-label="t('nextCard')"
         :title="t('nextCard')"
-        class="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-700 bg-[#ff6b00]/95 text-slate-200 shadow-lg transition hover:border-indigo-400 hover:bg-[#38bdf8] hover:text-white focus:outline-none"
+        class="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#263044] bg-[#1b2232]/95 text-[#f8fafc] shadow-lg transition hover:border-[#ff6b00] hover:bg-[#ff6b00] hover:text-white focus:outline-none"
       >
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />

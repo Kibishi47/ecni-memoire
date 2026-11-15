@@ -4,9 +4,17 @@
     <section class="relative overflow-hidden border-b mo-obsidian-grid" style="border-color: var(--border-subtle)">
       <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-24">
         <div class="mx-auto max-w-4xl text-center">
-          <div class="mb-6 flex justify-center">
-            <div class="rounded-full p-3" style="box-shadow: var(--brand-glow)">
-              <OlydorLogo size="xl" :show-text="false" />
+          <div class="mb-7 flex justify-center">
+            <div
+              data-testid="hub-hero-emblem"
+              class="inline-flex items-center justify-center rounded-3xl border-2 p-5 sm:p-6 transition-transform duration-300 hover:scale-[1.02]"
+              style="
+                background-color: var(--bg-surface);
+                border-color: var(--brand-primary);
+                box-shadow: 0 0 48px rgba(255, 107, 0, 0.38), 0 0 0 6px rgba(255, 107, 0, 0.12);
+              "
+            >
+              <OlydorLogo :size="136" :show-text="false" />
             </div>
           </div>
 
@@ -50,46 +58,6 @@
                 {{ t('soonBadge') }}
               </span>
             </button>
-          </div>
-
-          <!-- Telemetry Highlight Strip -->
-          <div class="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="mo-card p-4 text-left">
-              <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ t('statPrimitivesTitle') }}
-              </div>
-              <div class="mt-1 text-2xl font-black mo-gradient-text">{{ t('statPrimitivesValue') }}</div>
-              <div class="text-[11px]" style="color: var(--text-muted)">
-                {{ t('statPrimitivesSub') }}
-              </div>
-            </div>
-            <div class="mo-card p-4 text-left">
-              <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ t('statHorizonTitle') }}
-              </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--ai-accent)">{{ t('statHorizonValue') }}</div>
-              <div class="text-[11px]" style="color: var(--text-muted)">
-                T → T<sub>adv</sub> → T+1
-              </div>
-            </div>
-            <div class="mo-card p-4 text-left">
-              <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ t('statStateTitle') }}
-              </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--status-positive)">{{ t('statStateValue') }}</div>
-              <div class="text-[11px]" style="color: var(--text-muted)">
-                Zobrist + Int32Array(128)
-              </div>
-            </div>
-            <div class="mo-card p-4 text-left">
-              <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ t('statKpiTitle') }}
-              </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--brand-primary)">{{ t('statKpiValue') }}</div>
-              <div class="text-[11px]" style="color: var(--text-muted)">
-                {{ t('statKpiSub') }}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -260,9 +228,9 @@
             <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(16, 185, 129, 0.14); color: var(--status-positive)">
               <Zap class="h-5 w-5" />
             </div>
-            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archZobristTitle') }}</h3>
+            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archMetaBenchTitle') }}</h3>
             <p class="text-xs leading-relaxed" style="color: var(--text-secondary)">
-              {{ t('archZobristDesc') }}
+              {{ t('archMetaBenchDesc') }}
             </p>
           </div>
 
@@ -294,9 +262,9 @@
       <div
         class="rounded-2xl border p-8 sm:p-10 text-center"
         style="
-          background: radial-gradient(circle at top center, rgba(255, 107, 0, 0.16), transparent 65%), var(--bg-surface);
-          border-color: rgba(255, 107, 0, 0.4);
-          box-shadow: var(--brand-glow);
+          background-color: var(--bg-surface);
+          border-color: var(--border-subtle);
+          box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.35);
         "
       >
         <span
@@ -385,7 +353,7 @@ useHead({
         operatingSystem: 'Web',
         url: 'https://olydor.app',
         description:
-          'Simulateur Monte-Carlo 3-ply haute vélocité et plateforme d’analyse stratégique pour Pokémon TCG Standard.',
+          'Simulateur Monte-Carlo haute vélocité et future arène 1v1 contre le bot Pythia pour Pokémon TCG Standard.',
         offers: {
           '@type': 'Offer',
           price: '0',

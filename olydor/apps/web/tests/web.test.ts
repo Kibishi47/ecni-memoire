@@ -39,13 +39,25 @@ describe('@olydor/web hub & SEO configuration', () => {
     expect(nuxtConfig).toContain("content: '#0c0f16'")
   })
 
-  it('uses i18n cleanly (no isEn, no 854 badge), disables Arena links, and exposes SEO metadata', () => {
+  it('uses i18n cleanly, highlights Hero logo, omits jargon stats, disables Arena links, and exposes SEO metadata', () => {
     const indexPage = readFileSync(resolve(WEB_ROOT, 'pages/index.vue'), 'utf8')
     const i18nSrc = readFileSync(resolve(WEB_ROOT, 'utils/i18n.ts'), 'utf8')
+    const combined = `${indexPage}\n${i18nSrc}`
 
     expect(indexPage).not.toContain('isEn')
     expect(indexPage).not.toContain('854')
     expect(i18nSrc).not.toContain('854')
+    expect(indexPage).toContain('data-testid="hub-hero-emblem"')
+    expect(indexPage).toContain(':size="136"')
+    expect(combined).not.toContain('53-bit')
+    expect(combined).not.toContain('Int32Array(128)')
+    expect(combined).not.toContain('8 KPIs')
+    expect(combined).not.toContain('Zobrist')
+    expect(combined).not.toContain('blunders')
+    expect(combined).not.toContain('Win Probability')
+    expect(combined).not.toContain('Journal de pensée')
+    expect(combined).not.toContain('thought stream')
+    expect(indexPage).not.toContain('bg-[#ff6b00]')
     expect(indexPage).toContain('useSeoMeta(')
     expect(indexPage).toContain("'@type': 'SoftwareApplication'")
     expect(indexPage).toContain('BETA_FEEDBACK_FORM_URL')
@@ -57,10 +69,12 @@ describe('@olydor/web hub & SEO configuration', () => {
 
     const { t, setLanguage } = useWebI18n()
     setLanguage('fr')
-    expect(t('seoTitle')).toBe('Olydor — Simulateur Stratégique & IA Prédictive Pokémon TCG')
+    expect(t('seoTitle')).toBe('Olydor — Simulateur Stratégique & Duel IA Pokémon TCG')
     expect(t('heroSubtitle')).toBe('Ne devinez plus la méta. Simulez chaque branche.')
+    expect(t('arenaCardTitle')).toContain('Bot Pythia')
     setLanguage('en')
     expect(t('heroSubtitle')).toBe('Stop guessing the meta. Simulate every branch.')
+    expect(t('arenaCardTitle')).toContain('Pythia Bot')
   })
 
   it('wires BetaTesterBanner, AppNavbar, and AppFooter in layouts/default.vue', () => {

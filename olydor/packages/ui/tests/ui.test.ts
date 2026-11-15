@@ -8,6 +8,7 @@ import {
   AppNavbar,
   BETA_FEEDBACK_FORM_URL,
   BetaTesterBanner,
+  BugReportModal,
   createI18n,
   currentTheme,
   LegalMentionsContent,
@@ -82,7 +83,7 @@ describe('@olydor/ui Design System & Shared Components', () => {
     })
     expect(wrapper.text()).toContain('Simulateur')
     expect(wrapper.text()).toContain('Insight')
-    expect(wrapper.text()).toContain('Arène IA')
+    expect(wrapper.text()).toContain('Arène Bot')
     expect(wrapper.text()).toContain('SOON')
 
     const arenaBtn = wrapper.find('[data-testid="nav-arena-disabled"]')
@@ -103,12 +104,45 @@ describe('@olydor/ui Design System & Shared Components', () => {
     // Language switch FR -> EN
     await wrapper.find('[data-testid="lang-toggle"]').trigger('click')
     expect(wrapper.emitted('update:lang')?.[0]).toEqual(['en'])
-    expect(wrapper.text()).toContain('AI Arena')
+    expect(wrapper.text()).toContain('Bot Arena')
 
     const bugBtn = wrapper.find('[data-testid="report-bug-btn"]')
     expect(bugBtn.exists()).toBe(true)
     await bugBtn.trigger('click')
     expect(wrapper.emitted('open-bug-modal')).toBeTruthy()
+  })
+
+  it('renders BugReportModal without error type selector and submits direct user comment', async () => {
+    const originalFetch = globalThis.fetch
+    const requestCapture: { body: Record<string, unknown> | null } = { body: null }
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      requestCapture.body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      return new Response(JSON.stringify({ ok: true, reportId: 42 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(BugReportModal, {
+        props: { modelValue: true, lang: 'fr', apiBaseUrl: 'http://localhost:3000' },
+        global: { stubs: { Teleport: true } },
+      })
+      expect(wrapper.text()).not.toContain('CARD_MODEL_ERROR')
+      expect(wrapper.text()).not.toContain('ENGINE_RULE_ERROR')
+      expect(wrapper.find('#mo-bug-card-id').exists()).toBe(false)
+      expect(wrapper.find('#mo-bug-comment').exists()).toBe(true)
+
+      await wrapper.find('#mo-bug-comment').setValue('Le filtre decklist bug')
+      await wrapper.find('form').trigger('submit.prevent')
+
+      expect(requestCapture.body).not.toBeNull()
+      expect(requestCapture.body?.type).toBe('ENGINE_RULE_ERROR')
+      expect(requestCapture.body?.cardId).toBeNull()
+      expect(requestCapture.body?.userComment).toBe('Le filtre decklist bug')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 
   it('renders AppFooter with disabled Arena label, legal routes, and TPCI non-affiliation disclaimer', () => {

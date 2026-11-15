@@ -44,70 +44,16 @@
 
         <form class="mt-4 space-y-4" @submit.prevent="handleSubmit">
           <div>
-            <label class="block text-xs font-semibold uppercase tracking-wider mb-1.5" style="color: var(--text-secondary)">
-              {{ t('bugTypeLabel') }}
-            </label>
-            <div class="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                class="rounded-lg border px-3 py-2 text-left text-xs font-semibold transition"
-                :style="reportType === 'CARD_MODEL_ERROR'
-                  ? 'border-color: var(--brand-primary); background-color: rgba(255, 107, 0, 0.14); color: var(--text-primary)'
-                  : 'border-color: var(--border-subtle); background-color: var(--bg-elevated); color: var(--text-secondary)'"
-                @click="reportType = 'CARD_MODEL_ERROR'"
-              >
-                <div>{{ t('bugTypeCardTitle') }}</div>
-                <div class="mt-0.5 text-[11px] font-normal opacity-80">
-                  {{ t('bugTypeCardDesc') }}
-                </div>
-              </button>
-
-              <button
-                type="button"
-                class="rounded-lg border px-3 py-2 text-left text-xs font-semibold transition"
-                :style="reportType === 'ENGINE_RULE_ERROR'
-                  ? 'border-color: var(--brand-primary); background-color: rgba(255, 107, 0, 0.14); color: var(--text-primary)'
-                  : 'border-color: var(--border-subtle); background-color: var(--bg-elevated); color: var(--text-secondary)'"
-                @click="reportType = 'ENGINE_RULE_ERROR'"
-              >
-                <div>{{ t('bugTypeEngineTitle') }}</div>
-                <div class="mt-0.5 text-[11px] font-normal opacity-80">
-                  {{ t('bugTypeEngineDesc') }}
-                </div>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label for="mo-bug-card-id" class="block text-xs font-semibold uppercase tracking-wider mb-1.5" style="color: var(--text-secondary)">
-              {{ t('bugCardIdLabel') }}
-              <span v-if="reportType === 'CARD_MODEL_ERROR'" style="color: var(--brand-primary)">*</span>
-            </label>
-            <input
-              id="mo-bug-card-id"
-              v-model="cardId"
-              type="text"
-              maxlength="32"
-              :required="reportType === 'CARD_MODEL_ERROR'"
-              placeholder="sv03-125"
-              class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2"
-              style="
-                background-color: var(--bg-elevated);
-                border-color: var(--border-subtle);
-                color: var(--text-primary);
-              "
-            />
-          </div>
-
-          <div>
             <label for="mo-bug-comment" class="block text-xs font-semibold uppercase tracking-wider mb-1.5" style="color: var(--text-secondary)">
               {{ t('bugDescLabel') }}
+              <span style="color: var(--brand-primary)">*</span>
             </label>
             <textarea
               id="mo-bug-comment"
               v-model="userComment"
-              rows="3"
+              rows="4"
               maxlength="1000"
+              required
               :placeholder="t('bugDescPlaceholder')"
               class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2"
               style="
@@ -211,8 +157,6 @@ const resolvedApiBaseUrl = computed(
   () => resolvePlatformUrls({ apiUrl: props.apiBaseUrl }).apiUrl,
 )
 
-const reportType = ref<BugReportType>(props.defaultType)
-const cardId = ref(props.defaultCardId)
 const userComment = ref('')
 const isSubmitting = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -222,8 +166,6 @@ watch(
   () => props.modelValue,
   (isOpen) => {
     if (isOpen) {
-      reportType.value = props.defaultType
-      cardId.value = props.defaultCardId || ''
       errorMessage.value = null
       submittedResult.value = null
     }
@@ -239,26 +181,23 @@ async function handleSubmit() {
   errorMessage.value = null
   submittedResult.value = null
 
-  const trimmedCardId = cardId.value.trim()
-  if (reportType.value === 'CARD_MODEL_ERROR' && !trimmedCardId) {
-    errorMessage.value = t('bugErrorMissingCardId')
+  const trimmedComment = userComment.value.trim()
+  if (!trimmedComment) {
+    errorMessage.value = t('bugErrorEmptyComment')
     return
   }
 
-  const trimmedComment = userComment.value.trim()
+  const trimmedDefaultCardId = props.defaultCardId?.trim() || ''
+  const resolvedType: BugReportType = trimmedDefaultCardId ? 'CARD_MODEL_ERROR' : 'ENGINE_RULE_ERROR'
   const payload: BugReportPayload = {
-    type: reportType.value,
-    cardId: trimmedCardId || null,
-    matchLogs:
-      props.contextLogs ??
-      (reportType.value === 'ENGINE_RULE_ERROR'
-        ? {
-            source: 'navbar-bug-modal',
-            href: typeof window !== 'undefined' ? window.location.href : 'ssr',
-            timestamp: new Date().toISOString(),
-          }
-        : null),
-    userComment: trimmedComment || null,
+    type: resolvedType,
+    cardId: trimmedDefaultCardId || null,
+    matchLogs: props.contextLogs ?? {
+      source: 'navbar-bug-modal',
+      href: typeof window !== 'undefined' ? window.location.href : 'ssr',
+      timestamp: new Date().toISOString(),
+    },
+    userComment: trimmedComment,
   }
 
   isSubmitting.value = true

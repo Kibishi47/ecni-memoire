@@ -44,7 +44,7 @@ describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
     expect(parsed.isFullyResolved).toBe(true)
   })
 
-  it('renders prominent COMING SOON showcase via i18n, 62% - 38% Win Probability bar, Blunder Analysis, and ?deck= handling', () => {
+  it('renders prominent COMING SOON 1v1 bot duel showcase without coaching or Pythia plan exposure', () => {
     const indexSrc = readFileSync(resolve(ARENA_ROOT, 'pages/index.vue'), 'utf8')
     const i18nSrc = readFileSync(resolve(ARENA_ROOT, 'utils/i18n.ts'), 'utf8')
     const combined = `${indexSrc}\n${i18nSrc}`
@@ -53,27 +53,25 @@ describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
     expect(indexSrc).toContain('data-testid="arena-coming-soon-hero"')
     expect(indexSrc).toContain('resolvePlatformUrls(')
     expect(combined).toContain('COMING SOON')
-    expect(combined).toContain('ARÈNE TACTIQUE 1v1 — EN DÉVELOPPEMENT (COMING SOON)')
+    expect(combined).toContain('ARÈNE 1v1 VS BOT PYTHIA')
     expect(combined).toContain('Pythia')
-    expect(indexSrc).toContain('Win Probability Bar : {{ activeScenario.playerWinPct }}% - {{ activeScenario.pythiaWinPct }}%')
-    expect(indexSrc).toContain('playerWinPct: 62')
-    expect(indexSrc).toContain('pythiaWinPct: 38')
-    expect(combined).toContain('Blunder Analysis')
-    expect(indexSrc).toContain('-14.8% EV')
-    expect(indexSrc).toContain('+9.2% EV')
-    expect(combined).toContain("Votre deck de 60 cartes est prêt et validé pour l'Arène ! En attendant l'ouverture des duels")
+    expect(combined).not.toContain('Win Probability Bar')
+    expect(combined).not.toContain('Blunder Analysis')
+    expect(combined).not.toContain('thoughtLog')
+    expect(combined).not.toContain('Takeback')
+    expect(combined).not.toContain('Coach en direct')
+    expect(combined).not.toContain('Live Hints')
+    expect(combined).not.toContain('Puzzles')
+    expect(combined).toContain("En attendant l'ouverture des matchs 1v1 contre le bot Pythia")
     expect(indexSrc).toContain('BETA_FEEDBACK_FORM_URL')
     expect(BETA_FEEDBACK_FORM_URL).toBe('https://forms.gle/6FC4YYmw7nMkj3wT9')
-    expect(combined).toContain('Takeback')
-    expect(combined).toContain('Coach en direct')
-    expect(combined).toContain('Puzzles de fin de partie')
 
     const { t, setLanguage } = useArenaI18n()
     setLanguage('fr')
     expect(t('comingSoonSuperTitle')).toBe('COMING SOON')
-    expect(t('heroBadge')).toContain('EN DÉVELOPPEMENT')
+    expect(t('heroBadge')).toContain('1v1 VS BOT PYTHIA')
     setLanguage('en')
-    expect(t('heroBadge')).toContain('UNDER DEVELOPMENT')
+    expect(t('heroBadge')).toContain('1v1 ARENA VS PYTHIA BOT')
   })
 
   it('wires SSR Nuxt config, shared UI layout (active-app="arena"), SEO sitemap, and all 3 legal routes', () => {
