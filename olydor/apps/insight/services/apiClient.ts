@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { resolvePlatformUrls } from '@olydor/ui'
 import type {
   AlternativesRequestParams,
   ApiMetaDeck,
@@ -65,18 +66,19 @@ let localCatalogLoadPromise: Promise<number> | null = null
 export const isUsingOfflineCatalog = ref(false)
 
 export function setApiBaseUrl(url: string): void {
-  configuredApiBaseUrl = url.trim().replace(/\/+$/, '')
+  const cleaned = url.trim().replace(/\/+$/, '')
+  configuredApiBaseUrl = cleaned ? resolvePlatformUrls({ apiUrl: cleaned }).apiUrl : ''
 }
 
 export function getApiBaseUrl(): string {
-  if (configuredApiBaseUrl) return configuredApiBaseUrl
+  if (configuredApiBaseUrl) return resolvePlatformUrls({ apiUrl: configuredApiBaseUrl }).apiUrl
   const env = (import.meta as { env?: Record<string, string | undefined> }).env
   const raw =
     env?.NUXT_PUBLIC_API_URL ||
     env?.VITE_API_URL ||
     (typeof process !== 'undefined' ? process.env?.NUXT_PUBLIC_API_URL : undefined) ||
     ''
-  return raw.trim().replace(/\/+$/, '')
+  return resolvePlatformUrls({ apiUrl: raw.trim().replace(/\/+$/, '') }).apiUrl
 }
 
 function buildApiUrl(path: string): string {

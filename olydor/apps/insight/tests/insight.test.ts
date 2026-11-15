@@ -21,9 +21,11 @@ import {
 import {
   fetchAlternativesFromApi,
   fetchMetaDecks,
+  getApiBaseUrl,
   isUsingOfflineCatalog,
   resolveCardsFromApi,
   searchCatalogCards,
+  setApiBaseUrl,
 } from '../services/apiClient'
 import { mapApiMetaDecks } from '../services/metaDeckAdapter'
 import { SimulationWorkerPool } from '../worker/workerPool'
@@ -59,16 +61,30 @@ describe('@olydor/insight migrated simulator suite', () => {
     expect(zardUrl).toContain('high.webp')
   })
 
-  it('switches language FR/EN and exposes Olydor simulator localization keys', () => {
+  it('switches language FR/EN without hardcoded 854 card counts and shares i18n with @olydor/ui', () => {
     setLanguage('fr')
     expect(t('appTitle')).toBe('Olydor Insight')
     expect(t('debugModeBadge')).toContain('?debug=true')
+    expect(t('offlineCatalogBanner')).not.toContain('854')
+    expect(t('winInitial')).toBe('V')
+    expect(t('simStopBtn')).toContain('Annuler')
     setLanguage('en')
     expect(t('sendToArena')).toContain('Arena')
+    expect(t('offlineCatalogBanner')).not.toContain('854')
+    expect(t('winInitial')).toBe('W')
+    expect(t('simStopBtn')).toContain('Cancel')
     const rules = getLocalizedCardRules({
       rawRulesText: ['[Attaque FR: Lancer de Flamboyance]', '[Attack EN: Burning Darkness]'],
     }, 'en')
     expect(rules).toEqual(['[Attack: Burning Darkness]'])
+  })
+
+  it('resolves local API URL automatically in local dev via apiClient', () => {
+    setApiBaseUrl('https://api.olydor.app')
+    expect(getApiBaseUrl()).toBe('http://localhost:3000')
+    setApiBaseUrl('http://localhost:3456')
+    expect(getApiBaseUrl()).toBe('http://localhost:3456')
+    setApiBaseUrl('')
   })
 
   it('calibrates hardware profile and estimates simulation duration cleanly', () => {
@@ -168,21 +184,44 @@ describe('@olydor/insight migrated simulator suite', () => {
     expect(summary.tracedGames![0]!.turns.length).toBeGreaterThan(0)
   })
 
-  it('wires BetaTesterBanner, AppNavbar, AppFooter, Step3 Arena CTA, and legal pages', () => {
+  it('streamlines WizardHeader, removes old Step1 Hero, disables Arena buttons, and wires layout + legal routes', () => {
     const nuxtConfig = readFileSync(resolve(SIM_ROOT, 'nuxt.config.ts'), 'utf8')
     const layout = readFileSync(resolve(SIM_ROOT, 'layouts/default.vue'), 'utf8')
+    const wizardHeader = readFileSync(resolve(SIM_ROOT, 'components/WizardHeader.vue'), 'utf8')
+    const step1 = readFileSync(resolve(SIM_ROOT, 'components/Step1DeckImport.vue'), 'utf8')
+    const step2 = readFileSync(resolve(SIM_ROOT, 'components/Step2SimConfig.vue'), 'utf8')
     const step3 = readFileSync(resolve(SIM_ROOT, 'components/Step3DashboardAndComparator.vue'), 'utf8')
+    const indexPage = readFileSync(resolve(SIM_ROOT, 'pages/index.vue'), 'utf8')
     const mentions = readFileSync(resolve(SIM_ROOT, 'pages/mentions-legales.vue'), 'utf8')
     const privacy = readFileSync(resolve(SIM_ROOT, 'pages/confidentialite.vue'), 'utf8')
     const cgu = readFileSync(resolve(SIM_ROOT, 'pages/cgu.vue'), 'utf8')
 
     expect(nuxtConfig).toContain("transpile: ['@olydor/ui', '@olydor/engine']")
     expect(nuxtConfig).toContain("include: ['lucide-vue-next']")
+    expect(nuxtConfig).toContain('http://localhost:3000')
 
+    // WizardHeader keeps only steps + deck counter + status badges (no duplicate title or lang toggle)
+    expect(wizardHeader).toContain('data-testid="wizard-header"')
+    expect(wizardHeader).toContain('`wizard-step-${step.num}`')
+    expect(wizardHeader).not.toContain('appTitle')
+    expect(wizardHeader).not.toContain('setLanguage')
+
+    // Step1 opens directly into deck import without old Hero section
+    expect(step1).not.toContain('SECTION HERO INTUITIVE')
+    expect(step1).not.toContain('from-slate-900')
+    expect(step1).not.toContain('currentLang ===')
+    expect(step2).not.toContain('currentLang ===')
+
+    // Step3 keeps arenaDeckUrl computation for later launch while rendering disabled buttons
     expect(layout).toContain('<BetaTesterBanner')
     expect(layout).toContain('active-app="insight"')
     expect(step3).toContain('arenaDeckUrl')
+    expect(step3).toContain('data-testid="step3-arena-disabled"')
+    expect(step3).toContain('data-testid="step3-export-arena-disabled"')
+    expect(step3).not.toContain('<a\n            v-if="editableDeck.totalCards === 60"\n            :href="arenaDeckUrl"')
+    expect(step3).not.toContain('currentLang ===')
     expect(step3).toContain('DebugInspectorPanel')
+    expect(indexPage).not.toContain('Simulation en cours sur')
     expect(mentions).toContain('LegalMentionsContent')
     expect(privacy).toContain('PrivacyPolicyContent')
     expect(cgu).toContain('TermsContent')

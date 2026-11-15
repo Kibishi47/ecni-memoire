@@ -10,91 +10,84 @@
             </div>
           </div>
 
-          <div
-            class="mb-5 inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-xs font-semibold tracking-wide"
-            style="border-color: rgba(255, 107, 0, 0.35); background-color: rgba(255, 107, 0, 0.1); color: var(--brand-amber)"
-          >
-            <Cpu class="h-3.5 w-3.5" />
-            <span>{{ isEn ? '3-Ply Lookahead Engine • 854 Compiled Cards • ~1,600 games/s' : 'Moteur d’Anticipation 3-Ply • 854 Cartes Compilées • ~1 600 parties/sec' }}</span>
-          </div>
-
           <h1 class="text-4xl font-black tracking-tight sm:text-6xl leading-[1.08]">
             <span class="mo-gradient-text">OLYDOR</span>
             <span class="block mt-2 text-2xl sm:text-4xl font-extrabold" style="color: var(--text-primary)">
-              {{ isEn
-                ? 'Stop guessing the meta. Simulate every branch.'
-                : 'Ne devinez plus la méta. Simulez chaque branche.' }}
+              {{ t('heroSubtitle') }}
             </span>
           </h1>
 
           <p class="mx-auto mt-6 max-w-2xl text-base sm:text-lg leading-relaxed" style="color: var(--text-secondary)">
-            {{ isEn
-              ? 'Stress-test your 60-card lists across hundreds of multi-threaded Web Worker games against meta archetypes, pinpoint consistency bricks, and optimize card slots with A/B simulation.'
-              : 'Évaluez vos decklists de 60 cartes sur des centaines de parties parallélisées en Web Workers, identifiez vos tours morts et optimisez chaque slot grâce à l’atelier comparatif A/B.' }}
+            {{ t('heroDescription') }}
           </p>
 
           <div class="mt-9 flex flex-wrap items-center justify-center gap-4">
             <a
-              :href="config.public.insightUrl"
+              :href="urls.insightUrl"
+              data-testid="hero-insight-cta"
               class="mo-btn-solar inline-flex items-center gap-2.5 rounded-xl px-7 py-3.5 text-sm sm:text-base"
             >
               <FlaskConical class="h-5 w-5" />
-              <span>{{ isEn ? 'Launch Simulator' : 'Lancer le Simulateur' }}</span>
+              <span>{{ t('heroLaunchSim') }}</span>
               <ArrowRight class="h-4 w-4" />
             </a>
 
-            <a
-              :href="config.public.arenaUrl"
-              class="inline-flex items-center gap-2.5 rounded-xl border px-6 py-3.5 text-sm sm:text-base font-bold transition hover:bg-white/5"
-              style="border-color: rgba(56, 189, 248, 0.45); background-color: rgba(56, 189, 248, 0.08); color: var(--ai-accent)"
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              data-testid="hero-arena-disabled"
+              :data-arena-preview-url="urls.arenaUrl"
+              class="inline-flex cursor-not-allowed items-center gap-2.5 rounded-xl border px-6 py-3.5 text-sm sm:text-base font-bold opacity-75 select-none"
+              style="border-color: rgba(56, 189, 248, 0.4); background-color: rgba(56, 189, 248, 0.08); color: var(--ai-accent)"
             >
               <Swords class="h-5 w-5" />
-              <span>{{ isEn ? 'Explore Pythia AI Arena' : 'Découvrir l’Arène IA Pythia' }}</span>
+              <span>{{ t('heroArenaDisabled') }}</span>
               <span
                 class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
-                style="background-color: rgba(255, 194, 26, 0.16); color: var(--brand-gold)"
+                style="background-color: rgba(255, 194, 26, 0.16); color: var(--brand-primary)"
               >
-                SOON
+                {{ t('soonBadge') }}
               </span>
-            </a>
+            </button>
           </div>
 
           <!-- Telemetry Highlight Strip -->
           <div class="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div class="mo-card p-4 text-left">
               <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ isEn ? 'Compiled Database' : 'Catalogue Standard' }}
+                {{ t('statPrimitivesTitle') }}
               </div>
-              <div class="mt-1 text-2xl font-black mo-gradient-text">854</div>
+              <div class="mt-1 text-2xl font-black mo-gradient-text">{{ t('statPrimitivesValue') }}</div>
               <div class="text-[11px]" style="color: var(--text-muted)">
-                {{ isEn ? 'Executable schemas' : 'Cartes compilées' }}
+                {{ t('statPrimitivesSub') }}
               </div>
             </div>
             <div class="mo-card p-4 text-left">
               <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ isEn ? 'Decision Tree' : 'Horizon Tactique' }}
+                {{ t('statHorizonTitle') }}
               </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--ai-accent)">3-Ply</div>
+              <div class="mt-1 text-2xl font-black" style="color: var(--ai-accent)">{{ t('statHorizonValue') }}</div>
               <div class="text-[11px]" style="color: var(--text-muted)">
                 T → T<sub>adv</sub> → T+1
               </div>
             </div>
             <div class="mo-card p-4 text-left">
               <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ isEn ? 'State Hashing' : 'État Binaire' }}
+                {{ t('statStateTitle') }}
               </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--status-positive)">53-bit</div>
+              <div class="mt-1 text-2xl font-black" style="color: var(--status-positive)">{{ t('statStateValue') }}</div>
               <div class="text-[11px]" style="color: var(--text-muted)">
                 Zobrist + Int32Array(128)
               </div>
             </div>
             <div class="mo-card p-4 text-left">
               <div class="text-xs font-medium" style="color: var(--text-secondary)">
-                {{ isEn ? 'Analytics Suite' : 'Indicateurs Clés' }}
+                {{ t('statKpiTitle') }}
               </div>
-              <div class="mt-1 text-2xl font-black" style="color: var(--brand-gold)">8 KPIs</div>
+              <div class="mt-1 text-2xl font-black" style="color: var(--brand-primary)">{{ t('statKpiValue') }}</div>
               <div class="text-[11px]" style="color: var(--text-muted)">
-                {{ isEn ? '+ 6 tactical probes' : '+ 6 analyses méta' }}
+                {{ t('statKpiSub') }}
               </div>
             </div>
           </div>
@@ -106,12 +99,10 @@
     <section id="platforms" class="mx-auto max-w-7xl px-4 py-16 sm:px-6">
       <div class="mb-10 max-w-2xl">
         <h2 class="text-2xl font-black tracking-tight sm:text-3xl" style="color: var(--text-primary)">
-          {{ isEn ? 'Two Dedicated Platforms, One Shared Engine' : 'Deux Plateformes Spécialisées, Un Cœur Algorithmique Commun' }}
+          {{ t('platformsTitle') }}
         </h2>
         <p class="mt-2 text-sm sm:text-base" style="color: var(--text-secondary)">
-          {{ isEn
-            ? 'Built around the zero-DOM @olydor/engine package running seamlessly in browser Web Workers and Node.js.'
-            : 'Propulsées par le moteur partagé @olydor/engine s’exécutant aussi bien dans les Web Workers navigateur que sur l’API serveur.' }}
+          {{ t('platformsSubtitle') }}
         </p>
       </div>
 
@@ -123,118 +114,120 @@
         >
           <div>
             <div class="flex items-center justify-between gap-3">
-              <span class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style="color: var(--brand-amber)">
+              <span class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style="color: var(--brand-primary)">
                 <FlaskConical class="h-4 w-4" />
-                insight.olydor.app
+                {{ t('simDomain') }}
               </span>
               <span
                 class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
                 style="background-color: rgba(16, 185, 129, 0.14); color: var(--status-positive); border: 1px solid rgba(16, 185, 129, 0.35)"
               >
                 <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                {{ isEn ? 'AVAILABLE IN BETA' : 'DISPONIBLE EN BÊTA' }}
+                {{ t('simStatusBadge') }}
               </span>
             </div>
 
             <h3 class="mt-4 text-2xl font-black" style="color: var(--text-primary)">
-              {{ isEn ? 'Monte Carlo Deck Simulator & A/B Lab' : 'Simulateur Monte-Carlo & Atelier A/B' }}
+              {{ t('simCardTitle') }}
             </h3>
             <p class="mt-3 text-sm leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'Import any PTCGL list, validate 60 cards and Ace Spec / evolution synergies automatically, then run 50 to 1,000 parallel games against curated meta lists.'
-                : 'Importez votre decklist PTCGL, auditez instantanément vos 60 cartes et synergies clés, puis lancez jusqu’à 1 000 parties parallèles contre le métagame.' }}
+              {{ t('simCardDesc') }}
             </p>
 
             <ul class="mt-5 space-y-2 text-xs sm:text-sm" style="color: var(--text-secondary)">
               <li class="flex items-center gap-2">
                 <CheckCircle2 class="h-4 w-4 shrink-0" style="color: var(--status-positive)" />
-                <span>{{ isEn ? '8 Core KPIs: Winrate, T2 Setup, Brick Rate, Dead Cards, Mulligans' : '8 KPIs officiels : Winrate, Setup T2, Brick Rate, Cartes Mortes, Mulligans' }}</span>
+                <span>{{ t('simFeature1') }}</span>
               </li>
               <li class="flex items-center gap-2">
                 <CheckCircle2 class="h-4 w-4 shrink-0" style="color: var(--status-positive)" />
-                <span>{{ isEn ? '6 Deep Probes: Topdeck, Going First vs Second, Prize Map' : '6 analyses poussées : Topdecking, Joueur 1 vs Joueur 2, Matrice Récompenses' }}</span>
+                <span>{{ t('simFeature2') }}</span>
               </li>
               <li class="flex items-center gap-2">
                 <CheckCircle2 class="h-4 w-4 shrink-0" style="color: var(--status-positive)" />
-                <span>{{ isEn ? 'A/B Comparison & 1-click PTCGL Export + Arena Deep Link' : 'Comparateur A/B (Upgrades / Sidegrades) & export PTCGL en 1 clic' }}</span>
+                <span>{{ t('simFeature3') }}</span>
               </li>
             </ul>
           </div>
 
           <div class="mt-7 pt-5 border-t flex flex-wrap items-center justify-between gap-3" style="border-color: var(--border-subtle)">
             <a
-              :href="`${config.public.insightUrl}?preset=charizard`"
-              class="text-xs font-semibold underline decoration-orange-500/40 underline-offset-4 transition hover:text-white"
-              style="color: var(--brand-amber)"
+              :href="`${urls.insightUrl}?preset=charizard`"
+              data-testid="bento-insight-preset"
+              class="text-xs font-semibold underline decoration-orange-500/40 underline-offset-4 transition hover:opacity-80"
+              style="color: var(--brand-primary)"
             >
-              {{ isEn ? 'Try a meta deck in 1 click →' : 'Tester avec un deck méta en 1 clic →' }}
+              {{ t('simPresetCta') }}
             </a>
             <a
-              :href="config.public.insightUrl"
+              :href="urls.insightUrl"
+              data-testid="bento-insight-cta"
               class="mo-btn-solar inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm"
             >
-              <span>{{ isEn ? 'Open Simulator' : 'Ouvrir le Simulateur' }}</span>
+              <span>{{ t('simOpenCta') }}</span>
               <ArrowRight class="h-4 w-4" />
             </a>
           </div>
         </article>
 
-        <!-- Card 2: AI Arena (COMING SOON) -->
+        <!-- Card 2: AI Arena (COMING SOON — NON-CLICKABLE) -->
         <article
-          class="mo-card flex flex-col justify-between p-7 transition hover:border-sky-400/50"
-          style="box-shadow: 0 10px 30px -15px rgba(56, 189, 248, 0.18)"
+          class="mo-card flex flex-col justify-between p-7"
+          style="box-shadow: 0 10px 30px -15px rgba(56, 189, 248, 0.14)"
         >
           <div>
             <div class="flex items-center justify-between gap-3">
               <span class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style="color: var(--ai-accent)">
                 <Swords class="h-4 w-4" />
-                arena.olydor.app
+                {{ t('arenaDomain') }}
               </span>
               <span
                 class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
-                style="background-color: rgba(255, 194, 26, 0.14); color: var(--brand-gold); border: 1px solid rgba(255, 194, 26, 0.35)"
+                style="background-color: rgba(255, 194, 26, 0.16); color: var(--brand-primary); border: 1px solid rgba(255, 107, 0, 0.35)"
               >
-                COMING SOON
+                {{ t('arenaStatusBadge') }}
               </span>
             </div>
 
             <h3 class="mt-4 text-2xl font-black" style="color: var(--text-primary)">
-              {{ isEn ? 'AI Arena — Challenge Pythia 3-Ply' : 'Arène IA — Affrontez Pythia 3-Ply' }}
+              {{ t('arenaCardTitle') }}
             </h3>
             <p class="mt-3 text-sm leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'Play full manual turns directly against Olydor’s 3-ply AI bot Pythia, inspect real-time win probability shifts, and review post-game tactical blunders.'
-                : 'Affrontez directement l’IA Pythia coup par coup sur un plateau interactif, visualisez la jauge Win Probability en temps réel et analysez vos blunders.' }}
+              {{ t('arenaCardDesc') }}
             </p>
 
             <ul class="mt-5 space-y-2 text-xs sm:text-sm" style="color: var(--text-secondary)">
               <li class="flex items-center gap-2">
                 <Sparkles class="h-4 w-4 shrink-0" style="color: var(--ai-accent)" />
-                <span>{{ isEn ? 'Live 3-ply thought stream explaining Pythia’s prize & sequencing lines' : 'Journal de pensée 3-ply exposant les plans de récompenses de Pythia' }}</span>
+                <span>{{ t('arenaFeature1') }}</span>
               </li>
               <li class="flex items-center gap-2">
                 <Sparkles class="h-4 w-4 shrink-0" style="color: var(--ai-accent)" />
-                <span>{{ isEn ? 'Direct ?deck= URL import straight from Olydor Insight' : 'Import direct via ?deck= depuis l’Atelier A/B du Simulateur' }}</span>
+                <span>{{ t('arenaFeature2') }}</span>
               </li>
               <li class="flex items-center gap-2">
                 <Sparkles class="h-4 w-4 shrink-0" style="color: var(--ai-accent)" />
-                <span>{{ isEn ? 'Post-Match Blunder Analysis highlighting missed KOs & gust plays' : 'Analyse Post-Match identifiant les KOs manqués et lignes optimales' }}</span>
+                <span>{{ t('arenaFeature3') }}</span>
               </li>
             </ul>
           </div>
 
-          <div class="mt-7 pt-5 border-t flex items-center justify-between" style="border-color: var(--border-subtle)">
+          <div class="mt-7 pt-5 border-t flex items-center justify-between gap-3" style="border-color: var(--border-subtle)">
             <span class="text-xs font-medium" style="color: var(--text-muted)">
-              {{ isEn ? 'Currently in AI training phase' : 'Phase d’entraînement Pythia en cours' }}
+              {{ t('arenaStatusNote') }}
             </span>
-            <a
-              :href="config.public.arenaUrl"
-              class="inline-flex items-center gap-2 rounded-lg border px-5 py-2.5 text-sm font-bold transition hover:bg-sky-400/10"
-              style="border-color: rgba(56, 189, 248, 0.45); color: var(--ai-accent)"
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              data-testid="bento-arena-disabled"
+              :data-arena-preview-url="urls.arenaUrl"
+              class="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border px-5 py-2.5 text-sm font-bold opacity-70 select-none"
+              style="border-color: rgba(56, 189, 248, 0.4); color: var(--ai-accent)"
             >
-              <span>{{ isEn ? 'Preview Arena' : 'Voir l’aperçu' }}</span>
-              <ArrowRight class="h-4 w-4" />
-            </a>
+              <Lock class="h-4 w-4" />
+              <span>{{ t('arenaDisabledAction') }}</span>
+            </button>
           </div>
         </article>
       </div>
@@ -245,12 +238,10 @@
       <div class="mx-auto max-w-7xl px-4 sm:px-6">
         <div class="mb-10 max-w-2xl">
           <h2 class="text-2xl font-black tracking-tight sm:text-3xl" style="color: var(--text-primary)">
-            {{ isEn ? 'Engineered for Speed & Rule Precision' : 'Architecture & Performance Technique' }}
+            {{ t('archTitle') }}
           </h2>
           <p class="mt-2 text-sm sm:text-base" style="color: var(--text-secondary)">
-            {{ isEn
-              ? 'Every layer from offline LLM card compilation to browser worker bit-packing is built to make full TCG lookahead practical.'
-              : 'De la compilation LLM des textes de cartes jusqu’au hachage 53-bit, chaque brique vise la fiabilité compétitive et la vitesse d’exécution.' }}
+            {{ t('archSubtitle') }}
           </p>
         </div>
 
@@ -259,11 +250,9 @@
             <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(255, 107, 0, 0.14); color: var(--brand-primary)">
               <Database class="h-5 w-5" />
             </div>
-            <h3 class="font-bold text-sm" style="color: var(--text-primary)">LLM Card Compiler</h3>
+            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archCompilerTitle') }}</h3>
             <p class="text-xs leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'Offline Python pipeline normalizing card rules into 29 atomic primitives, preconditions, and strategic turn-phase weights.'
-                : 'Compilateur offline structurant les textes officiels en 29 primitives atomiques, préconditions et poids stratégiques par tour.' }}
+              {{ t('archCompilerDesc') }}
             </p>
           </div>
 
@@ -271,11 +260,9 @@
             <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(16, 185, 129, 0.14); color: var(--status-positive)">
               <Zap class="h-5 w-5" />
             </div>
-            <h3 class="font-bold text-sm" style="color: var(--text-primary)">Zobrist 53-bit &amp; Flat Buffers</h3>
+            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archZobristTitle') }}</h3>
             <p class="text-xs leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'Commutative Zobrist state hashing, transposition tables, and in-place mutation over Int32Array(128) buffers.'
-                : 'Hachage commutatif Zobrist 53-bit pour dédupliquer les permutations de Banc/Main et mutations en place sur Int32Array(128).' }}
+              {{ t('archZobristDesc') }}
             </p>
           </div>
 
@@ -283,23 +270,19 @@
             <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(56, 189, 248, 0.14); color: var(--ai-accent)">
               <GitBranch class="h-5 w-5" />
             </div>
-            <h3 class="font-bold text-sm" style="color: var(--text-primary)">Lookahead 3-Ply Pythia</h3>
+            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archLookaheadTitle') }}</h3>
             <p class="text-xs leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'Asymmetric T → T_adv → T+1 evaluation anticipates opponent counterplay, gust threats, and disruption recovery.'
-                : 'Évaluation asymétrique T → T_adv → T+1 anticipant les ripostes adverses, Ordres du Boss et bris de main.' }}
+              {{ t('archLookaheadDesc') }}
             </p>
           </div>
 
           <div class="mo-card-elevated p-5 space-y-2.5">
-            <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(255, 194, 26, 0.14); color: var(--brand-gold)">
+            <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background-color: rgba(255, 194, 26, 0.14); color: var(--brand-primary)">
               <Server class="h-5 w-5" />
             </div>
-            <h3 class="font-bold text-sm" style="color: var(--text-primary)">API Hybride &amp; Workers</h3>
+            <h3 class="font-bold text-sm" style="color: var(--text-primary)">{{ t('archHybridTitle') }}</h3>
             <p class="text-xs leading-relaxed" style="color: var(--text-secondary)">
-              {{ isEn
-                ? 'PostgreSQL + Fastify API backing client Web Workers, with seamless offline JSON catalog fallback when disconnected.'
-                : 'API Fastify + PostgreSQL couplée aux Web Workers client, avec repli offline automatique sur le catalogue JSON intégré.' }}
+              {{ t('archHybridDesc') }}
             </p>
           </div>
         </div>
@@ -321,18 +304,14 @@
           style="background: var(--brand-gradient)"
         >
           <Sparkles class="h-3.5 w-3.5" />
-          {{ isEn ? 'Beta Feedback Program' : 'Programme Bêta-Testeurs' }}
+          {{ t('betaBadge') }}
         </span>
 
         <h2 class="mt-4 text-2xl font-black sm:text-3xl" style="color: var(--text-primary)">
-          {{ isEn
-            ? 'Help Calibrate Olydor for the Standard Metagame'
-            : 'Participez au calibrage d’Olydor pour le format Standard' }}
+          {{ t('betaTitle') }}
         </h2>
         <p class="mx-auto mt-3 max-w-2xl text-sm sm:text-base" style="color: var(--text-secondary)">
-          {{ isEn
-            ? 'Share your tournament decklists, suggest priority mechanics for Pythia AI Arena, and report card edge cases in under 2 minutes.'
-            : 'Partagez vos retours de test sur vos listes de tournoi, votez pour les fonctionnalités prioritaires de l’Arène Pythia et signalez les cas limites en moins de 2 minutes.' }}
+          {{ t('betaDesc') }}
         </p>
 
         <div class="mt-7 flex flex-wrap items-center justify-center gap-4">
@@ -342,7 +321,7 @@
             rel="noopener noreferrer"
             class="mo-btn-solar inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold"
           >
-            <span>{{ isEn ? 'Open Beta Questionnaire' : 'Devenir Bêta-Testeur (Google Form)' }}</span>
+            <span>{{ t('betaCta') }}</span>
             <span aria-hidden="true">↗</span>
           </a>
         </div>
@@ -352,38 +331,45 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, inject, type Ref } from 'vue'
 import {
   ArrowRight,
   CheckCircle2,
-  Cpu,
   Database,
   FlaskConical,
   GitBranch,
+  Lock,
   Server,
   Sparkles,
   Swords,
   Zap,
 } from 'lucide-vue-next'
-import { BETA_FEEDBACK_FORM_URL, OlydorLogo } from '@olydor/ui'
+import { BETA_FEEDBACK_FORM_URL, OlydorLogo, resolvePlatformUrls, type OlydorLang } from '@olydor/ui'
+import { useWebI18n } from '../utils/i18n'
 
 const config = useRuntimeConfig()
-const lang = inject<Ref<'fr' | 'en'>>('olydorLang', ref('fr'))
-const isEn = computed(() => lang.value === 'en')
+const injectedLang = inject<Ref<OlydorLang> | undefined>('olydorLang', undefined)
+const { t } = useWebI18n(() => injectedLang?.value)
+
+const urls = computed(() =>
+  resolvePlatformUrls({
+    webUrl: config.public.webUrl,
+    insightUrl: config.public.insightUrl,
+    arenaUrl: config.public.arenaUrl,
+    apiUrl: config.public.apiUrl,
+  }),
+)
 
 useSeoMeta({
-  title: 'Olydor — Simulateur Stratégique & IA Prédictive Pokémon TCG',
-  description:
-    'Écosystème compétitif Pokémon TCG : simulateur Monte-Carlo multi-threads (854 cartes compilées), atelier A/B, parseur PTCGL et future arène IA contre Pythia 3-ply.',
-  ogTitle: 'Olydor — Simulateur Monte-Carlo & Analyse Tactique Pokémon TCG',
-  ogDescription:
-    'Testez vos decklists 60 cartes contre le métagame grâce à l’anticipation asymétrique 3-ply et optimisez vos ratios avec l’atelier A/B.',
+  title: () => t('seoTitle'),
+  description: () => t('seoDescription'),
+  ogTitle: () => t('ogTitle'),
+  ogDescription: () => t('ogDescription'),
   ogType: 'website',
   ogUrl: 'https://olydor.app',
   twitterCard: 'summary_large_image',
-  twitterTitle: 'Olydor — Pokémon TCG 3-Ply Analytics',
-  twitterDescription:
-    'Simulateur Monte-Carlo haute performance et future arène IA contre le bot Pythia 3-ply.',
+  twitterTitle: () => t('twitterTitle'),
+  twitterDescription: () => t('twitterDescription'),
 })
 
 useHead({

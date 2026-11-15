@@ -3,10 +3,10 @@
     <BetaTesterBanner :lang="currentLang" />
     <AppNavbar
       active-app="insight"
-      :web-url="config.public.webUrl"
-      :insight-url="config.public.insightUrl"
-      :arena-url="config.public.arenaUrl"
-      :api-base-url="config.public.apiUrl"
+      :web-url="urls.webUrl"
+      :insight-url="urls.insightUrl"
+      :arena-url="urls.arenaUrl"
+      :api-base-url="urls.apiUrl"
       :lang="currentLang"
       @update:lang="setLanguage($event)"
     />
@@ -14,20 +14,33 @@
       <slot />
     </main>
     <AppFooter
-      :web-url="config.public.webUrl"
-      :insight-url="config.public.insightUrl"
-      :arena-url="config.public.arenaUrl"
+      :web-url="urls.webUrl"
+      :insight-url="urls.insightUrl"
+      :arena-url="urls.arenaUrl"
       :lang="currentLang"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { AppFooter, AppNavbar, BetaTesterBanner } from '@olydor/ui'
+import { computed, watchEffect } from 'vue'
+import { AppFooter, AppNavbar, BetaTesterBanner, resolvePlatformUrls } from '@olydor/ui'
 import { setApiBaseUrl } from '../services/apiClient'
 import { useI18n } from '../utils/i18n'
 
 const config = useRuntimeConfig()
-setApiBaseUrl(config.public.apiUrl)
 const { currentLang, setLanguage } = useI18n()
+
+const urls = computed(() =>
+  resolvePlatformUrls({
+    webUrl: config.public.webUrl,
+    insightUrl: config.public.insightUrl,
+    arenaUrl: config.public.arenaUrl,
+    apiUrl: config.public.apiUrl,
+  }),
+)
+
+watchEffect(() => {
+  setApiBaseUrl(urls.value.apiUrl)
+})
 </script>

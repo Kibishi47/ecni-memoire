@@ -44,7 +44,7 @@ const emit = defineEmits<{
   (e: 'retry-meta-decks'): void
 }>()
 
-const { t, currentLang } = useI18n()
+const { t, pickLocalizedField } = useI18n()
 
 const activeConfigTab = ref<'quick' | 'advanced'>('quick')
 const zoomedOpponentCards = ref<EngineCardModel[]>([])
@@ -969,7 +969,7 @@ const launchButtonState = computed(() => {
           <div>
             <div class="flex items-center justify-between">
               <span class="rounded-md bg-[#1b2232] px-2 py-0.5 text-xs font-bold text-slate-200">
-                {{ currentLang === 'en' && opp.archetypeBadgeEn ? opp.archetypeBadgeEn : opp.archetypeBadge }}
+                {{ pickLocalizedField(opp.archetypeBadge, opp.archetypeBadgeEn) }}
               </span>
               <input
                 type="checkbox"
@@ -979,10 +979,10 @@ const launchButtonState = computed(() => {
             </div>
 
             <h4 class="mt-3 text-base font-bold text-[#f8fafc]">
-              {{ currentLang === 'en' && opp.nameEn ? opp.nameEn : opp.name }}
+              {{ pickLocalizedField(opp.name, opp.nameEn) }}
             </h4>
             <p class="mt-1 text-xs text-[#8a93a2]">
-              {{ currentLang === 'en' && opp.strategySubtitleEn ? opp.strategySubtitleEn : opp.strategySubtitle }}
+              {{ pickLocalizedField(opp.strategySubtitle, opp.strategySubtitleEn) }}
             </p>
           </div>
 
@@ -993,7 +993,7 @@ const launchButtonState = computed(() => {
               size="sm"
               @select="openOpponentCardsZoom(opp.keyThreatCards)"
             />
-            <span class="truncate">{{ t('threatsLabel') }} : {{ (currentLang === 'en' && opp.keyThreatsEn ? opp.keyThreatsEn : opp.keyThreats).slice(0, 2).join(', ') }}</span>
+            <span class="truncate">{{ t('threatsLabel') }} : {{ pickLocalizedField(opp.keyThreats, opp.keyThreatsEn).slice(0, 2).join(', ') }}</span>
           </div>
         </div>
       </div>

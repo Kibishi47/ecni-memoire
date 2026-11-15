@@ -1,3 +1,5 @@
+const isProd = process.env.NODE_ENV === 'production'
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-03-01',
   devtools: { enabled: false },
@@ -14,10 +16,20 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      webUrl: process.env.NUXT_PUBLIC_WEB_URL || 'https://olydor.app',
-      insightUrl: process.env.NUXT_PUBLIC_INSIGHT_URL || process.env.NUXT_PUBLIC_SIM_URL || 'https://insight.olydor.app',
-      arenaUrl: process.env.NUXT_PUBLIC_ARENA_URL || 'https://arena.olydor.app',
-      apiUrl: process.env.NUXT_PUBLIC_API_URL || 'https://api.olydor.app',
+      webUrl:
+        process.env.NUXT_PUBLIC_WEB_URL ||
+        (isProd ? 'https://olydor.app' : 'http://localhost:3001'),
+      insightUrl:
+        process.env.NUXT_PUBLIC_INSIGHT_URL ||
+        process.env.NUXT_PUBLIC_SIM_URL ||
+        (isProd ? 'https://insight.olydor.app' : 'http://localhost:3002'),
+      arenaUrl:
+        process.env.NUXT_PUBLIC_ARENA_URL ||
+        (isProd ? 'https://arena.olydor.app' : 'http://localhost:3003'),
+      apiUrl:
+        process.env.NUXT_PUBLIC_API_URL ||
+        process.env.NUXT_PUBLIC_API_BASE_URL ||
+        (isProd ? 'https://api.olydor.app' : 'http://localhost:3000'),
     },
   },
   app: {
@@ -30,6 +42,12 @@ export default defineNuxtConfig({
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+      ],
+      script: [
+        {
+          innerHTML:
+            "try{if(localStorage.getItem('olydor-theme')==='light'){var r=document.documentElement;r.classList.remove('dark');r.classList.add('light');r.setAttribute('data-theme','light');}}catch(e){}",
+        },
       ],
     },
   },

@@ -18,7 +18,7 @@ const emit = defineEmits<{
   (e: 'proceed-step2'): void
 }>()
 
-const { t, currentLang, getLocalizedCardName, getLocalizedSubCategory } = useI18n()
+const { t, pickLocalizedField, getLocalizedCardName, getLocalizedSubCategory } = useI18n()
 
 const localText = ref(props.rawDeckText)
 const hasValidatedCurrentInput = ref(false)
@@ -103,44 +103,6 @@ function closeCardZoom() {
 
 <template>
   <div class="space-y-6">
-    <!-- SECTION HERO INTUITIVE -->
-    <section class="overflow-hidden rounded-2xl border border-[#263044] bg-[#131823] shadow-xs">
-      <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 px-6 py-8 text-white sm:px-8">
-        <div class="max-w-3xl">
-          <span class="inline-flex items-center gap-1.5 rounded-full bg-[#131823]/10 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-200 backdrop-blur">
-            {{ t('heroBadge') }}
-          </span>
-          <h1 class="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
-            {{ t('heroTitle') }}
-          </h1>
-          <p class="mt-2 text-sm leading-relaxed text-[#8a93a2] sm:text-base">
-            {{ t('heroDescription') }}
-          </p>
-
-          <div class="mt-5 flex flex-wrap gap-4 text-xs font-medium text-slate-200">
-            <div class="flex items-center gap-2">
-              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>{{ t('profileBalancedDesc') }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>{{ t('metaMatchupsTitle') }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <svg class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>{{ t('step3Title') }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- ZONE D'IMPORT ET VALIDATION DU DECK -->
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
       <!-- Colonne Gauche : Saisie de la liste PTCGL -->
@@ -359,10 +321,10 @@ function closeCardZoom() {
                 />
                 <div class="min-w-0">
                   <div class="truncate font-bold text-[#f8fafc]">
-                    {{ currentLang === 'en' && item.cardNameEn ? item.cardNameEn : item.cardNameFr }}
+                    {{ pickLocalizedField(item.cardNameFr, item.cardNameEn) }}
                   </div>
                   <div class="mt-0.5 text-[#8a93a2]">
-                    {{ currentLang === 'en' && item.descriptionEn ? item.descriptionEn : item.description }}
+                    {{ pickLocalizedField(item.description, item.descriptionEn) }}
                   </div>
                 </div>
               </div>

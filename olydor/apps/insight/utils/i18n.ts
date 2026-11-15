@@ -1,24 +1,34 @@
-import { ref } from 'vue'
 import type { EngineCardModel, ParsedDeckEntry } from '@olydor/types'
+import {
+  currentOlydorLang,
+  initOlydorLanguage,
+  setOlydorLanguage,
+  toggleOlydorLanguage,
+} from '@olydor/ui'
 
 export type Language = 'fr' | 'en'
 
-const savedLang =
-  typeof localStorage !== 'undefined'
-    ? (localStorage.getItem('poketcg_lang') as Language | null)
-    : null
-
-export const currentLang = ref<Language>(savedLang === 'en' ? 'en' : 'fr')
+export const currentLang = currentOlydorLang
 
 export function setLanguage(lang: Language) {
-  currentLang.value = lang
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem('poketcg_lang', lang)
-  }
+  setOlydorLanguage(lang)
 }
 
 export function toggleLanguage() {
-  setLanguage(currentLang.value === 'fr' ? 'en' : 'fr')
+  toggleOlydorLanguage()
+}
+
+export function pickLocalizedField<T>(frValue: T, enValue?: T | null): T {
+  if (currentLang.value === 'en' && enValue !== undefined && enValue !== null) {
+    if (typeof enValue === 'string' && enValue.length === 0) {
+      return frValue
+    }
+    if (Array.isArray(enValue) && enValue.length === 0) {
+      return frValue
+    }
+    return enValue
+  }
+  return frValue
 }
 
 export const translations: Record<Language, Record<string, string>> = {
@@ -28,7 +38,7 @@ export const translations: Record<Language, Record<string, string>> = {
     appSubtitle: 'Simulateur Monte-Carlo 3-Ply & Atelier A/B',
     debugModeBadge: 'MODE DEBUG (?debug=true)',
     sendToArena: 'Tester cette liste dans l’Arène',
-    offlineCatalogBanner: 'Mode hybride offline actif : catalogue local 854 cartes utilisé.',
+    offlineCatalogBanner: 'Mode hybride offline actif : catalogue local embarqué utilisé.',
     step1Title: 'Deck & Synergies',
     step1Short: '1. Import Deck',
     step2Title: 'Configuration Matchups',
@@ -377,6 +387,13 @@ export const translations: Record<Language, Record<string, string>> = {
     reportIssueLink: 'Voir le ticket GitHub',
     reportRateLimitError: 'Limite de signalements atteinte. Réessayez dans {sec}s.',
     reportErrorGeneric: 'Impossible d’envoyer le signalement',
+    winInitial: 'V',
+    soonBadge: 'BIENTÔT',
+    simRunningProgress:
+      'Simulation en cours sur {cores} cœurs : {completed} / {total} parties ({percent} %)...',
+    simThroughputRate: 'Débit : ~{rate} parties/sec',
+    simElapsedSec: 'Temps écoulé : {sec} s',
+    simStopBtn: '🛑 Annuler la simulation',
   },
   en: {
     // Header & Steps
@@ -384,7 +401,7 @@ export const translations: Record<Language, Record<string, string>> = {
     appSubtitle: '3-Ply Monte Carlo Simulator & A/B Deck Optimizer',
     debugModeBadge: 'DEBUG MODE (?debug=true)',
     sendToArena: 'Test this list in the Arena',
-    offlineCatalogBanner: 'Offline hybrid mode active: using local 854-card catalog.',
+    offlineCatalogBanner: 'Offline hybrid mode active: using built-in local catalog.',
     step1Title: 'Deck & Synergies',
     step1Short: '1. Import Deck',
     step2Title: 'Matchup Configuration',
@@ -733,6 +750,13 @@ export const translations: Record<Language, Record<string, string>> = {
     reportIssueLink: 'View GitHub issue',
     reportRateLimitError: 'Report rate limit reached. Try again in {sec}s.',
     reportErrorGeneric: 'Unable to submit report',
+    winInitial: 'W',
+    soonBadge: 'SOON',
+    simRunningProgress:
+      'Simulation running on {cores} cores: {completed} / {total} games ({percent}%)...',
+    simThroughputRate: 'Throughput: ~{rate} games/sec',
+    simElapsedSec: 'Elapsed time: {sec} s',
+    simStopBtn: '🛑 Cancel simulation',
   },
 }
 
@@ -906,10 +930,12 @@ export function getLocalizedSubCategory(rawSubCat: string | null | undefined, la
 }
 
 export function useI18n() {
+  initOlydorLanguage()
   return {
     currentLang,
     setLanguage,
     toggleLanguage,
+    pickLocalizedField,
     t,
     getLocalizedCardName,
     getLocalizedCardRules,

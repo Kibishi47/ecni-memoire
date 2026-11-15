@@ -25,6 +25,53 @@
   --status-warning: #f59e0b;
   --status-negative: #ef4444;
   --ai-accent: #38bdf8;
+
+  /* Derived surface & pattern tokens */
+  --bg-navbar: rgba(12, 15, 22, 0.88);
+  --bg-overlay: rgba(12, 15, 22, 0.8);
+  --grid-line: rgba(38, 48, 68, 0.22);
+  --grid-glow-crimson: rgba(225, 29, 72, 0.12);
+  --grid-glow-orange: rgba(255, 107, 0, 0.14);
+  --shadow-card: 0 10px 30px -12px rgba(0, 0, 0, 0.45);
+}
+
+/* Light Theme — Solar Flare & Ivory (preserves exact Olydor Solar Flare brand palette) */
+html.light,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-canvas: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f5f9;
+  --border-subtle: #cbd5e1;
+
+  /* Identité Olydor (identique au thème sombre) */
+  --brand-crimson: #e11d48;
+  --brand-primary: #ff6b00;
+  --brand-amber: #ff8a00;
+  --brand-gold: #ffc21a;
+  --brand-gradient: linear-gradient(135deg, #e11d48 0%, #ff5500 45%, #ffc21a 100%);
+  --brand-glow: 0 4px 20px rgba(255, 107, 0, 0.22);
+
+  /* Typographie */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+
+  /* Télémétrie & Simulation */
+  --status-positive: #059669;
+  --status-warning: #d97706;
+  --status-negative: #dc2626;
+  --ai-accent: #0284c7;
+
+  /* Derived surface & pattern tokens */
+  --bg-navbar: rgba(255, 255, 255, 0.9);
+  --bg-overlay: rgba(248, 250, 252, 0.88);
+  --grid-line: rgba(148, 163, 184, 0.22);
+  --grid-glow-crimson: rgba(225, 29, 72, 0.08);
+  --grid-glow-orange: rgba(255, 107, 0, 0.1);
+  --shadow-card: 0 8px 24px -10px rgba(15, 23, 42, 0.1);
 }
 
 html,
@@ -47,6 +94,7 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 0.75rem;
+  box-shadow: var(--shadow-card);
 }
 
 .mo-card-elevated {
@@ -76,14 +124,14 @@ body {
 
 .mo-obsidian-grid {
   background-image:
-    radial-gradient(circle at 20% 0%, rgba(225, 29, 72, 0.12), transparent 38%),
-    radial-gradient(circle at 82% 10%, rgba(255, 107, 0, 0.14), transparent 42%),
-    linear-gradient(to right, rgba(38, 48, 68, 0.22) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(38, 48, 68, 0.22) 1px, transparent 1px);
+    radial-gradient(circle at 20% 0%, var(--grid-glow-crimson), transparent 38%),
+    radial-gradient(circle at 82% 10%, var(--grid-glow-orange), transparent 42%),
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
   background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
 }
 
-/* Custom dark scrollbar */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -100,4 +148,102 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--brand-primary);
+}
+
+/* Light theme compatibility overrides for Tailwind arbitrary hex classes used across Insight components */
+html.light [class~='bg-[#0c0f16]'],
+html.light [class~='bg-[#0c0f16]/80'] {
+  background-color: var(--bg-canvas) !important;
+}
+
+html.light [class~='bg-[#0c0f16]/50'],
+html.light [class~='bg-[#0c0f16]/60'] {
+  background-color: rgba(241, 245, 249, 0.85) !important;
+}
+
+html.light [class~='bg-[#131823]'] {
+  background-color: var(--bg-surface) !important;
+}
+
+html.light [class~='bg-[#131823]/10'],
+html.light [class~='bg-[#131823]/15'],
+html.light [class~='bg-[#131823]/20'] {
+  background-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+html.light [class~='bg-[#1b2232]'],
+html.light [class~='bg-[#1b2232]/60'],
+html.light [class~='bg-[#1b2232]/70'] {
+  background-color: var(--bg-elevated) !important;
+}
+
+html.light [class~='bg-[#263044]'] {
+  background-color: #e2e8f0 !important;
+}
+
+html.light [class~='bg-slate-800'],
+html.light [class~='bg-slate-800/40'],
+html.light [class~='bg-slate-800/50'],
+html.light [class~='bg-slate-800/70'],
+html.light [class~='bg-slate-800/80'] {
+  background-color: #f1f5f9 !important;
+}
+
+html.light [class~='bg-slate-950'],
+html.light [class~='bg-slate-950/85'],
+html.light [class~='bg-slate-950/90'] {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+}
+
+html.light [class~='border-[#263044]'],
+html.light [class~='border-[#263044]/60'],
+html.light [class~='border-slate-800'],
+html.light [class~='border-slate-900'] {
+  border-color: var(--border-subtle) !important;
+}
+
+html.light [class~='divide-[#263044]'] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-subtle) !important;
+}
+
+html.light [class~='text-[#f8fafc]'] {
+  color: var(--text-primary) !important;
+}
+
+html.light [class~='text-[#8a93a2]'] {
+  color: var(--text-secondary) !important;
+}
+
+html.light [class~='text-slate-100'],
+html.light [class~='text-slate-200'] {
+  color: #1e293b !important;
+}
+
+html.light [class~='text-slate-300'] {
+  color: #334155 !important;
+}
+
+html.light [class~='text-emerald-300'] {
+  color: #047857 !important;
+}
+
+html.light [class~='text-amber-300'] {
+  color: #b45309 !important;
+}
+
+html.light [class~='text-sky-300'] {
+  color: #0369a1 !important;
+}
+
+html.light [class~='text-red-200'],
+html.light [class~='text-rose-200'] {
+  color: #b91c1c !important;
+}
+
+html.light [class~='hover:bg-[#1b2232]']:hover {
+  background-color: var(--bg-elevated) !important;
+}
+
+html.light [class~='hover:text-white']:not(.mo-btn-solar):not([class*='bg-[#ff']):hover {
+  color: var(--text-primary) !important;
 }

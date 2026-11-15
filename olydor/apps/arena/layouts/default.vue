@@ -1,32 +1,42 @@
 <template>
   <div class="min-h-screen flex flex-col" style="background-color: var(--bg-canvas); color: var(--text-primary)">
-    <BetaTesterBanner :lang="lang" />
+    <BetaTesterBanner :lang="currentLang" />
     <AppNavbar
       active-app="arena"
-      :web-url="config.public.webUrl"
-      :insight-url="config.public.insightUrl"
-      :arena-url="config.public.arenaUrl"
-      :api-base-url="config.public.apiUrl"
-      :lang="lang"
-      @update:lang="lang = $event"
+      :web-url="urls.webUrl"
+      :insight-url="urls.insightUrl"
+      :arena-url="urls.arenaUrl"
+      :api-base-url="urls.apiUrl"
+      :lang="currentLang"
+      @update:lang="setLanguage($event)"
     />
     <main class="flex-1">
       <slot />
     </main>
     <AppFooter
-      :web-url="config.public.webUrl"
-      :insight-url="config.public.insightUrl"
-      :arena-url="config.public.arenaUrl"
-      :lang="lang"
+      :web-url="urls.webUrl"
+      :insight-url="urls.insightUrl"
+      :arena-url="urls.arenaUrl"
+      :lang="currentLang"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { provide, ref } from 'vue'
-import { AppFooter, AppNavbar, BetaTesterBanner } from '@olydor/ui'
+import { computed, provide } from 'vue'
+import { AppFooter, AppNavbar, BetaTesterBanner, resolvePlatformUrls } from '@olydor/ui'
+import { useArenaI18n } from '../utils/i18n'
 
 const config = useRuntimeConfig()
-const lang = ref<'fr' | 'en'>('fr')
-provide('olydorLang', lang)
+const { currentLang, setLanguage } = useArenaI18n()
+provide('olydorLang', currentLang)
+
+const urls = computed(() =>
+  resolvePlatformUrls({
+    webUrl: config.public.webUrl,
+    insightUrl: config.public.insightUrl,
+    arenaUrl: config.public.arenaUrl,
+    apiUrl: config.public.apiUrl,
+  }),
+)
 </script>

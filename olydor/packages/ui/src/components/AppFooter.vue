@@ -1,6 +1,6 @@
 <template>
   <footer
-    class="mt-auto border-t"
+    class="mt-auto border-t transition-colors duration-200"
     style="background-color: var(--bg-surface); border-color: var(--border-subtle); color: var(--text-secondary)"
   >
     <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6">
@@ -8,34 +8,34 @@
         <div class="space-y-3">
           <OlydorLogo size="sm" />
           <p class="text-xs leading-relaxed max-w-sm" style="color: var(--text-secondary)">
-            <template v-if="lang === 'en'">
-              High-throughput Monte Carlo simulator and 3-ply lookahead tactical engine built for competitive Pokémon TCG Standard analysis.
-            </template>
-            <template v-else>
-              Écosystème d’analyse compétitive Pokémon TCG : simulation Monte-Carlo 3-ply haute vélocité et laboratoire d’optimisation de decklists.
-            </template>
+            {{ t('footerDesc') }}
           </p>
         </div>
 
         <div class="space-y-2.5 text-xs">
           <h3 class="font-bold uppercase tracking-wider" style="color: var(--text-primary)">
-            {{ lang === 'en' ? 'Ecosystem' : 'Plateforme' }}
+            {{ t('footerPlatformsHeading') }}
           </h3>
           <ul class="space-y-1.5">
             <li>
-              <a :href="webUrl" class="transition hover:text-white">
-                Hub — olydor.app
+              <a :href="urls.webUrl" class="transition hover:opacity-80" style="color: var(--text-secondary)">
+                {{ t('footerHubLink') }}
               </a>
             </li>
             <li>
-              <a :href="insightUrl" class="transition hover:text-white">
-                {{ lang === 'en' ? 'Simulator — insight.olydor.app' : 'Simulateur — insight.olydor.app' }}
+              <a :href="urls.insightUrl" class="transition hover:opacity-80" style="color: var(--text-secondary)">
+                {{ t('footerInsightLink') }}
               </a>
             </li>
             <li>
-              <a :href="arenaUrl" class="transition hover:text-white">
-                {{ lang === 'en' ? 'AI Arena — arena.olydor.app' : 'Arène IA Pythia — arena.olydor.app' }}
-              </a>
+              <span
+                aria-disabled="true"
+                data-testid="footer-arena-disabled"
+                class="inline-flex cursor-not-allowed items-center gap-1.5 opacity-65 select-none"
+                style="color: var(--text-muted)"
+              >
+                {{ t('footerArenaDisabled') }}
+              </span>
             </li>
             <li>
               <a
@@ -43,9 +43,9 @@
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-1 font-semibold transition hover:brightness-110"
-                style="color: var(--brand-amber)"
+                style="color: var(--brand-primary)"
               >
-                <span>{{ lang === 'en' ? 'Beta Feedback Form' : 'Rejoindre le programme Bêta' }}</span>
+                <span>{{ t('footerBetaCta') }}</span>
                 <span aria-hidden="true">↗</span>
               </a>
             </li>
@@ -54,22 +54,22 @@
 
         <div class="space-y-2.5 text-xs">
           <h3 class="font-bold uppercase tracking-wider" style="color: var(--text-primary)">
-            {{ lang === 'en' ? 'Legal & Compliance' : 'Informations Légales' }}
+            {{ t('footerLegalHeading') }}
           </h3>
           <ul class="space-y-1.5">
             <li>
-              <a :href="legalBaseUrl + '/mentions-legales'" class="transition hover:text-white">
-                {{ lang === 'en' ? 'Legal Notice' : 'Mentions Légales' }}
+              <a :href="legalBaseUrl + '/mentions-legales'" class="transition hover:opacity-80" style="color: var(--text-secondary)">
+                {{ t('footerLegalNotice') }}
               </a>
             </li>
             <li>
-              <a :href="legalBaseUrl + '/confidentialite'" class="transition hover:text-white">
-                {{ lang === 'en' ? 'Privacy Policy (GDPR)' : 'Politique de Confidentialité (RGPD)' }}
+              <a :href="legalBaseUrl + '/confidentialite'" class="transition hover:opacity-80" style="color: var(--text-secondary)">
+                {{ t('footerPrivacy') }}
               </a>
             </li>
             <li>
-              <a :href="legalBaseUrl + '/cgu'" class="transition hover:text-white">
-                {{ lang === 'en' ? 'Terms of Service' : 'Conditions Générales d’Utilisation (CGU)' }}
+              <a :href="legalBaseUrl + '/cgu'" class="transition hover:opacity-80" style="color: var(--text-secondary)">
+                {{ t('footerTerms') }}
               </a>
             </li>
           </ul>
@@ -81,7 +81,7 @@
         style="border-color: var(--border-subtle); color: var(--text-muted)"
       >
         <p>{{ disclaimerText }}</p>
-        <p class="shrink-0">© {{ currentYear }} Olydor</p>
+        <p class="shrink-0">{{ t('footerCopyright', { year: currentYear }) }}</p>
       </div>
     </div>
   </footer>
@@ -95,6 +95,8 @@ import {
   TPCI_NON_AFFILIATION_DISCLAIMER_EN,
   TPCI_NON_AFFILIATION_DISCLAIMER_FR,
 } from '../logo'
+import { resolvePlatformUrls } from '../urls'
+import { useUiI18n, type OlydorLang } from '../i18n'
 
 export interface AppFooterProps {
   webUrl?: string
@@ -102,21 +104,31 @@ export interface AppFooterProps {
   arenaUrl?: string
   legalBaseUrl?: string
   betaFormUrl?: string
-  lang?: 'fr' | 'en'
+  lang?: OlydorLang
 }
 
 const props = withDefaults(defineProps<AppFooterProps>(), {
-  webUrl: 'https://olydor.app',
-  insightUrl: 'https://insight.olydor.app',
-  arenaUrl: 'https://arena.olydor.app',
+  webUrl: undefined,
+  insightUrl: undefined,
+  arenaUrl: undefined,
   legalBaseUrl: '',
   betaFormUrl: BETA_FEEDBACK_FORM_URL,
-  lang: 'fr',
+  lang: undefined,
 })
+
+const { t, activeLang } = useUiI18n(() => props.lang)
+
+const urls = computed(() =>
+  resolvePlatformUrls({
+    webUrl: props.webUrl,
+    insightUrl: props.insightUrl,
+    arenaUrl: props.arenaUrl,
+  }),
+)
 
 const currentYear = new Date().getFullYear()
 
 const disclaimerText = computed(() =>
-  props.lang === 'en' ? TPCI_NON_AFFILIATION_DISCLAIMER_EN : TPCI_NON_AFFILIATION_DISCLAIMER_FR,
+  activeLang.value === 'en' ? TPCI_NON_AFFILIATION_DISCLAIMER_EN : TPCI_NON_AFFILIATION_DISCLAIMER_FR,
 )
 </script>

@@ -10,6 +10,7 @@ import type {
 } from '@olydor/types'
 import type { SmartAlternativeSuggestion } from '@olydor/types'
 import { UNIFIED_CARD_REGISTRY } from '@olydor/engine'
+import { resolvePlatformUrls } from '@olydor/ui'
 import { ApiError, fetchAlternativesFromApi, searchCatalogCards } from '../services/apiClient'
 import { encodeDeckForUrl, exportDeckToPtcgl } from '@olydor/engine'
 import { getCardImageUrl } from '../utils/cardImage'
@@ -47,7 +48,7 @@ const props = withDefaults(
   {
     deckVersions: () => [],
     isDebugMode: false,
-    arenaUrl: 'https://arena.olydor.app',
+    arenaUrl: undefined,
     activeVersionId: '',
     metaOpponents: () => [],
   },
@@ -66,7 +67,7 @@ const emit = defineEmits<{
   (e: 'cancel-simulation'): void
 }>()
 
-const { t, currentLang, getLocalizedCardName, getLocalizedCardRules, getLocalizedSubCategory } = useI18n()
+const { t, pickLocalizedField, getLocalizedCardName, getLocalizedCardRules, getLocalizedSubCategory } = useI18n()
 
 // Onglets de navigation dans l'Étape 3
 type Step3Tab = 'overview' | 'detailed' | 'audit'
@@ -369,7 +370,7 @@ const exportedPtcglText = computed(() => {
 })
 
 const arenaDeckUrl = computed(() => {
-  const base = (props.arenaUrl || 'https://arena.olydor.app').replace(/\/+$/, '')
+  const base = resolvePlatformUrls({ arenaUrl: props.arenaUrl }).arenaUrl
   const rawList = exportDeckToPtcgl(props.editableDeck.cards, {
     lang: 'en',
     format: 'ptcgl',
@@ -663,17 +664,22 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             <span>{{ isDeckModified ? t('exportPtcglVariant') : t('exportPtcglDeck') }}</span>
           </button>
 
-          <!-- Bouton Tester cette liste dans l'Arène -->
-          <a
+          <!-- Bouton Tester cette liste dans l'Arène (Coming Soon — non cliquable) -->
+          <button
             v-if="editableDeck.totalCards === 60"
-            :href="arenaDeckUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-2 rounded-xl border border-[#38bdf8]/50 bg-[#38bdf8]/10 px-4 py-3 text-sm font-bold text-[#38bdf8] transition hover:bg-[#38bdf8]/20"
+            type="button"
+            disabled
+            aria-disabled="true"
+            data-testid="step3-arena-disabled"
+            :data-arena-preview-url="arenaDeckUrl"
+            class="inline-flex cursor-not-allowed items-center gap-2 rounded-xl border border-[#38bdf8]/40 bg-[#38bdf8]/10 px-4 py-3 text-sm font-bold text-[#38bdf8] opacity-70 select-none"
           >
             <span aria-hidden="true">⚔️</span>
             <span>{{ t('sendToArena') }}</span>
-          </a>
+            <span class="rounded-full bg-[#ff6b00]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#ffc21a]">
+              {{ t('soonBadge') }}
+            </span>
+          </button>
         </div>
       </div>
     </div>
@@ -754,7 +760,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       >
         <div class="flex items-center justify-between">
           <span class="rounded-md bg-[#1b2232] px-2.5 py-0.5 text-xs font-bold text-slate-200">
-            {{ currentLang === 'en' && m.archetypeTagEn ? m.archetypeTagEn : m.archetypeTag }}
+            {{ pickLocalizedField(m.archetypeTag, m.archetypeTagEn) }}
           </span>
 
           <span
@@ -768,7 +774,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
 
         <div class="mt-2 flex items-center justify-between gap-2">
           <h3 class="text-base font-bold text-[#f8fafc] truncate">
-            {{ currentLang === 'en' && m.opponentNameEn ? m.opponentNameEn : m.opponentName }}
+            {{ pickLocalizedField(m.opponentName, m.opponentNameEn) }}
           </h3>
           <CardFanThumbnail
             v-if="getMatchupThreatCards(m.opponentId).length > 0"
@@ -1200,7 +1206,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingFirst) }} %
             </div>
             <p class="mt-1 text-xs text-[#8a93a2] font-mono">
-              {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}{{ currentLang === 'en' ? 'W' : 'V' }} / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} {{ t('gamesUnit') }}
+              {{ currentSummary.turnOrderSplitStats.winsGoingFirst }}{{ t('winInitial') }} / {{ currentSummary.turnOrderSplitStats.gamesGoingFirst }} {{ t('gamesUnit') }}
             </p>
           </div>
 
@@ -1210,7 +1216,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               {{ formatRate(currentSummary.turnOrderSplitStats.winRateGoingSecond) }} %
             </div>
             <p class="mt-1 text-xs text-[#8a93a2] font-mono">
-              {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}{{ currentLang === 'en' ? 'W' : 'V' }} / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} {{ t('gamesUnit') }}
+              {{ currentSummary.turnOrderSplitStats.winsGoingSecond }}{{ t('winInitial') }} / {{ currentSummary.turnOrderSplitStats.gamesGoingSecond }} {{ t('gamesUnit') }}
             </p>
           </div>
 
@@ -1524,16 +1530,21 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
           ></textarea>
 
           <div class="mt-4 flex flex-wrap justify-end gap-3">
-            <a
+            <button
               v-if="editableDeck.totalCards === 60"
-              :href="arenaDeckUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 rounded-xl border border-[#38bdf8]/50 bg-[#38bdf8]/10 px-4 py-2 text-xs font-bold text-[#38bdf8] hover:bg-[#38bdf8]/20"
+              type="button"
+              disabled
+              aria-disabled="true"
+              data-testid="step3-export-arena-disabled"
+              :data-arena-preview-url="arenaDeckUrl"
+              class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-xl border border-[#38bdf8]/40 bg-[#38bdf8]/10 px-4 py-2 text-xs font-bold text-[#38bdf8] opacity-70 select-none"
             >
               <span aria-hidden="true">⚔️</span>
               <span>{{ t('sendToArena') }}</span>
-            </a>
+              <span class="rounded-full bg-[#ff6b00]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#ffc21a]">
+                {{ t('soonBadge') }}
+              </span>
+            </button>
             <button
               type="button"
               @click="downloadExportedDeckTxt"

@@ -34,6 +34,7 @@ import {
   recordActualSimulationThroughput,
   type HardwareProfile,
 } from '../services/hardwareBenchmark'
+import { resolvePlatformUrls } from '@olydor/ui'
 import { useI18n } from '../utils/i18n'
 import WizardHeader from '../components/WizardHeader.vue'
 import Step1DeckImport from '../components/Step1DeckImport.vue'
@@ -43,11 +44,19 @@ import Step3DashboardAndComparator, {
 } from '../components/Step3DashboardAndComparator.vue'
 
 const config = useRuntimeConfig()
-setApiBaseUrl(config.public.apiUrl)
+const resolvedUrls = computed(() =>
+  resolvePlatformUrls({
+    webUrl: config.public.webUrl,
+    insightUrl: config.public.insightUrl,
+    arenaUrl: config.public.arenaUrl,
+    apiUrl: config.public.apiUrl,
+  }),
+)
+setApiBaseUrl(resolvedUrls.value.apiUrl)
 
 const currentStep = ref<1 | 2 | 3>(1)
 const isDebugMode = ref<boolean>(false)
-const { t } = useI18n()
+const { t, currentLang } = useI18n()
 
 const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
 const maxHardwareWorkers = computed(() => hardwareProfile.value.workerThreadsMax)
@@ -541,21 +550,34 @@ useSeoMeta({
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
             <span>
-              Simulation en cours sur {{ simConfig.workerCount }} cœurs : {{ progressCompleted.toLocaleString('fr-FR') }} / {{ progressTotal.toLocaleString('fr-FR') }} parties ({{ progressPercent }} %)...
+              {{
+                t('simRunningProgress', {
+                  cores: simConfig.workerCount,
+                  completed: progressCompleted.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
+                  total: progressTotal.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
+                  percent: progressPercent,
+                })
+              }}
             </span>
           </div>
 
           <div class="flex items-center gap-4 font-mono text-xs" style="color: var(--text-secondary)">
-            <span style="color: var(--brand-amber)">Débit : ~{{ liveThroughput.toLocaleString('fr-FR') }} parties/sec</span>
+            <span style="color: var(--brand-amber)">
+              {{
+                t('simThroughputRate', {
+                  rate: liveThroughput.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
+                })
+              }}
+            </span>
             <span>•</span>
-            <span>Temps écoulé : {{ (progressElapsedMs / 1000).toFixed(1) }} s</span>
+            <span>{{ t('simElapsedSec', { sec: (progressElapsedMs / 1000).toFixed(1) }) }}</span>
             <button
               type="button"
               @click="handleCancelSimulation"
               class="rounded-lg border px-3 py-1 text-xs font-bold text-white transition hover:brightness-110"
               style="border-color: var(--status-negative); background-color: var(--status-negative)"
             >
-              🛑 Annuler la simulation
+              {{ t('simStopBtn') }}
             </button>
           </div>
         </div>
@@ -646,7 +668,7 @@ useSeoMeta({
         :progress-total="progressTotal"
         :progress-elapsed-ms="progressElapsedMs"
         :is-debug-mode="isDebugMode"
-        :arena-url="config.public.arenaUrl"
+        :arena-url="resolvedUrls.arenaUrl"
         :deck-versions="deckVersions"
         :active-version-id="activeVersionId"
         :meta-opponents="metaOpponents"

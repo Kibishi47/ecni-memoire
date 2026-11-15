@@ -2,7 +2,7 @@
   <div
     v-if="!isDismissed"
     role="region"
-    aria-label="Programme Bêta Ouverte Olydor"
+    :aria-label="t('betaRegionAria')"
     class="relative z-50 border-b text-xs sm:text-sm"
     style="
       background: linear-gradient(90deg, rgba(225, 29, 72, 0.16) 0%, rgba(255, 107, 0, 0.18) 50%, rgba(255, 194, 26, 0.14) 100%), var(--bg-surface);
@@ -17,15 +17,10 @@
           style="background: var(--brand-gradient)"
         >
           <Sparkles class="h-3 w-3" />
-          BÊTA OUVERTE
+          {{ t('betaBadge') }}
         </span>
         <p class="font-medium leading-snug" style="color: var(--text-primary)">
-          <template v-if="lang === 'en'">
-            Olydor is in open Beta testing — help shape the 3-ply Pokémon TCG engine &amp; Pythia AI Arena.
-          </template>
-          <template v-else>
-            Olydor est en phase Bêta ouverte — contribuez à améliorer le moteur 3-ply et la future Arène IA Pythia !
-          </template>
+          {{ t('betaText') }}
         </p>
         <a
           :href="formUrl"
@@ -34,7 +29,7 @@
           class="inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-bold text-white transition hover:brightness-110"
           style="background: var(--brand-gradient); box-shadow: var(--brand-glow)"
         >
-          <span>{{ lang === 'en' ? 'Become a Beta Tester' : 'Devenir Bêta-Testeur' }}</span>
+          <span>{{ t('betaFeedbackBtn') }}</span>
           <span aria-hidden="true">→</span>
         </a>
       </div>
@@ -42,9 +37,9 @@
       <button
         v-if="dismissible"
         type="button"
-        class="shrink-0 rounded-md p-1 transition hover:bg-white/10"
+        class="shrink-0 rounded-md p-1 transition hover:opacity-75"
         style="color: var(--text-secondary)"
-        :aria-label="lang === 'en' ? 'Dismiss beta banner' : 'Masquer le bandeau bêta pour cette session'"
+        :aria-label="t('betaDismissAria')"
         @click="dismiss"
       >
         <X class="h-4 w-4" />
@@ -57,21 +52,23 @@
 import { onMounted, ref } from 'vue'
 import { Sparkles, X } from 'lucide-vue-next'
 import { BETA_FEEDBACK_FORM_URL } from '../logo'
+import { useUiI18n, type OlydorLang } from '../i18n'
 
 export interface BetaTesterBannerProps {
-  lang?: 'fr' | 'en'
+  lang?: OlydorLang
   formUrl?: string
   dismissible?: boolean
   storageKey?: string
 }
 
 const props = withDefaults(defineProps<BetaTesterBannerProps>(), {
-  lang: 'fr',
+  lang: undefined,
   formUrl: BETA_FEEDBACK_FORM_URL,
   dismissible: true,
   storageKey: 'olydor_beta_banner_dismissed',
 })
 
+const { t } = useUiI18n(() => props.lang)
 const isDismissed = ref(false)
 
 onMounted(() => {
