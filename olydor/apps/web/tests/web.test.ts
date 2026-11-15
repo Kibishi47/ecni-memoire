@@ -58,6 +58,8 @@ describe('@olydor/web hub & SEO configuration', () => {
     expect(combined).not.toContain('Journal de pensée')
     expect(combined).not.toContain('thought stream')
     expect(indexPage).not.toContain('bg-[#ff6b00]')
+    expect(indexPage).toContain('?preset=1')
+    expect(indexPage).not.toContain('?preset=charizard')
     expect(indexPage).toContain('useSeoMeta(')
     expect(indexPage).toContain("'@type': 'SoftwareApplication'")
     expect(indexPage).toContain('BETA_FEEDBACK_FORM_URL')

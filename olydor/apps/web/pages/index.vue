@@ -120,7 +120,7 @@
 
           <div class="mt-7 pt-5 border-t flex flex-wrap items-center justify-between gap-3" style="border-color: var(--border-subtle)">
             <a
-              :href="`${urls.insightUrl}?preset=charizard`"
+              :href="`${urls.insightUrl}?preset=1`"
               data-testid="bento-insight-preset"
               class="text-xs font-semibold underline decoration-orange-500/40 underline-offset-4 transition hover:opacity-80"
               style="color: var(--brand-primary)"

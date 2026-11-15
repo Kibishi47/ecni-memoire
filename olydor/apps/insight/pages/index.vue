@@ -133,12 +133,18 @@ async function applyInitialDeckFromUrl() {
       return
     }
   }
-  const preset = params.get('preset')?.toLowerCase().trim()
-  if (preset && META_OPPONENT_DECKS.length > 0) {
+  const preset = params.get('preset')?.trim()
+  const presetNum = preset && /^\d+$/.test(preset) ? Number.parseInt(preset, 10) : NaN
+  if (Number.isInteger(presetNum) && presetNum >= 1) {
+    if (metaOpponents.value.length === 0) {
+      await loadMetaDecks()
+    }
     const matched =
-      META_OPPONENT_DECKS.find(
-        (d) => d.id.toLowerCase().includes(preset) || d.name.toLowerCase().includes(preset),
-      ) ?? META_OPPONENT_DECKS[0]
+      metaOpponents.value.find((d) => d.id === `meta_api_${presetNum}`) ??
+      metaOpponents.value[presetNum - 1] ??
+      META_OPPONENT_DECKS[presetNum - 1] ??
+      metaOpponents.value[0] ??
+      META_OPPONENT_DECKS[0]
     if (matched) {
       await ensureLocalCatalogLoaded()
       await handleValidateDeck(matched.ptcglText)
@@ -179,8 +185,10 @@ async function loadMetaDecks() {
 onMounted(() => {
   detectUrlParams()
   void ensureLocalCatalogLoaded()
-  void loadMetaDecks()
-  void applyInitialDeckFromUrl()
+  void (async () => {
+    await loadMetaDecks()
+    await applyInitialDeckFromUrl()
+  })()
   if (typeof window !== 'undefined') {
     window.addEventListener('popstate', detectUrlParams)
   }
