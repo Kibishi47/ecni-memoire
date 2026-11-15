@@ -98,8 +98,75 @@ Energy: 10
 
 Total Cards: 60`
 
+export const DECK_ALAKAZAM_PTCGL = `Pokémon: 21
+4 Abra MEG 54
+4 Kadabra MEG 55
+3 Alakazam MEG 56
+3 Dunsparce JTG 120
+2 Dudunsparce TEF 129
+1 Flutter Mane TEF 78
+1 Elgyem BLK 40
+1 Genesect SFA 40
+1 Fezandipiti ex ASC 142
+1 Lillie's Clefairy ex JTG 56
+
+Trainer: 31
+4 Dawn PFL 87
+3 Hilda WHT 84
+2 Boss's Orders MEG 114
+1 Eri TEF 146
+4 Buddy-Buddy Poffin TEF 144
+4 Poké Pad POR 81
+2 Rare Candy MEG 125
+2 Wondrous Patch PFL 94
+1 Night Stretcher ASC 196
+1 Sacred Ash DRI 168
+1 Special Red Card CRI 82
+2 Lillie's Pearl JTG 151
+1 Handheld Fan TWM 150
+2 Nighttime Mine ASC 197
+1 Battle Cage PFL 85
+
+Energy: 8
+4 Telepathic Psychic Energy POR 88
+2 Psychic Energy MEE 13
+1 Mist Energy TEF 161
+1 Enriching Energy SSP 191
+
+Total Cards: 60`
+
+export const DECK_BRANETTE_SINISTRAIL_PTCGL = `Pokémon: 25
+4 Poltchageist PBL 5
+2 Sinistcha PBL 6
+4 Dhelmise PBL 39
+3 Dunsparce JTG 120
+2 Dudunsparce TEF 129
+2 Shuppet PBL 33
+4 Banette PBL 34
+2 Lillie's Clefairy ex JTG 56
+1 Bloodmoon Ursaluna ex TWM 141
+1 Latias ex SSP 76
+
+Trainer: 28
+4 Lillie's Determination MEG 119
+4 Gwynn PBL 78
+3 Boss's Orders MEG 114
+2 Explorer's Guidance TEF 147
+1 Black Belt's Training JTG 143
+4 Ultra Ball MEG 131
+4 Poké Pad POR 81
+3 Night Stretcher ASC 196
+3 Prism Tower CRI 80
+
+Energy: 7
+4 Telepathic Psychic Energy POR 88
+2 Psychic Energy MEE 13
+1 Legacy Energy TWM 167
+
+Total Cards: 60`
+
 /**
- * Les 3 decks top méta du moment servant d'adversaires de référence.
+ * Les 5 decks top méta du moment servant d'adversaires de référence.
  * 100 % des 60 cartes sont résolues dans cards_database.json et les énergies natives.
  */
 export const META_OPPONENT_DECKS: MetaOpponentDeck[] = [
@@ -153,5 +220,39 @@ export const META_OPPONENT_DECKS: MetaOpponentDeck[] = [
     keyThreatsEn: ['Slowking', 'Ciphermaniac\'s Codebreaking', 'Kyurem'],
     badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
     ptcglText: DECK_ROIGADA_PTCGL,
+  },
+  {
+    id: 'meta_alakazam',
+    name: 'Alakazam',
+    nameEn: 'Alakazam',
+    archetypeBadge: 'Pioche & Dégâts Main',
+    archetypeBadgeEn: 'Draw & Hand Scaling',
+    strategySubtitle: 'Pioche Psy + Deusolourdo pour amplifier Main Puissante',
+    strategySubtitleEn: 'Psychic Draw + Dudunsparce to scale Powerful Hand',
+    description:
+      'Deck à 1 Récompense accumulant une main massive via Alakazam (Pioche Psy), Kadabra, Deusolourdo et Énergie Enrichissante pour placer des marqueurs de dégâts massifs avec Main Puissante.',
+    descriptionEn:
+      'Single-prize deck building a massive hand through Alakazam (Psychic Draw), Kadabra, Dudunsparce, and Enriching Energy to place huge damage counters with Powerful Hand.',
+    keyThreats: ['Alakazam (Main Puissante)', 'Deusolourdo (Pioche Fuyante)', 'Genesect (Annihilateur HIGH)'],
+    keyThreatsEn: ['Alakazam (Powerful Hand)', 'Dudunsparce (Run Away Draw)', 'Genesect (ACE Nullifier)'],
+    badgeColor: 'bg-sky-50 text-sky-700 border-sky-200',
+    ptcglText: DECK_ALAKAZAM_PTCGL,
+  },
+  {
+    id: 'meta_branette_sinistrail',
+    name: 'Branette / Sinistrail',
+    nameEn: 'Banette / Dhelmise',
+    archetypeBadge: 'Défausse & Cachette en Douce',
+    archetypeBadgeEn: 'Discard & Hide \'n\' Sneak',
+    strategySubtitle: 'Alimente la défausse en Cachette en Douce pour Ancre Vengeresse & Pirouette Matcha',
+    strategySubtitleEn: 'Feeds discard with Hide \'n\' Sneak Pokémon for Vengeful Anchor & Matcha Spin',
+    description:
+      'Deck combo à 1 Récompense qui remplit la pile de défausse avec Albia et Tour Prismatique en Pokémon dotés de Cachette en Douce (Branette, Théffroyable) pour frapper fort avec Sinistrail et spreader le Banc.',
+    descriptionEn:
+      'Single-prize combo deck filling the discard pile via Gwynn and Prism Tower with Hide \'n\' Sneak Pokémon (Banette, Sinistcha) to hit hard with Dhelmise and spread damage with Sinistcha.',
+    keyThreats: ['Sinistrail (Ancre Vengeresse)', 'Théffroyable (Pirouette Matcha)', 'Branette (Poupée Piocheuse)'],
+    keyThreatsEn: ['Dhelmise (Vengeful Anchor)', 'Sinistcha (Matcha Spin)', 'Banette (Puppet Pull)'],
+    badgeColor: 'bg-rose-50 text-rose-700 border-rose-200',
+    ptcglText: DECK_BRANETTE_SINISTRAIL_PTCGL,
   },
 ]

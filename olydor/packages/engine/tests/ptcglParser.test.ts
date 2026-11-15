@@ -15,12 +15,14 @@ describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
     expect(getCompiledCardsCount()).toBe(3509)
   })
 
-  it('valide les 3 decks méta de référence à 60 cartes avec 100 % de cartes résolues', () => {
-    expect(META_OPPONENT_DECKS.length).toBe(3)
+  it('valide les 5 decks méta de référence à 60 cartes avec 100 % de cartes résolues', () => {
+    expect(META_OPPONENT_DECKS.length).toBe(5)
     expect(META_OPPONENT_DECKS.map((d) => d.name)).toEqual([
       'Lanssorien-ex',
       'Méga-Kangourex-ex',
       'Roigada',
+      'Alakazam',
+      'Branette / Sinistrail',
     ])
 
     for (const deck of META_OPPONENT_DECKS) {
