@@ -197,10 +197,14 @@ describe('@olydor/ui Design System & Shared Components', () => {
     const wrapper = mount(AppFooter, { props: { lang: 'fr' } })
     expect(wrapper.text()).toContain(TPCI_NON_AFFILIATION_DISCLAIMER_FR)
     expect(wrapper.find('[data-testid="footer-arena-disabled"]').attributes('aria-disabled')).toBe('true')
+    expect(wrapper.find('[data-testid="footer-about-alpha"]').exists()).toBe(false)
     expect(wrapper.find('a[href*="arena"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/mentions-legales"]').exists()).toBe(true)
     expect(wrapper.find('a[href="/confidentialite"]').exists()).toBe(true)
     expect(wrapper.find('a[href="/cgu"]').exists()).toBe(true)
+
+    const hubWrapper = mount(AppFooter, { props: { lang: 'en', showAboutAlpha: true } })
+    expect(hubWrapper.find('[data-testid="footer-about-alpha"]').exists()).toBe(true)
   })
 
   it('resolves localhost ports in local dev and olydor.app domains in production via resolvePlatformUrls & createI18n', () => {

@@ -19,6 +19,7 @@
       :insight-url="urls.insightUrl"
       :arena-url="urls.arenaUrl"
       :lang="currentLang"
+      :show-about-alpha="true"
     />
   </div>
 </template>

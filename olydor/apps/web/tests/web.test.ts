@@ -85,6 +85,7 @@ describe('@olydor/web hub & SEO configuration', () => {
     expect(layout).toContain('<AlphaOnboardingModal')
     expect(layout).toContain('<AppNavbar')
     expect(layout).toContain('<AppFooter')
+    expect(layout).toContain(':show-about-alpha="true"')
     expect(layout).toContain('active-app="web"')
   })
 

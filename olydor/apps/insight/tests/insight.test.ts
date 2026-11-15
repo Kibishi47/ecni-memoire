@@ -218,7 +218,7 @@ describe('@olydor/insight migrated simulator suite', () => {
 
     // Step3 keeps arenaDeckUrl computation for later launch while rendering disabled buttons
     expect(layout).toContain('<AlphaTesterBanner')
-    expect(layout).toContain('<AlphaOnboardingModal')
+    expect(layout).not.toContain('<AlphaOnboardingModal')
     expect(layout).toContain('active-app="insight"')
     expect(step3).toContain('arenaDeckUrl')
     expect(step3).toContain('data-testid="step3-arena-disabled"')

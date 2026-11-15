@@ -49,7 +49,7 @@
                 <span aria-hidden="true">↗</span>
               </a>
             </li>
-            <li>
+            <li v-if="showAboutAlpha">
               <button
                 type="button"
                 data-testid="footer-about-alpha"
@@ -117,6 +117,7 @@ export interface AppFooterProps {
   legalBaseUrl?: string
   alphaFormUrl?: string
   lang?: OlydorLang
+  showAboutAlpha?: boolean
 }
 
 const props = withDefaults(defineProps<AppFooterProps>(), {
@@ -126,6 +127,7 @@ const props = withDefaults(defineProps<AppFooterProps>(), {
   legalBaseUrl: '',
   alphaFormUrl: ALPHA_FEEDBACK_FORM_URL,
   lang: undefined,
+  showAboutAlpha: false,
 })
 
 const { t, activeLang } = useUiI18n(() => props.lang)

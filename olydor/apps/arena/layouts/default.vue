@@ -1,7 +1,6 @@
 <template>
   <div class="min-h-screen flex flex-col" style="background-color: var(--bg-canvas); color: var(--text-primary)">
     <AlphaTesterBanner :lang="currentLang" />
-    <AlphaOnboardingModal :lang="currentLang" @update:lang="setLanguage($event)" />
     <AppNavbar
       active-app="arena"
       :web-url="urls.webUrl"
@@ -26,7 +25,6 @@
 <script setup lang="ts">
 import { computed, provide } from 'vue'
 import {
-  AlphaOnboardingModal,
   AlphaTesterBanner,
   AppFooter,
   AppNavbar,
