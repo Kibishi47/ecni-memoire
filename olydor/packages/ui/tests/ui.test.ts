@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -238,6 +238,62 @@ describe('@olydor/ui Design System & Shared Components', () => {
 
       expect(enWrapper.text()).toContain('Please try again in 1 hour.')
       expect(enWrapper.text()).not.toContain('60s')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('surfaces concrete Zod validation issue messages instead of raw "Validation Error" and falls back cleanly if an older API rejects WEBSITE_ERROR', async () => {
+    const originalFetch = globalThis.fetch
+    let callCount = 0
+    const capturedTypes: unknown[] = []
+
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      callCount += 1
+      const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      capturedTypes.push(parsed.type)
+      if (callCount === 1) {
+        return new Response(
+          JSON.stringify({
+            error: 'Validation Error',
+            issues: [{ path: 'type', message: 'Invalid discriminator value' }],
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (callCount === 2) {
+        return new Response(JSON.stringify({ success: true, reportId: 88 }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(
+        JSON.stringify({
+          error: 'Validation Error',
+          issues: [{ path: 'userComment', message: 'Commentaire trop long' }],
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      )
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(BugReportModal, {
+        props: { modelValue: true, lang: 'fr', apiBaseUrl: 'http://localhost:3000' },
+        global: { stubs: { Teleport: true } },
+      })
+      await wrapper.find('#mo-bug-comment').setValue('Problème sur la page accueil')
+      await wrapper.find('form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(capturedTypes).toEqual(['WEBSITE_ERROR', 'ENGINE_RULE_ERROR'])
+      expect(wrapper.text()).toContain('88')
+
+      await wrapper.find('#mo-bug-comment').setValue('Deuxième essai')
+      await wrapper.find('form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Commentaire trop long')
+      expect(wrapper.text()).not.toContain('Validation Error')
     } finally {
       globalThis.fetch = originalFetch
     }

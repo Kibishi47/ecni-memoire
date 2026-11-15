@@ -103,10 +103,25 @@ async function parseErrorBody(res: Response): Promise<{ message: string; retryAf
       try {
         const json = JSON.parse(text) as Record<string, unknown>
         details = json
-        if (typeof json.message === 'string' && json.message.trim().length > 0) {
-          message = json.message
-        } else if (typeof json.error === 'string' && json.error.trim().length > 0) {
-          message = json.error
+        if (Array.isArray(json.issues) && json.issues.length > 0) {
+          const issueDetails = json.issues
+            .map((issue) =>
+              issue && typeof issue === 'object' && typeof (issue as { message?: unknown }).message === 'string'
+                ? (issue as { message: string }).message.trim()
+                : '',
+            )
+            .filter(Boolean)
+            .join(' • ')
+          if (issueDetails.length > 0) {
+            message = issueDetails
+          }
+        }
+        if (message === `Erreur HTTP ${res.status}`) {
+          if (typeof json.message === 'string' && json.message.trim().length > 0) {
+            message = json.message
+          } else if (typeof json.error === 'string' && json.error.trim().length > 0) {
+            message = json.error
+          }
         }
         if (typeof json.retryAfterSeconds === 'number' && Number.isFinite(json.retryAfterSeconds)) {
           retryAfterSeconds = json.retryAfterSeconds

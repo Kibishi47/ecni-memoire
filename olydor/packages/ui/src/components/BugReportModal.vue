@@ -176,6 +176,10 @@ async function handleSubmit() {
     errorMessage.value = t('bugErrorEmptyComment')
     return
   }
+  if (trimmedComment.length > 1000) {
+    errorMessage.value = t('bugErrorCommentTooLong')
+    return
+  }
 
   const trimmedDefaultCardId = props.defaultCardId?.trim() || ''
   const resolvedType: BugReportType = trimmedDefaultCardId
@@ -183,27 +187,34 @@ async function handleSubmit() {
     : props.defaultType === 'ENGINE_RULE_ERROR'
       ? 'ENGINE_RULE_ERROR'
       : 'WEBSITE_ERROR'
+  const resolvedContextLogs =
+    props.contextLogs && typeof props.contextLogs === 'object' && !Array.isArray(props.contextLogs)
+      ? props.contextLogs
+      : {
+          source: 'navbar-bug-modal',
+          href: typeof window !== 'undefined' ? window.location.href : 'ssr',
+          timestamp: new Date().toISOString(),
+        }
   const payload: BugReportPayload = {
     type: resolvedType,
     cardId: trimmedDefaultCardId || null,
-    matchLogs: props.contextLogs ?? {
-      source: 'navbar-bug-modal',
-      href: typeof window !== 'undefined' ? window.location.href : 'ssr',
-      timestamp: new Date().toISOString(),
-    },
+    matchLogs: resolvedContextLogs,
     userComment: trimmedComment,
   }
 
-  isSubmitting.value = true
-  try {
-    const response = await fetch(`${resolvedApiBaseUrl.value}/api/reports`, {
+  const postReport = (bodyPayload: BugReportPayload) =>
+    fetch(`${resolvedApiBaseUrl.value}/api/reports`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(bodyPayload),
     })
+
+  isSubmitting.value = true
+  try {
+    let response = await postReport(payload)
 
     if (!response.ok) {
       let msg = t('bugErrorServer', { status: response.status })
@@ -212,11 +223,38 @@ async function handleSubmit() {
       let retrySeconds = Number.isFinite(headerRetry) && headerRetry > 0 ? headerRetry : 3600
 
       try {
-        const errJson = (await response.json()) as {
+        let errJson = (await response.json()) as {
           message?: string
           error?: string
           retryAfterSeconds?: number
+          issues?: Array<{ path?: string; message?: string }>
         }
+
+        const isUnsupportedWebsiteType =
+          response.status === 400 &&
+          resolvedType === 'WEBSITE_ERROR' &&
+          Array.isArray(errJson.issues) &&
+          errJson.issues.some((issue) => issue.path === 'type')
+
+        if (isUnsupportedWebsiteType) {
+          response = await postReport({
+            ...payload,
+            type: 'ENGINE_RULE_ERROR',
+            matchLogs: {
+              ...resolvedContextLogs,
+              requestedType: 'WEBSITE_ERROR',
+            },
+          })
+          if (response.ok) {
+            const result = (await response.json()) as BugReportResponse
+            submittedResult.value = result
+            userComment.value = ''
+            emit('submitted', result)
+            return
+          }
+          errJson = (await response.json().catch(() => ({}))) as typeof errJson
+        }
+
         if (
           typeof errJson.retryAfterSeconds === 'number' &&
           Number.isFinite(errJson.retryAfterSeconds) &&
@@ -228,8 +266,18 @@ async function handleSubmit() {
           msg = t('bugErrorRateLimit', {
             retry: formatRetryAfterDuration(retrySeconds, activeLang.value),
           })
-        } else if (errJson.message || errJson.error) {
-          msg = errJson.message || errJson.error || msg
+        } else {
+          const issueText = Array.isArray(errJson.issues)
+            ? errJson.issues
+                .map((issue) => (typeof issue.message === 'string' ? issue.message.trim() : ''))
+                .filter(Boolean)
+                .join(' • ')
+            : ''
+          if (issueText) {
+            msg = issueText
+          } else if (errJson.message || errJson.error) {
+            msg = errJson.message || errJson.error || msg
+          }
         }
       } catch {
         if (response.status === 429) {
