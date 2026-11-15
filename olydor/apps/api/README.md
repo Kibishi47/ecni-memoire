@@ -15,7 +15,7 @@ backend/
 │   ├── scripts/         # Scripts CLI d'administration locale (seedCards, seedMetaDecks)
 │   └── server.ts        # Point d'entrée Fastify
 ├── meta_decks/          # Decklists méta .txt au format PTCGL
-├── docker-compose.yml   # Base PostgreSQL 16 locale prête à l'emploi
+├── docker-compose.yml   # Base PostgreSQL 18 locale prête à l'emploi
 ├── package.json
 ├── tsconfig.json
 └── .env.example
