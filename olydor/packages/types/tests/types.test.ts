@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createReportBodySchema, isCardStandardLegal } from '../src/index.js'
 
 describe('@olydor/types', () => {
-  it('validates CARD_MODEL_ERROR and ENGINE_RULE_ERROR payloads with Zod', () => {
+  it('validates CARD_MODEL_ERROR, ENGINE_RULE_ERROR, and WEBSITE_ERROR payloads with Zod', () => {
     const validCardErr = createReportBodySchema.safeParse({
       type: 'CARD_MODEL_ERROR',
       cardId: 'sv03-125',
@@ -21,6 +21,19 @@ describe('@olydor/types', () => {
       matchLogs: { turn: 2, action: 'RETREAT' },
     })
     expect(validEngineErr.success).toBe(true)
+
+    const validWebsiteErr = createReportBodySchema.safeParse({
+      type: 'WEBSITE_ERROR',
+      userComment: 'Bouton invisible sur mobile',
+      matchLogs: { href: 'https://olydor.app/' },
+    })
+    expect(validWebsiteErr.success).toBe(true)
+
+    const emptyWebsiteErr = createReportBodySchema.safeParse({
+      type: 'WEBSITE_ERROR',
+      userComment: '   ',
+    })
+    expect(emptyWebsiteErr.success).toBe(false)
   })
 
   it('checks standard legality including regulation marks G/H/I/J and basic energy', () => {

@@ -111,7 +111,7 @@ Le projet intègre un `Dockerfile` multi-stage optimisé pour un déploiement au
 - `POST /api/cards/resolve` : Résout de manière tolérante des cartes (`items` ou `ptcglText`) via `card_id`, `CARD_ID_ALIASES` et repli sur nom FR/EN normalisé (`resolved` / `unresolved`).
 - `POST /api/cards/alternatives` : Calcule côté serveur les suggestions d'alternatives intelligentes (`cardIds` 1..60, `excludeCardIds`, `limitPerCard` 1..30) à l'aide d'un cache catalogue en mémoire.
 - `GET /api/cards/:cardId` : Retourne le modèle JSON `EngineCardModel` d'une carte.
-- `POST /api/reports` : Enregistre un signalement de bug (`CARD_MODEL_ERROR` ou `ENGINE_RULE_ERROR`), applique le rate-limiting IP, et crée une issue GitHub si configuré.
+- `POST /api/reports` : Enregistre un signalement de bug (`CARD_MODEL_ERROR`, `ENGINE_RULE_ERROR` ou `WEBSITE_ERROR`), applique le rate-limiting IP, et crée une issue GitHub en interne si configuré.
 
 ## Tests
 

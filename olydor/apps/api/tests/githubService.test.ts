@@ -89,4 +89,26 @@ describe('githubService', () => {
       'bug:engine',
     ])
   })
+
+  it('generates expected title, labels, and body for WEBSITE_ERROR', () => {
+    const input = {
+      reportId: 77,
+      type: 'WEBSITE_ERROR' as const,
+      cardId: null,
+      matchLogs: { source: 'navbar-bug-modal', href: 'https://olydor.app/' },
+      userComment: 'Problème de traduction sur le Hub.',
+    }
+
+    expect(buildIssueTitle(input)).toBe('[Website] Problème signalé sur le site')
+    expect(buildIssueLabels('WEBSITE_ERROR')).toEqual([
+      'source:user-report',
+      'triage-needed',
+      'bug:website',
+    ])
+
+    const body = buildIssueBody(input)
+    expect(body).toContain('Problème de traduction sur le Hub.')
+    expect(body).toContain('https://olydor.app/')
+    expect(body).toContain('<summary>Contexte / Logs</summary>')
+  })
 })

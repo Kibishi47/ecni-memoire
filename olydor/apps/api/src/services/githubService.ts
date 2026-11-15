@@ -1,7 +1,8 @@
 import { Octokit } from '@octokit/rest'
+import type { BugReportType } from '@olydor/types'
 import { env } from '../config/env.js'
 
-export type BugReportType = 'CARD_MODEL_ERROR' | 'ENGINE_RULE_ERROR'
+export type { BugReportType }
 
 export interface BugReportIssueInput {
   reportId: number
@@ -59,6 +60,9 @@ export function buildIssueTitle(input: Pick<BugReportIssueInput, 'type' | 'cardI
   if (input.type === 'CARD_MODEL_ERROR') {
     return `[Card Model] Erreur sur la carte ${input.cardId}`
   }
+  if (input.type === 'WEBSITE_ERROR') {
+    return '[Website] Problème signalé sur le site'
+  }
   return '[Engine Rule] Incohérence de règles signalée'
 }
 
@@ -70,6 +74,9 @@ export function buildIssueLabels(type: BugReportType): string[] {
   if (type === 'CARD_MODEL_ERROR') {
     return [...baseLabels, 'bug:card-model']
   }
+  if (type === 'WEBSITE_ERROR') {
+    return [...baseLabels, 'bug:website']
+  }
   return [...baseLabels, 'bug:engine']
 }
 
@@ -80,13 +87,17 @@ function formatBlockquote(text: string): string {
     .join('\n')
 }
 
-function formatMatchLogsSection(matchLogs: Record<string, unknown> | null): string {
+function formatMatchLogsSection(
+  matchLogs: Record<string, unknown> | null,
+  summaryLabel = 'Logs du match',
+  emptyLabel = '_Aucun log de match fourni._',
+): string {
   if (!matchLogs) {
     return [
       '<details>',
-      '<summary>Logs du match</summary>',
+      `<summary>${summaryLabel}</summary>`,
       '',
-      '_Aucun log de match fourni._',
+      emptyLabel,
       '',
       '</details>',
     ].join('\n')
@@ -99,7 +110,7 @@ function formatMatchLogsSection(matchLogs: Record<string, unknown> | null): stri
 
   return [
     '<details>',
-    '<summary>Logs du match</summary>',
+    `<summary>${summaryLabel}</summary>`,
     '',
     '```json',
     serialized,
@@ -150,7 +161,23 @@ export function buildIssueBody(
     sections.push(...cardLines)
   }
 
-  sections.push('', '### Replay / Logs', formatMatchLogsSection(input.matchLogs))
+  if (input.type === 'WEBSITE_ERROR') {
+    const pageHref =
+      input.matchLogs && typeof input.matchLogs.href === 'string' ? input.matchLogs.href : null
+    sections.push('', '### Contexte technique')
+    if (pageHref) {
+      sections.push(`- **Page concernée :** ${pageHref}`)
+    }
+    sections.push(
+      formatMatchLogsSection(
+        input.matchLogs,
+        'Contexte / Logs',
+        '_Aucun contexte technique fourni._',
+      ),
+    )
+  } else {
+    sections.push('', '### Replay / Logs', formatMatchLogsSection(input.matchLogs))
+  }
 
   return sections.join('\n')
 }

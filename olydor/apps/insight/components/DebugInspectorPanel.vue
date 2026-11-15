@@ -237,15 +237,6 @@ function formatWinReason(reason: string | null): string {
             class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/45 bg-emerald-950/45 px-2.5 py-1.5 text-xs text-emerald-200"
           >
             <span>{{ t('reportSuccessMsg', { id: engineReport.successResult.value.reportId }) }}</span>
-            <a
-              v-if="engineReport.successResult.value.issueUrl"
-              :href="engineReport.successResult.value.issueUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="font-bold underline hover:text-[#10b981]"
-            >
-              {{ t('reportIssueLink') }}
-            </a>
           </div>
           <div class="flex items-center justify-end gap-2">
             <button

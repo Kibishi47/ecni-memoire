@@ -84,16 +84,6 @@
                 {{ t('bugSuccessMsg', { id: submittedResult.reportId }) }}
               </span>
             </div>
-            <a
-              v-if="submittedResult.issueUrl"
-              :href="submittedResult.issueUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="mt-1 inline-block underline hover:opacity-80"
-              style="color: var(--ai-accent)"
-            >
-              {{ submittedResult.issueUrl }}
-            </a>
           </div>
 
           <div class="flex items-center justify-end gap-3 pt-2">
@@ -140,7 +130,7 @@ export interface BugReportModalProps {
 
 const props = withDefaults(defineProps<BugReportModalProps>(), {
   apiBaseUrl: undefined,
-  defaultType: 'CARD_MODEL_ERROR',
+  defaultType: 'WEBSITE_ERROR',
   defaultCardId: '',
   contextLogs: null,
   lang: undefined,
@@ -188,7 +178,11 @@ async function handleSubmit() {
   }
 
   const trimmedDefaultCardId = props.defaultCardId?.trim() || ''
-  const resolvedType: BugReportType = trimmedDefaultCardId ? 'CARD_MODEL_ERROR' : 'ENGINE_RULE_ERROR'
+  const resolvedType: BugReportType = trimmedDefaultCardId
+    ? 'CARD_MODEL_ERROR'
+    : props.defaultType === 'ENGINE_RULE_ERROR'
+      ? 'ENGINE_RULE_ERROR'
+      : 'WEBSITE_ERROR'
   const payload: BugReportPayload = {
     type: resolvedType,
     cardId: trimmedDefaultCardId || null,

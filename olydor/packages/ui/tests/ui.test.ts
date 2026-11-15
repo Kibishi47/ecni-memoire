@@ -160,13 +160,13 @@ describe('@olydor/ui Design System & Shared Components', () => {
     expect(wrapper.emitted('open-bug-modal')).toBeTruthy()
   })
 
-  it('renders BugReportModal without error type selector and submits direct user comment', async () => {
+  it('renders BugReportModal without error type selector, submits WEBSITE_ERROR by default, and hides GitHub issue URLs', async () => {
     const originalFetch = globalThis.fetch
     const requestCapture: { body: Record<string, unknown> | null } = { body: null }
     globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
       requestCapture.body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
-      return new Response(JSON.stringify({ ok: true, reportId: 42 }), {
-        status: 200,
+      return new Response(JSON.stringify({ success: true, reportId: 42 }), {
+        status: 201,
         headers: { 'Content-Type': 'application/json' },
       })
     }) as typeof fetch
@@ -178,16 +178,21 @@ describe('@olydor/ui Design System & Shared Components', () => {
       })
       expect(wrapper.text()).not.toContain('CARD_MODEL_ERROR')
       expect(wrapper.text()).not.toContain('ENGINE_RULE_ERROR')
+      expect(wrapper.text()).not.toContain('WEBSITE_ERROR')
       expect(wrapper.find('#mo-bug-card-id').exists()).toBe(false)
       expect(wrapper.find('#mo-bug-comment').exists()).toBe(true)
 
       await wrapper.find('#mo-bug-comment').setValue('Le filtre decklist bug')
       await wrapper.find('form').trigger('submit.prevent')
+      await wrapper.vm.$nextTick()
+      await Promise.resolve()
 
       expect(requestCapture.body).not.toBeNull()
-      expect(requestCapture.body?.type).toBe('ENGINE_RULE_ERROR')
+      expect(requestCapture.body?.type).toBe('WEBSITE_ERROR')
       expect(requestCapture.body?.cardId).toBeNull()
       expect(requestCapture.body?.userComment).toBe('Le filtre decklist bug')
+      expect(wrapper.text()).toContain('42')
+      expect(wrapper.find('a[href*="github"]').exists()).toBe(false)
     } finally {
       globalThis.fetch = originalFetch
     }

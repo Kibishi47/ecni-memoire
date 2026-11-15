@@ -163,6 +163,7 @@
   <BugReportModal
     v-model="isBugModalOpen"
     :api-base-url="urls.apiUrl"
+    :default-type="bugCardId ? 'CARD_MODEL_ERROR' : 'WEBSITE_ERROR'"
     :default-card-id="bugCardId"
     :context-logs="bugContextLogs"
     :lang="activeLang"

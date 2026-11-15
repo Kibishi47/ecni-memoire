@@ -127,8 +127,8 @@ describe('POST /api/reports', () => {
     expect(res.json()).toEqual({
       success: true,
       reportId: 101,
-      issueUrl: 'https://github.com/org/repo/issues/7',
     })
+    expect(res.json()).not.toHaveProperty('issueUrl')
 
     expect(githubMock.createBugReportIssue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -141,6 +141,62 @@ describe('POST /api/reports', () => {
 
     const updateQuery = queries.find((q) => q.sql.includes('UPDATE bug_reports'))
     expect(updateQuery?.params).toEqual(['https://github.com/org/repo/issues/7', 7, 101])
+
+    await app.close()
+  })
+
+  it('accepts WEBSITE_ERROR with userComment, rejects empty comment, and never exposes issueUrl', async () => {
+    const { pool, queries } = createMockPool()
+    const githubMock: GitHubIssueCreator = {
+      isConfigured: () => true,
+      createBugReportIssue: vi.fn().mockResolvedValue({
+        issueUrl: 'https://github.com/org/repo/issues/12',
+        issueNumber: 12,
+      }),
+    }
+
+    const app = await buildServer({
+      pool,
+      logger: false,
+      githubService: githubMock,
+      reportRateLimiter: new InMemoryRateLimiter({ maxRequests: 5 }),
+    })
+
+    const badRes = await app.inject({
+      method: 'POST',
+      url: '/api/reports',
+      payload: {
+        type: 'WEBSITE_ERROR',
+        userComment: '   ',
+      },
+    })
+    expect(badRes.statusCode).toBe(400)
+
+    const okRes = await app.inject({
+      method: 'POST',
+      url: '/api/reports',
+      payload: {
+        type: 'WEBSITE_ERROR',
+        matchLogs: { source: 'navbar-bug-modal', href: 'https://olydor.app/' },
+        userComment: 'Le texte du thème clair manque de contraste.',
+      },
+    })
+
+    expect(okRes.statusCode).toBe(201)
+    expect(okRes.json()).toEqual({
+      success: true,
+      reportId: 101,
+    })
+    expect(okRes.json()).not.toHaveProperty('issueUrl')
+
+    const insertQuery = queries.find((q) => q.sql.includes('INSERT INTO bug_reports'))
+    expect(insertQuery?.params?.[0]).toBe('WEBSITE_ERROR')
+    expect(githubMock.createBugReportIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'WEBSITE_ERROR',
+        userComment: 'Le texte du thème clair manque de contraste.',
+      }),
+    )
 
     await app.close()
   })
@@ -210,7 +266,6 @@ describe('POST /api/reports', () => {
     expect(res.json()).toEqual({
       success: true,
       reportId: 101,
-      issueUrl: null,
     })
 
     await app.close()

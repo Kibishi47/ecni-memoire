@@ -95,7 +95,6 @@ export async function registerReportRoutes(
     )
 
     const reportId = insertRes.rows[0]!.id
-    let issueUrl: string | null = null
 
     if (githubService.isConfigured()) {
       try {
@@ -110,7 +109,6 @@ export async function registerReportRoutes(
         })
 
         if (createdIssue) {
-          issueUrl = createdIssue.issueUrl
           await pool.query(
             `
               UPDATE bug_reports
@@ -131,7 +129,6 @@ export async function registerReportRoutes(
     return reply.status(201).send({
       success: true,
       reportId,
-      issueUrl,
     })
   })
 }

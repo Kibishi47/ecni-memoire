@@ -102,7 +102,7 @@ export interface SmartAlternativeSuggestion {
   attackerComparison?: AttackerComparisonRow
 }
 
-export type BugReportType = 'CARD_MODEL_ERROR' | 'ENGINE_RULE_ERROR'
+export type BugReportType = 'CARD_MODEL_ERROR' | 'ENGINE_RULE_ERROR' | 'WEBSITE_ERROR'
 
 export interface BugReportPayload {
   type: BugReportType
@@ -114,7 +114,6 @@ export interface BugReportPayload {
 export interface BugReportResponse {
   success: boolean
   reportId: number
-  issueUrl: string | null
 }
 
 const optionalCommentSchema = z
@@ -154,9 +153,21 @@ export const engineRuleReportSchema = z.object({
   userComment: optionalCommentSchema,
 })
 
+export const websiteReportSchema = z.object({
+  type: z.literal('WEBSITE_ERROR'),
+  cardId: optionalCardIdSchema,
+  matchLogs: z.record(z.string(), z.unknown()).nullable().optional(),
+  userComment: z
+    .string({ required_error: 'userComment est requis pour WEBSITE_ERROR' })
+    .trim()
+    .min(1, 'userComment ne peut pas être vide pour WEBSITE_ERROR')
+    .max(1000, 'userComment ne peut pas dépasser 1000 caractères'),
+})
+
 export const createReportBodySchema = z.discriminatedUnion('type', [
   cardModelReportSchema,
   engineRuleReportSchema,
+  websiteReportSchema,
 ])
 
 export const bugReportPayloadSchema = createReportBodySchema
