@@ -33,10 +33,21 @@ RUN pnpm --filter @olydor/types build \
  && pnpm --filter @olydor/engine build \
  && pnpm --filter @olydor/api build
 
-# Élagage des devDependencies tout en conservant les liens symboliques pnpm workspace
-RUN CI=true pnpm prune --prod
+# --- Stage 2 : Dépendances de production uniquement (préserve les liens workspace pnpm) ---
+FROM base AS prod-deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/types/package.json packages/types/package.json
+COPY packages/engine/package.json packages/engine/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/insight/package.json apps/insight/package.json
+COPY apps/arena/package.json apps/arena/package.json
 
-# --- Stage 2 : Runtime Production minimaliste ---
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts --filter @olydor/api... \
+ && mkdir -p packages/types/node_modules packages/engine/node_modules apps/api/node_modules
+
+# --- Stage 3 : Runtime Production minimaliste ---
 FROM node:22-alpine AS runner
 RUN apk add --no-cache wget
 WORKDIR /app
@@ -47,19 +58,21 @@ ENV HOST=0.0.0.0
 ENV AUTO_MIGRATE=true
 ENV AUTO_SEED=true
 
-# Copier l'arbre de dépendances élagué + artefacts compilés + données SQL/JSON
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=builder /app/node_modules ./node_modules
+# Copier l'arbre de dépendances production + artefacts compilés + données SQL/JSON
+COPY --from=prod-deps /app/package.json ./package.json
+COPY --from=prod-deps /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 COPY --from=builder /app/packages/types/package.json ./packages/types/package.json
+COPY --from=prod-deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=builder /app/packages/types/dist ./packages/types/dist
 
 COPY --from=builder /app/packages/engine/package.json ./packages/engine/package.json
+COPY --from=prod-deps /app/packages/engine/node_modules ./packages/engine/node_modules
 COPY --from=builder /app/packages/engine/dist ./packages/engine/dist
 
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=prod-deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/meta_decks ./apps/api/meta_decks
 COPY --from=builder /app/apps/api/src/migrations ./apps/api/src/migrations
