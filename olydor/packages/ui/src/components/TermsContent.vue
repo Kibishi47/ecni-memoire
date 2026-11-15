@@ -4,46 +4,50 @@
       <a
         href="/"
         class="inline-flex items-center gap-1.5 text-xs font-semibold transition hover:brightness-125"
-        style="color: var(--brand-amber)"
+        style="color: var(--brand-primary)"
       >
         <span>←</span>
-        <span>Retour à l’accueil</span>
+        <span>{{ t('legalBackHome') }}</span>
       </a>
       <h1 class="mt-4 text-3xl font-black tracking-tight sm:text-4xl mo-gradient-text">
-        Conditions Générales d’Utilisation (CGU)
+        {{ t('termsTitle') }}
       </h1>
       <p class="mt-2 text-sm" style="color: var(--text-secondary)">
-        Dernière mise à jour : {{ lastUpdated }} — Accès aux outils Olydor.
+        {{ t('termsSubtitle', { date: effectiveDate }) }}
       </p>
     </div>
 
     <div class="space-y-6 text-sm leading-relaxed" style="color: var(--text-secondary)">
       <section class="mo-card p-6 space-y-2.5">
-        <h2 class="text-lg font-bold" style="color: var(--text-primary)">1. Objet &amp; Statut Bêta</h2>
+        <h2 class="text-lg font-bold" style="color: var(--text-primary)">{{ t('termsS1Title') }}</h2>
         <p>
-          Les présentes Conditions Générales d’Utilisation régissent l’accès gratuit aux services web <strong style="color: var(--text-primary)">Olydor</strong> : le Hub d’information (`olydor.app`), le Simulateur Monte-Carlo 3-ply (`insight.olydor.app`), l’Arène IA Pythia (`arena.olydor.app`, en préparation) et l’API associée (`api.olydor.app`).
+          {{ t('termsS1Body1Prefix') }}
+          <strong style="color: var(--text-primary)">{{ t('termsS1Body1Strong') }}</strong>
+          {{ t('termsS1Body1Suffix') }}
         </p>
         <p>
-          Le service est fourni en version <strong style="color: var(--brand-amber)">Bêta Ouverte</strong> « en l’état » : certaines modélisations de cartes ou interactions complexes du règlement Pokémon TCG peuvent encore comporter des imprécisions signalables à tout moment via l’interface.
-        </p>
-      </section>
-
-      <section class="mo-card p-6 space-y-2.5">
-        <h2 class="text-lg font-bold" style="color: var(--text-primary)">2. Caractère analytique des résultats</h2>
-        <p>
-          Les indicateurs (Winrate Global, Tour Moyen Premier KO, Taux de Setup T2, Taux de Brick, Atelier A/B) résultent de simulations stochastiques et d’heuristiques 3-ply destinées à l’entraînement compétitif. Olydor ne garantit en aucun cas des résultats exacts en tournoi officiel Play! Pokémon.
+          {{ t('termsS1Body2Prefix') }}
+          <strong style="color: var(--brand-primary)">{{ t('termsS1Body2Strong') }}</strong>
+          {{ t('termsS1Body2Suffix') }}
         </p>
       </section>
 
       <section class="mo-card p-6 space-y-2.5">
-        <h2 class="text-lg font-bold" style="color: var(--text-primary)">3. Usage loyal de l’API &amp; Disponibilité</h2>
+        <h2 class="text-lg font-bold" style="color: var(--text-primary)">{{ t('termsS2Title') }}</h2>
         <p>
-          Toute tentative d’extraction massive automatisée, de saturation volontaire de `api.olydor.app` ou de contournement des limites de débit (rate-limiting) est interdite. Olydor se réserve le droit d’interrompre ou de faire évoluer les endpoints sans préavis durant la phase Bêta.
+          {{ t('termsS2Body') }}
         </p>
       </section>
 
       <section class="mo-card p-6 space-y-2.5">
-        <h2 class="text-lg font-bold" style="color: var(--text-primary)">4. Non-Affiliation</h2>
+        <h2 class="text-lg font-bold" style="color: var(--text-primary)">{{ t('termsS3Title') }}</h2>
+        <p>
+          {{ t('termsS3Body') }}
+        </p>
+      </section>
+
+      <section class="mo-card p-6 space-y-2.5">
+        <h2 class="text-lg font-bold" style="color: var(--text-primary)">{{ t('termsS4Title') }}</h2>
         <p style="color: var(--text-primary)">
           {{ disclaimer }}
         </p>
@@ -53,16 +57,23 @@
 </template>
 
 <script setup lang="ts">
-import { TPCI_NON_AFFILIATION_DISCLAIMER_FR } from '../logo'
+import { computed } from 'vue'
+import {
+  TPCI_NON_AFFILIATION_DISCLAIMER_EN,
+  TPCI_NON_AFFILIATION_DISCLAIMER_FR,
+} from '../logo'
+import { useUiI18n, type OlydorLang } from '../i18n'
 
-withDefaults(
-  defineProps<{
-    lastUpdated?: string
-  }>(),
-  {
-    lastUpdated: 'Novembre 2026',
-  },
+const props = defineProps<{
+  lastUpdated?: string
+  lang?: OlydorLang
+}>()
+
+const { t, activeLang } = useUiI18n(() => props.lang)
+const effectiveDate = computed(() => props.lastUpdated || t('legalDefaultDate'))
+const disclaimer = computed(() =>
+  activeLang.value === 'en'
+    ? TPCI_NON_AFFILIATION_DISCLAIMER_EN
+    : TPCI_NON_AFFILIATION_DISCLAIMER_FR,
 )
-
-const disclaimer = TPCI_NON_AFFILIATION_DISCLAIMER_FR
 </script>

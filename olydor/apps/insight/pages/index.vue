@@ -56,7 +56,7 @@ setApiBaseUrl(resolvedUrls.value.apiUrl)
 
 const currentStep = ref<1 | 2 | 3>(1)
 const isDebugMode = ref<boolean>(false)
-const { t, currentLang } = useI18n()
+const { t, formatNumber } = useI18n()
 
 const hardwareProfile = ref<HardwareProfile>(calibrateHardwareProfile(false))
 const maxHardwareWorkers = computed(() => hardwareProfile.value.workerThreadsMax)
@@ -297,12 +297,12 @@ async function executeInitialSimulation() {
       deckVersions.value[0].summary = summary
     }
   } catch (err) {
-    if (err instanceof Error && err.message.includes('annulée')) {
+    if (err instanceof Error && (err.message.includes('annulée') || err.message.toLowerCase().includes('cancel'))) {
       cancelNotice.value = t('simulationCancelled')
       simulationError.value = null
     } else {
       simulationError.value = err instanceof Error ? err.message : String(err)
-      console.error('Erreur lors de la simulation initiale :', err)
+      console.error('Error during initial simulation:', err)
     }
   } finally {
     isSimulating.value = false
@@ -513,12 +513,10 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
 }
 
 useSeoMeta({
-  title: 'Olydor Insight — Laboratoire Monte-Carlo & Atelier A/B Pokémon TCG',
-  description:
-    'Importez votre decklist PTCGL, vérifiez ses 60 cartes et lancez des simulations Monte-Carlo 3-ply multi-threads avec comparateur A/B.',
-  ogTitle: 'Olydor Insight — insight.olydor.app',
-  ogDescription:
-    '8 KPIs compétitifs, 6 analyses méta, suggestions d’alternatives et inspecteur 3-ply pour Pokémon TCG Standard.',
+  title: () => t('seoTitle'),
+  description: () => t('seoDescription'),
+  ogTitle: () => t('ogTitle'),
+  ogDescription: () => t('ogDescription'),
 })
 </script>
 
@@ -561,8 +559,8 @@ useSeoMeta({
               {{
                 t('simRunningProgress', {
                   cores: simConfig.workerCount,
-                  completed: progressCompleted.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
-                  total: progressTotal.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
+                  completed: formatNumber(progressCompleted),
+                  total: formatNumber(progressTotal),
                   percent: progressPercent,
                 })
               }}
@@ -573,7 +571,7 @@ useSeoMeta({
             <span class="font-bold" style="color: var(--brand-primary)">
               {{
                 t('simThroughputRate', {
-                  rate: liveThroughput.toLocaleString(currentLang === 'en' ? 'en-US' : 'fr-FR'),
+                  rate: formatNumber(liveThroughput),
                 })
               }}
             </span>

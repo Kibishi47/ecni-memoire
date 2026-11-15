@@ -1,12 +1,15 @@
 <template>
-  <TermsContent />
+  <TermsContent :lang="currentLang" />
 </template>
 
 <script setup lang="ts">
 import { TermsContent } from '@olydor/ui'
+import { useI18n } from '../utils/i18n'
+
+const { t, currentLang } = useI18n()
 
 useSeoMeta({
-  title: 'Conditions Générales d’Utilisation — Olydor Insight',
-  description: 'Conditions générales d’utilisation d’Olydor Insight (insight.olydor.app).',
+  title: () => t('legalTermsSeoTitle'),
+  description: () => t('legalTermsSeoDesc'),
 })
 </script>

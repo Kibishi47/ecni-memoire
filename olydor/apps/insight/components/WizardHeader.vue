@@ -33,7 +33,7 @@ const navSteps = computed(() => [
   >
     <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
       <!-- Navigation par étapes du Wizard -->
-      <nav aria-label="Navigation des étapes" class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      <nav :aria-label="t('wizardStepsNavAria')" class="flex flex-wrap items-center gap-1.5 sm:gap-2">
         <button
           v-for="step in navSteps"
           :key="step.num"
@@ -59,7 +59,7 @@ const navSteps = computed(() => [
         <span
           v-if="isDebugMode"
           class="inline-flex items-center gap-1 rounded-md border border-[#ff6b00]/45 bg-[#ff6b00]/15 px-2 py-0.5 font-mono text-[11px] font-bold text-[#ff8a00]"
-          title="Mode debug actif via ?debug=true"
+          :title="t('debugModeTooltip', { param: '?debug=true' })"
         >
           <Bug class="h-3 w-3" />
           {{ t('debugModeBadge') }}

@@ -39,15 +39,26 @@
             </li>
             <li>
               <a
-                :href="betaFormUrl"
+                :href="alphaFormUrl"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-1 font-semibold transition hover:brightness-110"
                 style="color: var(--brand-primary)"
               >
-                <span>{{ t('footerBetaCta') }}</span>
+                <span>{{ t('footerAlphaCta') }}</span>
                 <span aria-hidden="true">↗</span>
               </a>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-testid="footer-about-alpha"
+                class="inline-flex items-center gap-1 text-left transition hover:opacity-80"
+                style="color: var(--text-secondary)"
+                @click="openAlphaOnboarding()"
+              >
+                {{ t('footerAboutAlpha') }}
+              </button>
             </li>
           </ul>
         </div>
@@ -91,19 +102,20 @@
 import { computed } from 'vue'
 import OlydorLogo from './OlydorLogo.vue'
 import {
-  BETA_FEEDBACK_FORM_URL,
+  ALPHA_FEEDBACK_FORM_URL,
   TPCI_NON_AFFILIATION_DISCLAIMER_EN,
   TPCI_NON_AFFILIATION_DISCLAIMER_FR,
 } from '../logo'
 import { resolvePlatformUrls } from '../urls'
 import { useUiI18n, type OlydorLang } from '../i18n'
+import { openAlphaOnboarding } from '../onboarding'
 
 export interface AppFooterProps {
   webUrl?: string
   insightUrl?: string
   arenaUrl?: string
   legalBaseUrl?: string
-  betaFormUrl?: string
+  alphaFormUrl?: string
   lang?: OlydorLang
 }
 
@@ -112,7 +124,7 @@ const props = withDefaults(defineProps<AppFooterProps>(), {
   insightUrl: undefined,
   arenaUrl: undefined,
   legalBaseUrl: '',
-  betaFormUrl: BETA_FEEDBACK_FORM_URL,
+  alphaFormUrl: ALPHA_FEEDBACK_FORM_URL,
   lang: undefined,
 })
 

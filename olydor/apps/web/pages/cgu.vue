@@ -1,13 +1,18 @@
 <template>
-  <TermsContent />
+  <TermsContent :lang="lang" />
 </template>
 
 <script setup lang="ts">
-import { TermsContent } from '@olydor/ui'
+import { inject, type Ref } from 'vue'
+import { TermsContent, type OlydorLang } from '@olydor/ui'
+import { useWebI18n } from '../utils/i18n'
+
+const injectedLang = inject<Ref<OlydorLang> | undefined>('olydorLang', undefined)
+const { t, lang } = useWebI18n(() => injectedLang?.value)
 
 useSeoMeta({
-  title: 'Conditions Générales d’Utilisation — Olydor',
-  description: 'Conditions générales d’utilisation des plateformes Olydor (Hub, Simulateur, Arène IA).',
+  title: () => t('legalTermsSeoTitle'),
+  description: () => t('legalTermsSeoDesc'),
   robots: 'index, follow',
 })
 </script>

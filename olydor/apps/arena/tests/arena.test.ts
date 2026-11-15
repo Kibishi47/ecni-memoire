@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BETA_FEEDBACK_FORM_URL, OLYDOR_SVG, setOlydorLanguage } from '@olydor/ui'
+import { ALPHA_FEEDBACK_FORM_URL, OLYDOR_SVG, setOlydorLanguage } from '@olydor/ui'
 import { useArenaI18n } from '../utils/i18n'
 import {
   META_OPPONENT_DECKS,
@@ -63,8 +63,8 @@ describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
     expect(combined).not.toContain('Live Hints')
     expect(combined).not.toContain('Puzzles')
     expect(combined).toContain("En attendant l'ouverture des matchs 1v1 contre le bot Pythia")
-    expect(indexSrc).toContain('BETA_FEEDBACK_FORM_URL')
-    expect(BETA_FEEDBACK_FORM_URL).toBe('https://forms.gle/6FC4YYmw7nMkj3wT9')
+    expect(indexSrc).toContain('ALPHA_FEEDBACK_FORM_URL')
+    expect(ALPHA_FEEDBACK_FORM_URL).toBe('https://forms.gle/6FC4YYmw7nMkj3wT9')
 
     const { t, setLanguage } = useArenaI18n()
     setLanguage('fr')
@@ -86,7 +86,8 @@ describe('@olydor/arena Coming Soon & Deep-Link suite', () => {
     expect(nuxtConfig).toContain('@olydor/ui/theme.css')
     expect(nuxtConfig).toContain("transpile: ['@olydor/ui', '@olydor/engine']")
     expect(nuxtConfig).toContain("include: ['lucide-vue-next']")
-    expect(layoutSrc).toContain('<BetaTesterBanner')
+    expect(layoutSrc).toContain('<AlphaTesterBanner')
+    expect(layoutSrc).toContain('<AlphaOnboardingModal')
     expect(layoutSrc).toContain('active-app="arena"')
     expect(layoutSrc).toContain('<AppFooter')
     expect(mentions).toContain('<LegalMentionsContent')

@@ -257,7 +257,7 @@
       </div>
     </section>
 
-    <!-- Beta Tester CTA -->
+    <!-- Alpha Tester CTA -->
     <section class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
       <div
         class="rounded-2xl border p-8 sm:p-10 text-center"
@@ -272,24 +272,24 @@
           style="background: var(--brand-gradient)"
         >
           <Sparkles class="h-3.5 w-3.5" />
-          {{ t('betaBadge') }}
+          {{ t('alphaBadge') }}
         </span>
 
         <h2 class="mt-4 text-2xl font-black sm:text-3xl" style="color: var(--text-primary)">
-          {{ t('betaTitle') }}
+          {{ t('alphaTitle') }}
         </h2>
         <p class="mx-auto mt-3 max-w-2xl text-sm sm:text-base" style="color: var(--text-secondary)">
-          {{ t('betaDesc') }}
+          {{ t('alphaDesc') }}
         </p>
 
         <div class="mt-7 flex flex-wrap items-center justify-center gap-4">
           <a
-            :href="BETA_FEEDBACK_FORM_URL"
+            :href="ALPHA_FEEDBACK_FORM_URL"
             target="_blank"
             rel="noopener noreferrer"
             class="mo-btn-solar inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold"
           >
-            <span>{{ t('betaCta') }}</span>
+            <span>{{ t('alphaCta') }}</span>
             <span aria-hidden="true">↗</span>
           </a>
         </div>
@@ -312,7 +312,7 @@ import {
   Swords,
   Zap,
 } from 'lucide-vue-next'
-import { BETA_FEEDBACK_FORM_URL, OlydorLogo, resolvePlatformUrls, type OlydorLang } from '@olydor/ui'
+import { ALPHA_FEEDBACK_FORM_URL, OlydorLogo, resolvePlatformUrls, type OlydorLang } from '@olydor/ui'
 import { useWebI18n } from '../utils/i18n'
 
 const config = useRuntimeConfig()
@@ -352,8 +352,7 @@ useHead({
         applicationCategory: 'GameApplication',
         operatingSystem: 'Web',
         url: 'https://olydor.app',
-        description:
-          'Simulateur Monte-Carlo haute vélocité et future arène 1v1 contre le bot Pythia pour Pokémon TCG Standard.',
+        description: t('schemaDescription'),
         offers: {
           '@type': 'Offer',
           price: '0',

@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib'
 import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 import { buildServer } from '../src/server.js'
@@ -414,13 +415,17 @@ describe('Cards API routes', () => {
     })
 
     expect(res1.statusCode).toBe(200)
-    const json1 = res1.json()
+    const json1 =
+      res1.headers['content-encoding'] === 'gzip'
+        ? JSON.parse(gunzipSync(res1.rawPayload).toString('utf8'))
+        : res1.json()
     // Pepper (SUPPORTER) should receive Super Bonbon (ITEM) as economy upgrade
     expect(json1.results['sv01-166']).toHaveLength(1)
     expect(json1.results['sv01-166'][0]).toMatchObject({
       alternativeCardId: 'sv04-125',
       suggestionType: 'SUPPORTER_TO_ITEM_OR_ABILITY',
     })
+    expect(json1.results['sv01-166'][0].actionEconomyBadgeEn).toContain('Action Economy Upgrade')
     // Charizard (MAIN_ATTACKER) should have no alternatives
     expect(json1.results['sv03-125']).toEqual([])
 

@@ -704,7 +704,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
             {{ t('versionHistoryTitle') }}
           </h3>
           <span class="rounded bg-[#1b2232] px-2 py-0.5 text-[10px] font-bold text-[#8a93a2]">
-            {{ deckVersions.length }} version(s)
+            {{ t('versionsCount', { n: deckVersions.length }) }}
           </span>
         </div>
         <span class="text-xs text-[#8a93a2]">
@@ -1131,7 +1131,7 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
               class="flex h-28 w-20 shrink-0 cursor-zoom-in items-center justify-center rounded-lg bg-[#263044] font-bold text-[#8a93a2] text-xs transition hover:bg-[#263044]"
               :title="t('clickToEnlarge')"
             >
-              CARTE
+              {{ t('cardFallbackLabel') }}
             </div>
 
             <div class="min-w-0 flex-1">
@@ -1205,12 +1205,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                         {{ getLocalizedCardName(alt.alternativeModel) }}
                       </span>
                       <span class="shrink-0 rounded bg-sky-950/40 px-2 py-0.5 text-[10px] font-bold text-[#38bdf8]">
-                        {{ alt.actionEconomyBadge }}
+                        {{ pickLocalizedField(alt.actionEconomyBadge, alt.actionEconomyBadgeEn) }}
                       </span>
                     </div>
 
                     <p class="mt-1 text-xs text-[#8a93a2] line-clamp-2">
-                      {{ alt.strategicReason }}
+                      {{ pickLocalizedField(alt.strategicReason, alt.strategicReasonEn) }}
                     </p>
                   </div>
                 </div>
@@ -1425,12 +1425,12 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
                       size="md"
                       @select="openZoomList(getComboCards(combo), 0)"
                     />
-                    <span class="group-hover:text-[#38bdf8] transition">{{ combo.label }}</span>
+                    <span class="group-hover:text-[#38bdf8] transition">{{ pickLocalizedField(combo.label, combo.labelEn) }}</span>
                   </div>
                 </td>
                 <td class="px-3.5 py-2.5">
                   <span class="rounded border border-[#263044] bg-[#1b2232] px-1.5 py-0.5 font-mono text-[11px] text-slate-200">
-                    {{ combo.conditionSummary }}
+                    {{ pickLocalizedField(combo.conditionSummary, combo.conditionSummaryEn) }}
                   </span>
                 </td>
                 <td class="px-3.5 py-2.5 font-mono font-bold text-[#10b981]">

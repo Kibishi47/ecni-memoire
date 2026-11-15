@@ -107,13 +107,13 @@
           <!-- Primary Action Bar -->
           <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
             <a
-              :href="BETA_FEEDBACK_FORM_URL"
+              :href="ALPHA_FEEDBACK_FORM_URL"
               target="_blank"
               rel="noopener noreferrer"
               class="mo-btn-solar inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold"
             >
               <Vote class="h-4 w-4" />
-              <span>{{ t('ctaVoteBeta') }}</span>
+              <span>{{ t('ctaVoteAlpha') }}</span>
             </a>
             <a
               :href="simReturnUrl"
@@ -326,7 +326,7 @@
                   <div class="mt-1 flex items-center justify-between">
                     <span class="text-sm font-bold" style="color: var(--text-primary)">{{ activeScenario.pythiaActive.name }}</span>
                     <span class="font-mono text-xs font-bold" style="color: var(--status-warning)">
-                      {{ activeScenario.pythiaActive.hp }} PV
+                      {{ activeScenario.pythiaActive.hp }} {{ t('hpUnit') }}
                     </span>
                   </div>
                   <div class="mt-1.5 text-[11px]" style="color: var(--text-secondary)">
@@ -382,7 +382,7 @@
                   <div class="mt-1 flex items-center justify-between">
                     <span class="text-sm font-bold" style="color: var(--text-primary)">{{ activeScenario.playerActive.name }}</span>
                     <span class="font-mono text-xs font-bold" style="color: var(--status-positive)">
-                      {{ activeScenario.playerActive.hp }} PV
+                      {{ activeScenario.playerActive.hp }} {{ t('hpUnit') }}
                     </span>
                   </div>
                   <div class="mt-1.5 text-[11px]" style="color: var(--text-secondary)">
@@ -578,7 +578,7 @@
               {{ t('roadmapFooter') }}
             </span>
             <a
-              :href="BETA_FEEDBACK_FORM_URL"
+              :href="ALPHA_FEEDBACK_FORM_URL"
               target="_blank"
               rel="noopener noreferrer"
               class="mo-btn-solar inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold"
@@ -598,7 +598,7 @@ import { computed, inject, onMounted, ref, type Ref } from 'vue'
 import type { ParsedDeck } from '@olydor/types'
 import { decodeDeckFromUrl, parsePtcglDecklist, registerCompiledCards } from '@olydor/engine'
 import {
-  BETA_FEEDBACK_FORM_URL,
+  ALPHA_FEEDBACK_FORM_URL,
   OlydorLogo,
   resolvePlatformUrls,
   type OlydorLang,
@@ -613,12 +613,16 @@ import {
   Swords,
   Vote,
 } from 'lucide-vue-next'
-import { useArenaI18n } from '../utils/i18n'
+import {
+  getLocalizedArenaScenarios,
+  type ArenaScenario,
+  useArenaI18n,
+} from '../utils/i18n'
 
 const config = useRuntimeConfig()
 const route = useRoute()
 const injectedLang = inject<Ref<OlydorLang> | undefined>('olydorLang', undefined)
-const { t } = useArenaI18n(() => injectedLang?.value)
+const { t, lang } = useArenaI18n(() => injectedLang?.value)
 
 useSeoMeta({
   title: () => t('seoTitle'),
@@ -672,104 +676,9 @@ onMounted(async () => {
   }
 })
 
-interface ArenaScenario {
-  id: string
-  label: string
-  turnLabel: string
-  playerDeck: string
-  pythiaDeck: string
-  playerPrizes: number
-  pythiaPrizes: number
-  playerActive: { name: string; hp: string; energy: string; status: string }
-  pythiaActive: { name: string; hp: string; energy: string; status: string }
-  playerBench: string[]
-  pythiaBench: string[]
-  actionLog: { actor: 'PLAYER' | 'PYTHIA'; phase: string; action: string }[]
-}
-
-const scenarios: ArenaScenario[] = [
-  {
-    id: 'midgame-charizard',
-    label: 'Tour 3 · Charizard vs Dragapult',
-    turnLabel: 'Tour 3 (Phase Principale)',
-    playerDeck: 'Charizard ex / Pidgeot',
-    pythiaDeck: 'Dragapult ex / Dusknoir',
-    playerPrizes: 3,
-    pythiaPrizes: 4,
-    playerActive: {
-      name: 'Dracaufeu ex',
-      hp: '330 / 330',
-      energy: '2x Énergie Feu (Obscurité Téra)',
-      status: 'Obscurité Enflammée disponible',
-    },
-    pythiaActive: {
-      name: 'Lanssorien ex',
-      hp: '200 / 320',
-      energy: '1x Feu + 1x Psy',
-      status: '6 marqueurs de dégâts sur le Banc',
-    },
-    playerBench: ['Roucarnage ex', 'Salamèche · 70 PV', 'Favianos ex'],
-    pythiaBench: ['Dispareptil · 90 PV', 'Skelénox · 60 PV', 'Noctunoir'],
-    actionLog: [
-      {
-        actor: 'PYTHIA',
-        phase: 'Tour 2 · Attaque',
-        action: 'Lanssorien ex utilise Fantôme Plongeant (200 dégâts sur le Poste Actif).',
-      },
-      {
-        actor: 'PLAYER',
-        phase: 'Tour 3 · Action',
-        action: 'Super Bonbon joue Dracaufeu ex depuis Salamèche (Talent Règne Infernal activé).',
-      },
-      {
-        actor: 'PLAYER',
-        phase: 'Tour 3 · Attaque',
-        action: 'Dracaufeu ex prépare Obscurité Enflammée sur Lanssorien ex.',
-      },
-    ],
-  },
-  {
-    id: 't1-lock',
-    label: 'Tour 1 (J2) · Budew Item-Lock',
-    turnLabel: 'Tour 1 Joueur 2',
-    playerDeck: 'Gardevoir ex / Munkidori',
-    pythiaDeck: 'Gholdengo ex / Budew',
-    playerPrizes: 6,
-    pythiaPrizes: 6,
-    playerActive: {
-      name: 'Tarsal',
-      hp: '70 / 70',
-      energy: '1x Énergie Psy',
-      status: 'Verrouillage Objets Actif au prochain tour',
-    },
-    pythiaActive: {
-      name: 'Rozbouton (Budew)',
-      hp: '30 / 30',
-      energy: '0 Énergie',
-      status: 'Pollen Démangeant actif',
-    },
-    playerBench: ['Fortusimia', 'Tarsal · 70 PV'],
-    pythiaBench: ['Mordudor · 70 PV', 'Mordudor · 70 PV', 'Amphinobi Radieux'],
-    actionLog: [
-      {
-        actor: 'PLAYER',
-        phase: 'Tour 1 · Préparation',
-        action: 'Pose Tarsal en Actif, attache 1 Énergie Psy et passe le tour.',
-      },
-      {
-        actor: 'PYTHIA',
-        phase: 'Tour 1 J2 · Banc',
-        action: 'Joue Poffin Copain-Copain et place deux Mordudor sur le Banc.',
-      },
-      {
-        actor: 'PYTHIA',
-        phase: 'Tour 1 J2 · Attaque',
-        action: 'Rozbouton utilise Pollen Démangeant (10 dégâts, Objets bloqués au prochain tour).',
-      },
-    ],
-  },
-]
-
+const scenarios = computed<ArenaScenario[]>(() => getLocalizedArenaScenarios(lang.value))
 const selectedScenarioIdx = ref(0)
-const activeScenario = computed(() => scenarios[selectedScenarioIdx.value] ?? scenarios[0]!)
+const activeScenario = computed(
+  () => scenarios.value[selectedScenarioIdx.value] ?? scenarios.value[0]!,
+)
 </script>

@@ -217,7 +217,8 @@ describe('@olydor/insight migrated simulator suite', () => {
     expect(step2).not.toContain('currentLang ===')
 
     // Step3 keeps arenaDeckUrl computation for later launch while rendering disabled buttons
-    expect(layout).toContain('<BetaTesterBanner')
+    expect(layout).toContain('<AlphaTesterBanner')
+    expect(layout).toContain('<AlphaOnboardingModal')
     expect(layout).toContain('active-app="insight"')
     expect(step3).toContain('arenaDeckUrl')
     expect(step3).toContain('data-testid="step3-arena-disabled"')

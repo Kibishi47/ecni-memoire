@@ -111,15 +111,19 @@ export type SuggestionType =
 export interface SmartAlternativeSuggestion {
   targetCardId: string
   targetCardNameFr: string
+  targetCardNameEn?: string
   alternativeModel: EngineCardModel
   alternativeCardId: string
   alternativeNameFr: string
+  alternativeNameEn?: string
   alternativeCategory: string
   alternativeSubCategory: string
   suggestionType: SuggestionType
   sharedPrimitives: string[]
   actionEconomyBadge: string
+  actionEconomyBadgeEn?: string
   strategicReason: string
+  strategicReasonEn?: string
   relevanceScore: number
   attackerComparison?: AttackerComparisonRow
 }
@@ -567,13 +571,21 @@ export function findAlternativesForCard(
             : candidate.subCategory === 'TOOL'
               ? 'Outil'
               : 'Objet'
+        const targetTypeLabelEn =
+          candidate.category === 'POKEMON'
+            ? 'Pokémon Ability'
+            : candidate.subCategory === 'TOOL'
+              ? 'Tool'
+              : 'Item'
 
         suggestions.push({
           targetCardId: targetModel.cardId,
           targetCardNameFr: targetModel.identity.nameFr,
+          targetCardNameEn: targetModel.identity.nameEn || targetModel.identity.nameFr,
           alternativeModel: candidate,
           alternativeCardId: candidate.cardId,
           alternativeNameFr: candidate.identity.nameFr,
+          alternativeNameEn: candidate.identity.nameEn || candidate.identity.nameFr,
           alternativeCategory: candidate.category,
           alternativeSubCategory: candidate.subCategory,
           suggestionType: isEconomyCandidate
@@ -583,9 +595,15 @@ export function findAlternativesForCard(
           actionEconomyBadge: isEconomyCandidate
             ? `Gain d'Économie d'Action (Supporter -> ${targetTypeLabel})`
             : 'Supporter Alternatif',
+          actionEconomyBadgeEn: isEconomyCandidate
+            ? `Action Economy Upgrade (Supporter -> ${targetTypeLabelEn})`
+            : 'Alternative Supporter',
           strategicReason: isEconomyCandidate
             ? "Gain d'Économie d'Action : Passer cet effet de Supporter vers Objet/Talent libère votre Supporter du tour (ex: pour jouer Ordres du Boss)."
             : `Alternative de Supporter partageant la mécanique ${sharedPrimitives.join(', ')}.`,
+          strategicReasonEn: isEconomyCandidate
+            ? "Action Economy Upgrade: Moving this Supporter effect to an Item/Ability frees up your Supporter for the turn (e.g. Boss's Orders)."
+            : `Supporter alternative sharing the ${sharedPrimitives.join(', ')} mechanic.`,
           relevanceScore:
             (isEconomyCandidate ? 120 : 65) +
             sharedPrimitives.length * 15 +
@@ -605,16 +623,21 @@ export function findAlternativesForCard(
         suggestions.push({
           targetCardId: targetModel.cardId,
           targetCardNameFr: targetModel.identity.nameFr,
+          targetCardNameEn: targetModel.identity.nameEn || targetModel.identity.nameFr,
           alternativeModel: candidate,
           alternativeCardId: candidate.cardId,
           alternativeNameFr: candidate.identity.nameFr,
+          alternativeNameEn: candidate.identity.nameEn || candidate.identity.nameFr,
           alternativeCategory: candidate.category,
           alternativeSubCategory: candidate.subCategory,
           suggestionType: 'FUNCTIONAL_EQUIVALENT',
           sharedPrimitives,
           actionEconomyBadge:
             candidate.category === 'POKEMON' ? 'Alternative Talent Pokémon' : 'Alternative Objet',
+          actionEconomyBadgeEn:
+            candidate.category === 'POKEMON' ? 'Pokémon Ability Alternative' : 'Item Alternative',
           strategicReason: `Partage la fonction tactique (${sharedPrimitives.join(', ')}) sans consommer le Supporter du tour.`,
+          strategicReasonEn: `Shares the tactical function (${sharedPrimitives.join(', ')}) without using your Supporter for the turn.`,
           relevanceScore:
             85 +
             sharedPrimitives.length * 15 +
@@ -647,13 +670,18 @@ export function findAlternativesForCard(
         const diffHp = candRow.hp - targetRow.hp
         const diffHpLabel =
           diffHp > 0 ? `+${diffHp} PV` : diffHp < 0 ? `${diffHp} PV` : 'PV identiques'
+        const diffHpLabelEn =
+          diffHp > 0 ? `+${diffHp} HP` : diffHp < 0 ? `${diffHp} HP` : 'Same HP'
+        const candNameEn = candidate.identity.nameEn || candRow.nameFr
 
         suggestions.push({
           targetCardId: targetModel.cardId,
           targetCardNameFr: targetModel.identity.nameFr,
+          targetCardNameEn: targetModel.identity.nameEn || targetModel.identity.nameFr,
           alternativeModel: candidate,
           alternativeCardId: candidate.cardId,
           alternativeNameFr: candidate.identity.nameFr,
+          alternativeNameEn: candidate.identity.nameEn || candidate.identity.nameFr,
           alternativeCategory: candidate.category,
           alternativeSubCategory: candidate.subCategory,
           suggestionType: 'ALTERNATIVE_ATTACKER',
@@ -661,7 +689,11 @@ export function findAlternativesForCard(
           actionEconomyBadge: sameRole
             ? `Même rôle (${candRow.primaryRole})`
             : 'Profil Pokémon Alternatif',
+          actionEconomyBadgeEn: sameRole
+            ? `Same role (${candRow.primaryRole})`
+            : 'Alternative Pokémon Profile',
           strategicReason: `${candRow.nameFr} (${candRow.hp} PV, ${diffHpLabel}) — Coût : ${candRow.energyCostCount} Énergie(s), Dégâts : ${candRow.damageSummary}, Retraite : ${candRow.retreatCost}.`,
+          strategicReasonEn: `${candNameEn} (${candRow.hp} HP, ${diffHpLabelEn}) — Cost: ${candRow.energyCostCount} Energy, Damage: ${candRow.damageSummary}, Retreat: ${candRow.retreatCost}.`,
           relevanceScore: score,
           attackerComparison: candRow,
         })

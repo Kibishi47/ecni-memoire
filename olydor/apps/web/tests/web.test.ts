@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BETA_FEEDBACK_FORM_URL, OLYDOR_SVG, setOlydorLanguage } from '@olydor/ui'
+import { ALPHA_FEEDBACK_FORM_URL, OLYDOR_SVG, setOlydorLanguage } from '@olydor/ui'
 import { useWebI18n } from '../utils/i18n'
 
 const WEB_ROOT = resolve(__dirname, '..')
@@ -62,12 +62,12 @@ describe('@olydor/web hub & SEO configuration', () => {
     expect(indexPage).not.toContain('?preset=charizard')
     expect(indexPage).toContain('useSeoMeta(')
     expect(indexPage).toContain("'@type': 'SoftwareApplication'")
-    expect(indexPage).toContain('BETA_FEEDBACK_FORM_URL')
+    expect(indexPage).toContain('ALPHA_FEEDBACK_FORM_URL')
     expect(indexPage).toContain('resolvePlatformUrls(')
     expect(indexPage).toContain('data-testid="hero-arena-disabled"')
     expect(indexPage).toContain('data-testid="bento-arena-disabled"')
     expect(indexPage).toContain('aria-disabled="true"')
-    expect(BETA_FEEDBACK_FORM_URL).toBe('https://forms.gle/6FC4YYmw7nMkj3wT9')
+    expect(ALPHA_FEEDBACK_FORM_URL).toBe('https://forms.gle/6FC4YYmw7nMkj3wT9')
 
     const { t, setLanguage } = useWebI18n()
     setLanguage('fr')
@@ -79,9 +79,10 @@ describe('@olydor/web hub & SEO configuration', () => {
     expect(t('arenaCardTitle')).toContain('Pythia Bot')
   })
 
-  it('wires BetaTesterBanner, AppNavbar, and AppFooter in layouts/default.vue', () => {
+  it('wires AlphaTesterBanner, AlphaOnboardingModal, AppNavbar, and AppFooter in layouts/default.vue', () => {
     const layout = readFileSync(resolve(WEB_ROOT, 'layouts/default.vue'), 'utf8')
-    expect(layout).toContain('<BetaTesterBanner')
+    expect(layout).toContain('<AlphaTesterBanner')
+    expect(layout).toContain('<AlphaOnboardingModal')
     expect(layout).toContain('<AppNavbar')
     expect(layout).toContain('<AppFooter')
     expect(layout).toContain('active-app="web"')

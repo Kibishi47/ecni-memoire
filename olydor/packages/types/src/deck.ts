@@ -37,6 +37,7 @@ export interface ParsedDeckEntry {
 export interface ParseWarning {
   line?: number
   message: string
+  messageEn?: string
 }
 
 export interface SynergyAuditItem {

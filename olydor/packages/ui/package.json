@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Design System Dark Obsidian & Solar Flare, logo SVG officiel, bandeau Bêta, modale de signalement et composants légaux Olydor",
+  "description": "Design System Dark Obsidian & Solar Flare, logo SVG officiel, bandeau Alpha, onboarding, modale de signalement et composants légaux Olydor",
   "exports": {
     ".": "./src/index.ts",
     "./theme.css": "./src/theme.css",

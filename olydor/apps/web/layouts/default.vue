@@ -1,6 +1,7 @@
 <template>
   <div class="min-h-screen flex flex-col" style="background-color: var(--bg-canvas); color: var(--text-primary)">
-    <BetaTesterBanner :lang="currentLang" />
+    <AlphaTesterBanner :lang="currentLang" />
+    <AlphaOnboardingModal :lang="currentLang" @update:lang="setLanguage($event)" />
     <AppNavbar
       active-app="web"
       :web-url="urls.webUrl"
@@ -24,7 +25,13 @@
 
 <script setup lang="ts">
 import { computed, provide } from 'vue'
-import { AppFooter, AppNavbar, BetaTesterBanner, resolvePlatformUrls } from '@olydor/ui'
+import {
+  AlphaOnboardingModal,
+  AlphaTesterBanner,
+  AppFooter,
+  AppNavbar,
+  resolvePlatformUrls,
+} from '@olydor/ui'
 import { useWebI18n } from '../utils/i18n'
 
 const config = useRuntimeConfig()

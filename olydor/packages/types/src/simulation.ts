@@ -85,10 +85,13 @@ export interface BossFlexibilityStats {
 export interface ConditionalComboStatRecord {
   comboId: string
   label: string
+  labelEn?: string
   cardId: string
   cardNameFr: string
+  cardNameEn?: string
   relatedCardIds?: string[]
   conditionSummary: string
+  conditionSummaryEn?: string
   gamesTriggered: number
   totalTriggersCount: number
   triggerRate: number
@@ -113,6 +116,7 @@ export interface TracedPokemonSnapshot {
   instanceId: string
   cardId: string
   nameFr: string
+  nameEn?: string
   subCategory: string
   currentHp: number
   maxHp: number

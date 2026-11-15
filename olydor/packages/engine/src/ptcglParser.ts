@@ -68,6 +68,7 @@ export function parsePtcglDecklist(text: string): ParsedDeck {
       warnings.push({
         line: lineNum,
         message: `Ligne non reconnue ignorée : "${trimmed}"`,
+        messageEn: `Unrecognized line ignored: "${trimmed}"`,
       })
       continue
     }
@@ -76,6 +77,7 @@ export function parsePtcglDecklist(text: string): ParsedDeck {
       warnings.push({
         line: lineNum,
         message: `Quantité nulle ou négative ignorée : "${trimmed}"`,
+        messageEn: `Zero or negative quantity ignored: "${trimmed}"`,
       })
       continue
     }
@@ -87,6 +89,7 @@ export function parsePtcglDecklist(text: string): ParsedDeck {
       warnings.push({
         line: lineNum,
         message: `Nom de carte manquant à la ligne ${lineNum}`,
+        messageEn: `Missing card name at line ${lineNum}`,
       })
       continue
     }
@@ -245,38 +248,40 @@ export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number
   }
 }
 
-function describeCardFilterFr(filter: CardFilter): string {
+function describeCardFilter(filter: CardFilter, lang: 'fr' | 'en' = 'fr'): string {
   const parts: string[] = []
   if (filter.specificCardName) {
-    parts.push(`« ${filter.specificCardName} »`)
+    parts.push(lang === 'en' ? `"${filter.specificCardName}"` : `« ${filter.specificCardName} »`)
   } else if (filter.subCategory) {
-    const subLabels: Record<string, string> = {
-      BASIC: 'Pokémon de Base',
-      STAGE_1: 'Pokémon Niveau 1',
-      STAGE_2: 'Pokémon Niveau 2',
-      ITEM: 'Objet',
-      SUPPORTER: 'Supporter',
-      TOOL: 'Outil Pokémon',
-      STADIUM: 'Stade',
-      BASIC_ENERGY: 'Énergie de Base',
-      SPECIAL_ENERGY: 'Énergie Spéciale',
+    const subLabels: Record<string, { fr: string; en: string }> = {
+      BASIC: { fr: 'Pokémon de Base', en: 'Basic Pokémon' },
+      STAGE_1: { fr: 'Pokémon Niveau 1', en: 'Stage 1 Pokémon' },
+      STAGE_2: { fr: 'Pokémon Niveau 2', en: 'Stage 2 Pokémon' },
+      ITEM: { fr: 'Objet', en: 'Item' },
+      SUPPORTER: { fr: 'Supporter', en: 'Supporter' },
+      TOOL: { fr: 'Outil Pokémon', en: 'Pokémon Tool' },
+      STADIUM: { fr: 'Stade', en: 'Stadium' },
+      BASIC_ENERGY: { fr: 'Énergie de Base', en: 'Basic Energy' },
+      SPECIAL_ENERGY: { fr: 'Énergie Spéciale', en: 'Special Energy' },
     }
-    parts.push(subLabels[filter.subCategory] || filter.subCategory)
+    const label = subLabels[filter.subCategory]
+    parts.push(label ? label[lang] : filter.subCategory)
   } else if (filter.category) {
-    const catLabels: Record<string, string> = {
-      POKEMON: 'Pokémon',
-      TRAINER: 'Dresseur',
-      ENERGY: 'Énergie',
+    const catLabels: Record<string, { fr: string; en: string }> = {
+      POKEMON: { fr: 'Pokémon', en: 'Pokémon' },
+      TRAINER: { fr: 'Dresseur', en: 'Trainer' },
+      ENERGY: { fr: 'Énergie', en: 'Energy' },
     }
-    parts.push(catLabels[filter.category] || filter.category)
+    const label = catLabels[filter.category]
+    parts.push(label ? label[lang] : filter.category)
   }
   if (filter.maxHp) {
-    parts.push(`≤ ${filter.maxHp} PV`)
+    parts.push(lang === 'en' ? `≤ ${filter.maxHp} HP` : `≤ ${filter.maxHp} PV`)
   }
   if (filter.energyType) {
-    parts.push(`type ${filter.energyType}`)
+    parts.push(lang === 'en' ? `${filter.energyType} type` : `type ${filter.energyType}`)
   }
-  return parts.join(' ') || 'cartes compatibles'
+  return parts.join(' ') || (lang === 'en' ? 'matching cards' : 'cartes compatibles')
 }
 
 export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): SynergyAuditItem[] {
@@ -299,6 +304,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         }
       }
       let filterDesc = ''
+      let filterDescEn = ''
       let minCount = 1
       let isCriticalZero = false
 
@@ -311,6 +317,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
             continue
           }
           filterDesc = `Énergie ${energyType}`
+          filterDescEn = `${energyType} Energy`
           for (const c of activeCards) {
             const isMatchingEnergy =
               c.model.category === 'ENERGY' &&
@@ -325,6 +332,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         } else if (rawReq.startsWith('requires_evolution_line:')) {
           const evoName = rawReq.replace('requires_evolution_line:', '')
           filterDesc = `Lignée ${evoName}`
+          filterDescEn = `${evoName} line`
           for (const c of activeCards) {
             if (
               c.nameFr.toLowerCase().includes(evoName.toLowerCase()) ||
@@ -336,6 +344,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
           }
         } else {
           filterDesc = rawReq
+          filterDescEn = rawReq
           matchingCount = 1
         }
       } else {
@@ -346,7 +355,8 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         }
         minCount = reqObj.minCountInDeck || 1
         isCriticalZero = reqObj.ifMissingSetValueToZero || false
-        filterDesc = describeCardFilterFr(reqObj.requiredFilter)
+        filterDesc = describeCardFilter(reqObj.requiredFilter, 'fr')
+        filterDescEn = describeCardFilter(reqObj.requiredFilter, 'en')
         for (const candidate of activeCards) {
           if (matchesCardFilter(candidate.model, reqObj.requiredFilter)) {
             matchingCount += candidate.quantity
@@ -372,7 +382,7 @@ export function computeDeckSynergyAudit(activeCards: ParsedDeckEntry[]): Synergy
         satisfied,
         criticalZeroValue,
         description: `${entry.nameFr} attend ≥ ${minCount}× ${filterDesc} (trouvé : ${matchingCount})`,
-        descriptionEn: `${nameEn} requires ≥ ${minCount}× ${filterDesc} (found: ${matchingCount})`,
+        descriptionEn: `${nameEn} requires ≥ ${minCount}× ${filterDescEn} (found: ${matchingCount})`,
       })
     }
   }
@@ -415,25 +425,30 @@ export function computeDeckSummary(
   if (declaredTotal !== undefined && declaredTotal !== totalCards && baseWarnings.length === 0) {
     warnings.push({
       message: `Le total déclaré (${declaredTotal}) diffère du nombre réel de cartes comptées (${totalCards}).`,
+      messageEn: `Declared total (${declaredTotal}) differs from counted cards (${totalCards}).`,
     })
   }
   if (totalCards !== 60) {
     warnings.push({
       message: `Le deck contient ${totalCards} carte(s) au lieu des 60 cartes réglementaires.`,
+      messageEn: `Deck contains ${totalCards} card(s) instead of the required 60 cards.`,
     })
   }
   if (basicPokemonCount === 0) {
     warnings.push({
       message: `Aucun Pokémon de Base détecté dans la liste (au moins 1 Pokémon BASIC est obligatoire).`,
+      messageEn: `No Basic Pokémon detected in decklist (at least 1 Basic Pokémon is required).`,
     })
   }
   if (!isDatabaseLoaded) {
     warnings.push({
       message: `Simulation impossible : aucun modèle de carte n'a encore été chargé depuis l'API. Veuillez valider le deck pour résoudre les cartes.`,
+      messageEn: `Cannot simulate: no card models loaded from the API yet. Please validate your deck first.`,
     })
   } else if (!isFullyResolved) {
     warnings.push({
       message: `Simulation impossible : ${unresolvedCount} carte(s) (${unresolvedCards.length} référence(s)) de votre deck n'ont pas été trouvées dans le catalogue API.`,
+      messageEn: `Cannot simulate: ${unresolvedCount} card(s) (${unresolvedCards.length} reference(s)) in your deck were not found in the API catalog.`,
     })
   }
 
@@ -445,6 +460,7 @@ export function computeDeckSummary(
   if (aceSpecCount > 1) {
     warnings.push({
       message: `Le deck contient ${aceSpecCount} cartes HIGH-TECH (ACE SPEC). Une seule carte HIGH-TECH est autorisée par deck.`,
+      messageEn: `Deck contains ${aceSpecCount} ACE SPEC cards. Only 1 ACE SPEC card is allowed per deck.`,
     })
   }
 
@@ -456,6 +472,7 @@ export function computeDeckSummary(
   if (radiantCount > 1) {
     warnings.push({
       message: `Le deck contient ${radiantCount} Pokémon Radieux. Un seul Pokémon Radieux est autorisé par deck.`,
+      messageEn: `Deck contains ${radiantCount} Radiant Pokémon. Only 1 Radiant Pokémon is allowed per deck.`,
     })
   }
 
@@ -478,6 +495,7 @@ export function computeDeckSummary(
       copyLimitViolations.push(entry.displayName)
       warnings.push({
         message: `La carte "${entry.displayName}" apparaît en ${entry.count} exemplaires (maximum réglementaire : 4 par nom).`,
+        messageEn: `Card "${entry.displayName}" appears ${entry.count} times (Standard rule maximum: 4 copies per name).`,
       })
     }
   }
@@ -488,6 +506,7 @@ export function computeDeckSummary(
     const illegalCount = illegalStandardCards.reduce((sum, c) => sum + c.quantity, 0)
     warnings.push({
       message: `Le deck contient ${illegalCount} carte(s) non légales au format Standard (seules les marques de régulation G, H, I et les Énergies de base sont autorisées).`,
+      messageEn: `Deck contains ${illegalCount} card(s) not legal in Standard format (only regulation marks G, H, I and Basic Energies are allowed).`,
     })
   }
 

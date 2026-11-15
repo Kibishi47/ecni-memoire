@@ -8,7 +8,7 @@ const props = defineProps<{
   tracedGames: TracedGameRecord[]
 }>()
 
-const { t } = useI18n()
+const { t, getLocalizedCardName } = useI18n()
 const engineReport = useBugReport()
 
 const outcomeFilter = ref<'ALL' | 'PLAYER' | 'OPPONENT' | 'DRAW'>('ALL')
@@ -80,15 +80,15 @@ const displayedOpponentBoard = computed<TracedBoardSnapshot | null>(() => {
 function formatWinReason(reason: string | null): string {
   switch (reason) {
     case 'ALL_PRIZES_TAKEN':
-      return '6 Récompenses prises'
+      return t('dbgWinReasonAllPrizes')
     case 'NO_POKEMON_IN_PLAY':
-      return 'Plus aucun Pokémon en jeu (KO Table)'
+      return t('dbgWinReasonNoPokemon')
     case 'DECK_OUT':
-      return 'Deck vide au début du tour (Deck-Out)'
+      return t('dbgWinReasonDeckOut')
     case 'MAX_TURNS_REACHED':
-      return 'Limite maxTurns atteinte (Départage aux Récompenses)'
+      return t('dbgWinReasonMaxTurns')
     default:
-      return reason || 'Terminé'
+      return reason || t('dbgWinReasonFinished')
   }
 }
 </script>
@@ -96,7 +96,7 @@ function formatWinReason(reason: string | null): string {
 <template>
   <section
     class="rounded-2xl border-2 border-[#ff6b00]/45 bg-[#131823] p-5 shadow-xs"
-    aria-label="Inspecteur granulaire de parties"
+    :aria-label="t('dbgAriaLabel')"
   >
     <!-- En-tête de l'Inspecteur de Parties -->
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[#263044] pb-4">
@@ -106,11 +106,11 @@ function formatWinReason(reason: string | null): string {
             {{ t('debugModeBadge') }}
           </span>
           <h3 class="text-base font-bold text-[#f8fafc]">
-            Inspection Granulaire : Partie → Timeline par Tour → Branches 3-Ply (T → T_adv → T+1)
+            {{ t('dbgTitle') }}
           </h3>
         </div>
         <p class="mt-1 text-xs text-[#8a93a2]">
-          Examinez les mains initiales, les 6 Récompenses, l'état exact du Double Plateau et le calcul mathématique de chaque branche candidate.
+          {{ t('dbgSubtitle') }}
         </p>
       </div>
 
@@ -118,21 +118,21 @@ function formatWinReason(reason: string | null): string {
       <div class="flex flex-wrap items-center gap-2">
         <select
           v-model="outcomeFilter"
-          aria-label="Filtrer par issue de la partie"
+          :aria-label="t('dbgFilterOutcomeAria')"
           class="rounded-lg border border-[#263044] bg-[#0c0f16] px-2.5 py-1.5 text-xs font-semibold text-[#f8fafc]"
         >
-          <option value="ALL">Toutes les issues ({{ tracedGames.length }})</option>
-          <option value="PLAYER">Victoires Joueur uniquement</option>
-          <option value="OPPONENT">Défaites uniquement</option>
-          <option value="DRAW">Égalités uniquement</option>
+          <option value="ALL">{{ t('dbgOutcomeAll', { n: tracedGames.length }) }}</option>
+          <option value="PLAYER">{{ t('dbgOutcomePlayer') }}</option>
+          <option value="OPPONENT">{{ t('dbgOutcomeOpponent') }}</option>
+          <option value="DRAW">{{ t('dbgOutcomeDraw') }}</option>
         </select>
 
         <select
           v-model="opponentFilter"
-          aria-label="Filtrer par deck adverse affronté"
+          :aria-label="t('dbgFilterOpponentAria')"
           class="rounded-lg border border-[#263044] bg-[#0c0f16] px-2.5 py-1.5 text-xs font-semibold text-[#f8fafc]"
         >
-          <option value="ALL">Tous les decks affrontés</option>
+          <option value="ALL">{{ t('dbgOpponentAll') }}</option>
           <option v-for="opp in uniqueOpponents" :key="opp.id" :value="opp.id">
             vs {{ opp.name }}
           </option>
@@ -140,18 +140,25 @@ function formatWinReason(reason: string | null): string {
 
         <select
           v-model="selectedGameIndex"
-          aria-label="Sélectionner la partie tracée"
+          :aria-label="t('dbgSelectGameAria')"
           class="rounded-lg border border-[#263044] bg-[#0c0f16] px-3 py-1.5 font-mono text-xs font-bold text-[#ff8a00]"
         >
           <option v-for="g in filteredGames" :key="g.gameIndex" :value="g.gameIndex">
-            Partie #{{ g.gameIndex }} — {{ g.winner === 'PLAYER' ? 'VICTOIRE' : g.winner === 'OPPONENT' ? 'DÉFAITE' : 'ÉGALITÉ' }} vs {{ g.opponentName }} ({{ g.totalTurns }}t)
+            {{
+              t('dbgGameOption', {
+                index: g.gameIndex,
+                outcome: g.winner === 'PLAYER' ? t('dbgShortWin') : g.winner === 'OPPONENT' ? t('dbgShortLoss') : t('dbgShortDraw'),
+                opponent: g.opponentName,
+                turns: g.totalTurns,
+              })
+            }}
           </option>
         </select>
       </div>
     </div>
 
     <div v-if="!activeGame" class="py-8 text-center text-sm text-[#8a93a2]">
-      Aucune partie tracée ne correspond aux filtres sélectionnés.
+      {{ t('dbgNoMatchingGames') }}
     </div>
 
     <div v-else class="mt-5 space-y-6">
@@ -160,7 +167,7 @@ function formatWinReason(reason: string | null): string {
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#263044] pb-3">
           <div class="flex flex-wrap items-center gap-2">
             <span class="font-mono text-sm font-bold text-[#f8fafc]">
-              Partie #{{ activeGame.gameIndex }}
+              {{ t('dbgGameNumber', { index: activeGame.gameIndex }) }}
             </span>
             <span
               class="rounded-md px-2 py-0.5 font-mono text-xs font-bold"
@@ -174,14 +181,14 @@ function formatWinReason(reason: string | null): string {
             >
               {{
                 activeGame.winner === 'PLAYER'
-                  ? 'VICTOIRE JOUEUR'
+                  ? t('dbgBadgePlayerWin')
                   : activeGame.winner === 'OPPONENT'
-                    ? 'VICTOIRE ADVERSE'
-                    : 'ÉGALITÉ'
+                    ? t('dbgBadgeOpponentWin')
+                    : t('dbgBadgeDraw')
               }}
             </span>
             <span class="rounded border border-[#263044] bg-[#131823] px-2 py-0.5 text-xs font-medium text-slate-200">
-              Motif : {{ formatWinReason(activeGame.winReason) }}
+              {{ t('dbgReasonPrefix', { reason: formatWinReason(activeGame.winReason) }) }}
             </span>
             <span class="rounded border border-[#263044] bg-[#131823] px-2 py-0.5 font-mono text-xs text-[#8a93a2]">
               Seed: {{ activeGame.seed }}
@@ -189,11 +196,11 @@ function formatWinReason(reason: string | null): string {
           </div>
 
           <div class="flex flex-wrap items-center gap-3 font-mono text-xs text-[#8a93a2]">
-            <span>1er Joueur : <strong>{{ activeGame.firstPlayer === 'PLAYER' ? 'Joueur' : 'Adversaire' }}</strong></span>
+            <span>{{ t('dbgFirstPlayerLabel') }} <strong>{{ activeGame.firstPlayer === 'PLAYER' ? t('dbgActorPlayer') : t('dbgActorOpponent') }}</strong></span>
             <span>•</span>
-            <span>Prizes gagnés : <strong>{{ activeGame.playerPrizesWon }} - {{ activeGame.opponentPrizesWon }}</strong></span>
+            <span>{{ t('dbgPrizesWonLabel') }} <strong>{{ activeGame.playerPrizesWon }} - {{ activeGame.opponentPrizesWon }}</strong></span>
             <span>•</span>
-            <span>Mulligans : <strong>J:{{ activeGame.playerMulligans }} / Adv:{{ activeGame.opponentMulligans }}</strong></span>
+            <span>{{ t('dbgMulligansLabel', { player: activeGame.playerMulligans, opp: activeGame.opponentMulligans }) }}</span>
             <button
               type="button"
               @click="engineReport.togglePanel()"
@@ -270,10 +277,10 @@ function formatWinReason(reason: string | null): string {
           <!-- Ouverture Joueur -->
           <div class="rounded-lg border border-[#263044] bg-[#131823] p-3">
             <div class="text-xs font-bold uppercase tracking-wider text-emerald-300">
-              Ouverture Joueur (Main initiale 7 cartes &amp; 6 Récompenses)
+              {{ t('dbgPlayerOpeningTitle') }}
             </div>
             <div class="mt-2">
-              <div class="text-[11px] font-semibold text-[#8a93a2]">Main initiale (7 cartes) :</div>
+              <div class="text-[11px] font-semibold text-[#8a93a2]">{{ t('dbgPlayerInitialHand') }}</div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
                   v-for="(cName, idx) in activeGame.playerInitialHand"
@@ -285,7 +292,7 @@ function formatWinReason(reason: string | null): string {
               </div>
             </div>
             <div class="mt-2.5">
-              <div class="text-[11px] font-semibold text-[#8a93a2]">6 Cartes Récompenses initiales :</div>
+              <div class="text-[11px] font-semibold text-[#8a93a2]">{{ t('dbgPlayerInitialPrizes') }}</div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
                   v-for="(pName, idx) in activeGame.playerInitialPrizes"
@@ -301,10 +308,10 @@ function formatWinReason(reason: string | null): string {
           <!-- Ouverture Adversaire -->
           <div class="rounded-lg border border-[#263044] bg-[#131823] p-3">
             <div class="text-xs font-bold uppercase tracking-wider text-rose-300">
-              Ouverture Adversaire — {{ activeGame.opponentName }}
+              {{ t('dbgOpponentOpeningTitle', { opponent: activeGame.opponentName }) }}
             </div>
             <div class="mt-2">
-              <div class="text-[11px] font-semibold text-[#8a93a2]">Main initiale adverse (7 cartes) :</div>
+              <div class="text-[11px] font-semibold text-[#8a93a2]">{{ t('dbgOpponentInitialHand') }}</div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
                   v-for="(cName, idx) in activeGame.opponentInitialHand"
@@ -316,7 +323,7 @@ function formatWinReason(reason: string | null): string {
               </div>
             </div>
             <div class="mt-2.5">
-              <div class="text-[11px] font-semibold text-[#8a93a2]">6 Cartes Récompenses adverses :</div>
+              <div class="text-[11px] font-semibold text-[#8a93a2]">{{ t('dbgOpponentInitialPrizes') }}</div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
                   v-for="(pName, idx) in activeGame.opponentInitialPrizes"
@@ -335,11 +342,11 @@ function formatWinReason(reason: string | null): string {
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div class="text-xs font-bold uppercase tracking-wider text-[#8a93a2]">
-            Timeline Interactive des Tours ({{ activeGame.turns.length }} demi-tours joués)
+            {{ t('dbgTimelineTitle', { n: activeGame.turns.length }) }}
           </div>
 
           <div class="flex items-center gap-1.5">
-            <span class="text-xs text-[#8a93a2]">État du plateau affiché :</span>
+            <span class="text-xs text-[#8a93a2]">{{ t('dbgBoardTimingLabel') }}</span>
             <button
               type="button"
               @click="boardSnapshotTiming = 'BEFORE'"
@@ -350,7 +357,7 @@ function formatWinReason(reason: string | null): string {
                   : 'border-[#263044] bg-[#0c0f16] text-[#8a93a2] hover:bg-[#1b2232]'
               "
             >
-              Début de Tour (Avant actions)
+              {{ t('dbgTimingBefore') }}
             </button>
             <button
               type="button"
@@ -362,14 +369,14 @@ function formatWinReason(reason: string | null): string {
                   : 'border-[#263044] bg-[#0c0f16] text-[#8a93a2] hover:bg-[#1b2232]'
               "
             >
-              Fin de Tour (Après actions)
+              {{ t('dbgTimingAfter') }}
             </button>
           </div>
         </div>
 
         <div class="flex flex-wrap gap-1.5">
           <button
-            v-for="(t, idx) in activeGame.turns"
+            v-for="(turnItem, idx) in activeGame.turns"
             :key="idx"
             type="button"
             @click="selectedTurnIndex = idx"
@@ -377,14 +384,14 @@ function formatWinReason(reason: string | null): string {
             :class="
               selectedTurnIndex === idx
                 ? 'border-[#ff6b00] bg-[#ff6b00] text-white shadow-[0_0_20px_rgba(255,107,0,0.28)]'
-                : t.actingPlayer === 'PLAYER'
+                : turnItem.actingPlayer === 'PLAYER'
                   ? 'border-emerald-500/40 bg-emerald-950/45 text-emerald-200 hover:bg-emerald-950/60'
                   : 'border-rose-500/40 bg-rose-950/45 text-rose-200 hover:bg-rose-950/60'
             "
           >
-            <span>T{{ t.turnNumber }}</span>
+            <span>T{{ turnItem.turnNumber }}</span>
             <span class="text-[10px]">
-              ({{ t.actingPlayer === 'PLAYER' ? 'Joueur' : 'Adv' }})
+              ({{ turnItem.actingPlayer === 'PLAYER' ? t('dbgTurnShortPlayer') : t('dbgTurnShortOpponent') }})
             </span>
           </button>
         </div>
@@ -396,23 +403,23 @@ function formatWinReason(reason: string | null): string {
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#263044] bg-[#1b2232] px-4 py-3 text-[#f8fafc]">
           <div class="flex flex-wrap items-center gap-2.5">
             <span class="rounded border border-[#263044] bg-[#0c0f16] px-2 py-0.5 font-mono text-xs font-bold text-[#ff8a00]">
-              TOUR {{ activeTurn.turnNumber }} — {{ activeTurn.actingPlayer === 'PLAYER' ? 'TOUR DU JOUEUR' : 'TOUR DE L’ADVERSAIRE' }}
+              {{ activeTurn.actingPlayer === 'PLAYER' ? t('dbgTurnBannerPlayer', { n: activeTurn.turnNumber }) : t('dbgTurnBannerOpponent', { n: activeTurn.turnNumber }) }}
             </span>
             <span v-if="activeTurn.drawnCardName" class="text-xs text-[#8a93a2]">
-              Pioche du tour : <strong class="text-[#f8fafc]">{{ activeTurn.drawnCardName }}</strong>
+              {{ t('dbgDrawnCardLabel') }} <strong class="text-[#f8fafc]">{{ activeTurn.drawnCardName }}</strong>
             </span>
             <span
               v-if="activeTurn.perturbationNote"
               class="rounded border border-amber-500/40 bg-amber-950/60 px-2 py-0.5 text-xs font-bold text-amber-200"
             >
-              [Perturbation] {{ activeTurn.perturbationNote }}
+              {{ t('dbgPerturbationBadge', { note: activeTurn.perturbationNote }) }}
             </span>
           </div>
 
           <div class="flex items-center gap-3 font-mono text-xs">
-            <span>Branches explorées : <strong>{{ activeTurn.branchesExplored }}</strong></span>
+            <span>{{ t('dbgBranchesExplored') }} <strong>{{ activeTurn.branchesExplored }}</strong></span>
             <span>•</span>
-            <span>Score Branche Choisie : <strong class="text-emerald-300">{{ activeTurn.totalScore }}</strong></span>
+            <span>{{ t('dbgChosenScore') }} <strong class="text-emerald-300">{{ activeTurn.totalScore }}</strong></span>
           </div>
         </div>
 
@@ -424,22 +431,22 @@ function formatWinReason(reason: string | null): string {
               <div class="flex items-center gap-2">
                 <span class="h-2.5 w-2.5 rounded-full bg-emerald-600"></span>
                 <h4 class="text-xs font-bold uppercase tracking-wider text-emerald-100">
-                  Plateau du Joueur ({{ boardSnapshotTiming === 'AFTER' ? 'Fin de tour' : 'Début de tour' }})
+                  {{ t('dbgPlayerBoardTitle', { timing: boardSnapshotTiming === 'AFTER' ? t('dbgTimingTagAfter') : t('dbgTimingTagBefore') }) }}
                 </h4>
               </div>
               <div class="flex items-center gap-2 font-mono text-xs text-slate-200">
                 <span class="rounded bg-[#131823] px-2 py-0.5 font-bold text-emerald-300 shadow-2xs">
-                  Récompenses restantes : {{ displayedPlayerBoard.prizesRemaining }} / 6
+                  {{ t('dbgPrizesRemaining', { n: displayedPlayerBoard.prizesRemaining }) }}
                 </span>
-                <span>Deck: {{ displayedPlayerBoard.deckCount }}</span>
-                <span>Défausse: {{ displayedPlayerBoard.discardCount }}</span>
+                <span>{{ t('dbgDeckCount', { n: displayedPlayerBoard.deckCount }) }}</span>
+                <span>{{ t('dbgDiscardCount', { n: displayedPlayerBoard.discardCount }) }}</span>
               </div>
             </div>
 
             <!-- Poste Actif Joueur -->
             <div class="mt-3">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Poste Actif
+                {{ t('dbgActiveSpotPlayer') }}
               </div>
               <div
                 v-if="displayedPlayerBoard.active"
@@ -448,14 +455,14 @@ function formatWinReason(reason: string | null): string {
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-bold text-[#f8fafc]">
-                      {{ displayedPlayerBoard.active.nameFr }}
+                      {{ getLocalizedCardName(displayedPlayerBoard.active) }}
                     </span>
                     <span class="rounded bg-[#1b2232] px-1.5 py-0.5 font-mono text-[10px] text-[#8a93a2]">
                       {{ displayedPlayerBoard.active.subCategory }}
                     </span>
                   </div>
                   <span class="font-mono text-xs font-bold text-[#10b981]">
-                    {{ displayedPlayerBoard.active.currentHp }} / {{ displayedPlayerBoard.active.maxHp }} PV
+                    {{ displayedPlayerBoard.active.currentHp }} / {{ displayedPlayerBoard.active.maxHp }} {{ t('dbgHpUnit') }}
                     <span v-if="displayedPlayerBoard.active.damage > 0" class="text-[#ef4444]">
                       (-{{ displayedPlayerBoard.active.damage }})
                     </span>
@@ -467,14 +474,14 @@ function formatWinReason(reason: string | null): string {
                     :key="eIdx"
                     class="rounded bg-amber-950/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-200"
                   >
-                    NRJ: {{ en }}
+                    {{ t('dbgEnergyPrefix', { name: en }) }}
                   </span>
                   <span
                     v-for="(tl, tIdx) in displayedPlayerBoard.active.attachedTools"
                     :key="tIdx"
                     class="rounded bg-sky-950/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-100"
                   >
-                    Outil: {{ tl }}
+                    {{ t('dbgToolPrefix', { name: tl }) }}
                   </span>
                   <span
                     v-if="
@@ -483,19 +490,19 @@ function formatWinReason(reason: string | null): string {
                     "
                     class="text-[11px] text-[#8a93a2]"
                   >
-                    Aucune énergie ni outil attaché
+                    {{ t('dbgNoEnergyOrTool') }}
                   </span>
                 </div>
               </div>
               <div v-else class="mt-1 rounded-lg border border-dashed border-[#263044] p-3 text-xs text-[#8a93a2]">
-                Aucun Pokémon Actif
+                {{ t('dbgNoActivePokemon') }}
               </div>
             </div>
 
             <!-- Banc Joueur (max 5) -->
             <div class="mt-3">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Banc ({{ displayedPlayerBoard.bench.length }} / 5)
+                {{ t('dbgBenchPlayer', { n: displayedPlayerBoard.bench.length }) }}
               </div>
               <div
                 v-if="displayedPlayerBoard.bench.length > 0"
@@ -507,9 +514,9 @@ function formatWinReason(reason: string | null): string {
                   class="rounded-lg border border-[#263044] bg-[#131823] p-2.5 text-xs"
                 >
                   <div class="flex items-center justify-between font-semibold text-[#f8fafc]">
-                    <span>#{{ bIdx + 1 }} {{ bPoke.nameFr }}</span>
+                    <span>#{{ bIdx + 1 }} {{ getLocalizedCardName(bPoke) }}</span>
                     <span class="font-mono text-[11px] text-[#8a93a2]">
-                      {{ bPoke.currentHp }}/{{ bPoke.maxHp }} PV
+                      {{ bPoke.currentHp }}/{{ bPoke.maxHp }} {{ t('dbgHpUnit') }}
                     </span>
                   </div>
                   <div class="mt-1 flex flex-wrap gap-1">
@@ -518,18 +525,18 @@ function formatWinReason(reason: string | null): string {
                       :key="eIdx"
                       class="rounded bg-amber-950/45 px-1.5 py-0.5 font-mono text-[10px] text-amber-300"
                     >
-                      NRJ: {{ en }}
+                      {{ t('dbgEnergyPrefix', { name: en }) }}
                     </span>
                   </div>
                 </div>
               </div>
-              <div v-else class="mt-1 text-xs text-[#8a93a2]">Banc vide</div>
+              <div v-else class="mt-1 text-xs text-[#8a93a2]">{{ t('dbgBenchEmptyPlayer') }}</div>
             </div>
 
             <!-- Main Joueur -->
             <div class="mt-3 border-t border-emerald-500/35 pt-2.5">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Main ({{ displayedPlayerBoard.hand.length }} cartes)
+                {{ t('dbgHandPlayer', { n: displayedPlayerBoard.hand.length }) }}
               </div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
@@ -540,7 +547,7 @@ function formatWinReason(reason: string | null): string {
                   {{ hCard }}
                 </span>
                 <span v-if="displayedPlayerBoard.hand.length === 0" class="text-xs text-[#8a93a2]">
-                  Main vide
+                  {{ t('dbgHandEmptyPlayer') }}
                 </span>
               </div>
             </div>
@@ -552,22 +559,22 @@ function formatWinReason(reason: string | null): string {
               <div class="flex items-center gap-2">
                 <span class="h-2.5 w-2.5 rounded-full bg-rose-600"></span>
                 <h4 class="text-xs font-bold uppercase tracking-wider text-rose-100">
-                  Plateau Adverse ({{ boardSnapshotTiming === 'AFTER' ? 'Fin de tour' : 'Début de tour' }})
+                  {{ t('dbgOpponentBoardTitle', { timing: boardSnapshotTiming === 'AFTER' ? t('dbgTimingTagAfter') : t('dbgTimingTagBefore') }) }}
                 </h4>
               </div>
               <div class="flex items-center gap-2 font-mono text-xs text-slate-200">
                 <span class="rounded bg-[#131823] px-2 py-0.5 font-bold text-rose-300 shadow-2xs">
-                  Récompenses restantes : {{ displayedOpponentBoard.prizesRemaining }} / 6
+                  {{ t('dbgPrizesRemaining', { n: displayedOpponentBoard.prizesRemaining }) }}
                 </span>
-                <span>Deck: {{ displayedOpponentBoard.deckCount }}</span>
-                <span>Défausse: {{ displayedOpponentBoard.discardCount }}</span>
+                <span>{{ t('dbgDeckCount', { n: displayedOpponentBoard.deckCount }) }}</span>
+                <span>{{ t('dbgDiscardCount', { n: displayedOpponentBoard.discardCount }) }}</span>
               </div>
             </div>
 
             <!-- Poste Actif Adversaire -->
             <div class="mt-3">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Poste Actif Adverse
+                {{ t('dbgActiveSpotOpponent') }}
               </div>
               <div
                 v-if="displayedOpponentBoard.active"
@@ -576,14 +583,14 @@ function formatWinReason(reason: string | null): string {
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-bold text-[#f8fafc]">
-                      {{ displayedOpponentBoard.active.nameFr }}
+                      {{ getLocalizedCardName(displayedOpponentBoard.active) }}
                     </span>
                     <span class="rounded bg-[#1b2232] px-1.5 py-0.5 font-mono text-[10px] text-[#8a93a2]">
                       {{ displayedOpponentBoard.active.subCategory }}
                     </span>
                   </div>
                   <span class="font-mono text-xs font-bold text-[#ef4444]">
-                    {{ displayedOpponentBoard.active.currentHp }} / {{ displayedOpponentBoard.active.maxHp }} PV
+                    {{ displayedOpponentBoard.active.currentHp }} / {{ displayedOpponentBoard.active.maxHp }} {{ t('dbgHpUnit') }}
                     <span v-if="displayedOpponentBoard.active.damage > 0" class="text-[#ef4444]">
                       (-{{ displayedOpponentBoard.active.damage }})
                     </span>
@@ -595,14 +602,14 @@ function formatWinReason(reason: string | null): string {
                     :key="eIdx"
                     class="rounded bg-amber-950/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-200"
                   >
-                    NRJ: {{ en }}
+                    {{ t('dbgEnergyPrefix', { name: en }) }}
                   </span>
                   <span
                     v-for="(tl, tIdx) in displayedOpponentBoard.active.attachedTools"
                     :key="tIdx"
                     class="rounded bg-sky-950/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-100"
                   >
-                    Outil: {{ tl }}
+                    {{ t('dbgToolPrefix', { name: tl }) }}
                   </span>
                   <span
                     v-if="
@@ -611,19 +618,19 @@ function formatWinReason(reason: string | null): string {
                     "
                     class="text-[11px] text-[#8a93a2]"
                   >
-                    Aucune énergie ni outil attaché
+                    {{ t('dbgNoEnergyOrTool') }}
                   </span>
                 </div>
               </div>
               <div v-else class="mt-1 rounded-lg border border-dashed border-[#263044] p-3 text-xs text-[#8a93a2]">
-                Aucun Pokémon Actif
+                {{ t('dbgNoActivePokemon') }}
               </div>
             </div>
 
             <!-- Banc Adversaire -->
             <div class="mt-3">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Banc Adverse ({{ displayedOpponentBoard.bench.length }} / 5)
+                {{ t('dbgBenchOpponent', { n: displayedOpponentBoard.bench.length }) }}
               </div>
               <div
                 v-if="displayedOpponentBoard.bench.length > 0"
@@ -635,9 +642,9 @@ function formatWinReason(reason: string | null): string {
                   class="rounded-lg border border-[#263044] bg-[#131823] p-2.5 text-xs"
                 >
                   <div class="flex items-center justify-between font-semibold text-[#f8fafc]">
-                    <span>#{{ bIdx + 1 }} {{ bPoke.nameFr }}</span>
+                    <span>#{{ bIdx + 1 }} {{ getLocalizedCardName(bPoke) }}</span>
                     <span class="font-mono text-[11px] text-[#8a93a2]">
-                      {{ bPoke.currentHp }}/{{ bPoke.maxHp }} PV
+                      {{ bPoke.currentHp }}/{{ bPoke.maxHp }} {{ t('dbgHpUnit') }}
                     </span>
                   </div>
                   <div class="mt-1 flex flex-wrap gap-1">
@@ -646,18 +653,18 @@ function formatWinReason(reason: string | null): string {
                       :key="eIdx"
                       class="rounded bg-amber-950/45 px-1.5 py-0.5 font-mono text-[10px] text-amber-300"
                     >
-                      NRJ: {{ en }}
+                      {{ t('dbgEnergyPrefix', { name: en }) }}
                     </span>
                   </div>
                 </div>
               </div>
-              <div v-else class="mt-1 text-xs text-[#8a93a2]">Banc adverse vide</div>
+              <div v-else class="mt-1 text-xs text-[#8a93a2]">{{ t('dbgBenchEmptyOpponent') }}</div>
             </div>
 
             <!-- Main Adversaire -->
             <div class="mt-3 border-t border-rose-500/35 pt-2.5">
               <div class="text-[11px] font-bold uppercase tracking-wider text-[#8a93a2]">
-                Main Adverse ({{ displayedOpponentBoard.hand.length }} cartes)
+                {{ t('dbgHandOpponent', { n: displayedOpponentBoard.hand.length }) }}
               </div>
               <div class="mt-1 flex flex-wrap gap-1">
                 <span
@@ -668,7 +675,7 @@ function formatWinReason(reason: string | null): string {
                   {{ hCard }}
                 </span>
                 <span v-if="displayedOpponentBoard.hand.length === 0" class="text-xs text-[#8a93a2]">
-                  Main adverse vide
+                  {{ t('dbgHandEmptyOpponent') }}
                 </span>
               </div>
             </div>
@@ -680,14 +687,14 @@ function formatWinReason(reason: string | null): string {
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#263044] pb-3">
             <div>
               <h4 class="text-xs font-bold uppercase tracking-wider text-[#f8fafc]">
-                Comparateur d'Arbre 3-Ply du Tour {{ activeTurn.turnNumber }} — Branches Candidates Évaluées
+                {{ t('dbgTreeTitle', { n: activeTurn.turnNumber }) }}
               </h4>
               <p class="text-xs text-[#8a93a2]">
-                Formule : <code class="font-mono">Score Total = 0.35 × Score(T) - 0.30 × Score(T_adv) + 0.35 × Score(T+1)</code>
+                {{ t('dbgFormulaLabel') }} <code class="font-mono">Score Total = 0.35 × Score(T) - 0.30 × Score(T_adv) + 0.35 × Score(T+1)</code>
               </p>
             </div>
             <span class="rounded border border-[#263044] bg-[#131823] px-2.5 py-1 font-mono text-xs font-bold text-slate-200">
-              {{ activeTurn.candidateBranches.length }} branches évaluées en profondeur
+              {{ t('dbgBranchesDepthCount', { n: activeTurn.candidateBranches.length }) }}
             </span>
           </div>
 
@@ -712,10 +719,10 @@ function formatWinReason(reason: string | null): string {
                         : 'bg-[#263044] text-slate-200'
                     "
                   >
-                    {{ branch.branchId }} {{ branch.isChosen ? '— BRANCHE RETENUE' : '— Écartée' }}
+                    {{ branch.branchId }} {{ branch.isChosen ? t('dbgBranchChosen') : t('dbgBranchDiscarded') }}
                   </span>
                   <span class="text-xs font-semibold text-[#8a93a2]">
-                    {{ branch.actions.length }} action(s) dans la séquence
+                    {{ t('dbgActionsCount', { n: branch.actions.length }) }}
                   </span>
                 </div>
 
@@ -738,7 +745,7 @@ function formatWinReason(reason: string | null): string {
                         : 'bg-[#ff6b00] text-white'
                     "
                   >
-                    Score Total: {{ branch.totalScore }}
+                    {{ t('dbgTotalScore', { score: branch.totalScore }) }}
                   </span>
                 </div>
               </div>
@@ -761,11 +768,11 @@ function formatWinReason(reason: string | null): string {
               <!-- Réaction anticipée de l'adversaire (T_adv) & Rebond (T+1) -->
               <div class="mt-2.5 grid grid-cols-1 gap-2 border-t border-[#263044] pt-2 text-[11px] sm:grid-cols-2">
                 <div class="text-rose-200">
-                  <span class="font-bold">Riposte anticipée (T<sub>adv</sub>) :</span>
+                  <span class="font-bold">{{ t('dbgAnticipatedReply') }}</span>
                   {{ branch.opponentReactionSummary }}
                 </div>
                 <div class="text-sky-100">
-                  <span class="font-bold">Rebond projeté (T+1) :</span>
+                  <span class="font-bold">{{ t('dbgAnticipatedRebound') }}</span>
                   {{ branch.reboundSummary }}
                 </div>
               </div>

@@ -43,7 +43,7 @@ const emit = defineEmits<{
   (e: 'retry-meta-decks'): void
 }>()
 
-const { t, pickLocalizedField } = useI18n()
+const { t, pickLocalizedField, formatNumber } = useI18n()
 
 const activeConfigTab = ref<'quick' | 'advanced'>('quick')
 const zoomedOpponentCards = ref<EngineCardModel[]>([])
@@ -542,7 +542,7 @@ const launchButtonState = computed(() => {
                 @change="patchConfig({ lookaheadPly: Number(($event.target as HTMLSelectElement).value) as LookaheadPly })"
                 class="rounded-lg border border-[#263044] bg-[#131823] px-2.5 py-1.5 font-mono text-xs text-[#f8fafc]"
               >
-                <option :value="1">1-Ply (Tour T seul)</option>
+                <option :value="1">{{ t('ply1Label') }}</option>
                 <option :value="2">2-Ply (T -> T_adv)</option>
                 <option :value="3">3-Ply (T -> T_adv -> T+1)</option>
               </select>
@@ -559,7 +559,7 @@ const launchButtonState = computed(() => {
                 <option value="8">8 branches</option>
                 <option value="20">20 branches</option>
                 <option value="50">50 branches</option>
-                <option value="INFINITE">INFINITE (plafond 60)</option>
+                <option value="INFINITE">{{ t('maxBranchesInfinite') }}</option>
               </select>
             </label>
 
@@ -702,7 +702,7 @@ const launchButtonState = computed(() => {
                   class="rounded border border-[#263044] px-1.5 py-0.5 font-mono text-[10px] font-semibold transition"
                   :class="config.iterations === presetIter ? 'bg-[#ff6b00] text-white border-[#ff6b00]' : 'bg-[#0c0f16] text-[#8a93a2] hover:text-[#f8fafc]'"
                 >
-                  {{ presetIter.toLocaleString('fr-FR') }}
+                  {{ formatNumber(presetIter) }}
                 </button>
               </div>
             </div>

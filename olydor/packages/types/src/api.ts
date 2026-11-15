@@ -82,9 +82,11 @@ export interface AttackerComparisonRow {
 export interface SmartAlternativeSuggestion {
   targetCardId: string
   targetCardNameFr: string
+  targetCardNameEn?: string
   alternativeModel: EngineCardModel
   alternativeCardId: string
   alternativeNameFr: string
+  alternativeNameEn?: string
   alternativeCategory: string
   alternativeSubCategory: string
   suggestionType:
@@ -93,7 +95,9 @@ export interface SmartAlternativeSuggestion {
     | 'ALTERNATIVE_ATTACKER'
   sharedPrimitives: EffectPrimitive[]
   actionEconomyBadge: string
+  actionEconomyBadgeEn?: string
   strategicReason: string
+  strategicReasonEn?: string
   relevanceScore: number
   attackerComparison?: AttackerComparisonRow
 }

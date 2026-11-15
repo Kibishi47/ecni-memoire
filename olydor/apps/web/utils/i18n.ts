@@ -15,7 +15,7 @@ export const webTranslations = {
       'Analysez mathématiquement la régularité de vos listes sur Insight et préparez-vous bientôt à disputer de vrais matchs contre le bot Pythia dans l’Arène.',
 
     simDomain: 'insight.olydor.app',
-    simStatusBadge: 'DISPONIBLE EN BÊTA',
+    simStatusBadge: 'DISPONIBLE EN ALPHA',
     simCardTitle: 'Simulateur Monte-Carlo & Atelier A/B',
     simCardDesc:
       'Importez votre decklist PTCGL, auditez instantanément vos 60 cartes et synergies clés, puis lancez jusqu’à 1 000 parties parallèles contre le métagame.',
@@ -52,11 +52,11 @@ export const webTranslations = {
     archHybridDesc:
       'Préparez et affinez vos listes sur Insight aujourd’hui pour affronter bientôt le bot autonome Pythia dans l’Arène.',
 
-    betaBadge: 'Programme Bêta-Testeurs',
-    betaTitle: 'Participez au calibrage d’Olydor pour le format Standard',
-    betaDesc:
-      'Partagez vos retours de test sur vos listes de tournoi, votez pour les priorités des duels 1v1 contre le bot Pythia et signalez les cas limites en moins de 2 minutes.',
-    betaCta: 'Devenir Bêta-Testeur (Google Form)',
+    alphaBadge: 'Programme Alpha-Testeurs',
+    alphaTitle: 'Participez au calibrage d’Olydor pour le format Standard',
+    alphaDesc:
+      'L’IA Pythia est encore en cours de refonte : partagez vos retours de test sur vos listes de tournoi, votez pour les priorités des duels 1v1 et signalez les cas limites en moins de 2 minutes.',
+    alphaCta: 'Devenir Alpha-Testeur (Google Form)',
 
     seoTitle: 'Olydor — Simulateur Stratégique & Duel IA Pokémon TCG',
     seoDescription:
@@ -69,6 +69,12 @@ export const webTranslations = {
       'Simulateur Monte-Carlo haute performance et future arène 1v1 contre le bot Pythia.',
     schemaDescription:
       'Simulateur Monte-Carlo haute vélocité et plateforme d’analyse de decklists pour Pokémon TCG Standard.',
+    legalMentionsSeoTitle: 'Mentions Légales — Olydor',
+    legalMentionsSeoDesc: 'Mentions légales et informations réglementaires de l’écosystème Olydor (olydor.app).',
+    legalPrivacySeoTitle: 'Politique de Confidentialité (RGPD) — Olydor',
+    legalPrivacySeoDesc: 'Politique de confidentialité et protection des données RGPD sur Olydor.',
+    legalTermsSeoTitle: 'Conditions Générales d’Utilisation — Olydor',
+    legalTermsSeoDesc: 'Conditions générales d’utilisation des plateformes Olydor (Hub, Simulateur, Arène IA).',
   },
   en: {
     heroSubtitle: 'Stop guessing the meta. Simulate every branch.',
@@ -83,7 +89,7 @@ export const webTranslations = {
       'Benchmark list consistency mathematically in Insight, and soon play full 1v1 matches directly against the Pythia AI bot in the Arena.',
 
     simDomain: 'insight.olydor.app',
-    simStatusBadge: 'AVAILABLE IN BETA',
+    simStatusBadge: 'AVAILABLE IN ALPHA',
     simCardTitle: 'Monte Carlo Deck Simulator & A/B Lab',
     simCardDesc:
       'Import any PTCGL list, validate 60 cards and Ace Spec / evolution synergies automatically, then run 50 to 1,000 parallel games against curated meta lists.',
@@ -120,11 +126,11 @@ export const webTranslations = {
     archHybridDesc:
       'Refine your decklists in Insight today and get ready to battle the Pythia bot directly in 1v1 Arena matches.',
 
-    betaBadge: 'Beta Feedback Program',
-    betaTitle: 'Help Calibrate Olydor for the Standard Metagame',
-    betaDesc:
-      'Share your tournament decklists, vote on upcoming 1v1 Pythia bot battle priorities, and report card edge cases in under 2 minutes.',
-    betaCta: 'Open Beta Questionnaire',
+    alphaBadge: 'Alpha Feedback Program',
+    alphaTitle: 'Help Calibrate Olydor for the Standard Metagame',
+    alphaDesc:
+      'The Pythia AI is still being reworked: share your tournament decklist test feedback, vote on upcoming 1v1 bot battle priorities, and report card edge cases in under 2 minutes.',
+    alphaCta: 'Open Alpha Questionnaire',
 
     seoTitle: 'Olydor — Strategic Pokémon TCG Simulator & 1v1 Bot Arena',
     seoDescription:
@@ -137,6 +143,12 @@ export const webTranslations = {
       'High-throughput Monte Carlo simulator and upcoming 1v1 Arena against the Pythia bot.',
     schemaDescription:
       'High-throughput Monte Carlo simulator and strategic deck analysis platform for Standard Pokémon TCG.',
+    legalMentionsSeoTitle: 'Legal Notice — Olydor',
+    legalMentionsSeoDesc: 'Legal notice and regulatory information for the Olydor ecosystem (olydor.app).',
+    legalPrivacySeoTitle: 'Privacy Policy (GDPR) — Olydor',
+    legalPrivacySeoDesc: 'Privacy policy and GDPR data protection on Olydor.',
+    legalTermsSeoTitle: 'Terms of Service — Olydor',
+    legalTermsSeoDesc: 'Terms of service for the Olydor platforms (Hub, Simulator, AI Arena).',
   },
 } as const
 

@@ -1,12 +1,15 @@
 <template>
-  <PrivacyPolicyContent />
+  <PrivacyPolicyContent :lang="currentLang" />
 </template>
 
 <script setup lang="ts">
 import { PrivacyPolicyContent } from '@olydor/ui'
+import { useI18n } from '../utils/i18n'
+
+const { t, currentLang } = useI18n()
 
 useSeoMeta({
-  title: 'Politique de Confidentialité — Olydor Insight',
-  description: 'Politique de confidentialité d’Olydor Insight (insight.olydor.app).',
+  title: () => t('legalPrivacySeoTitle'),
+  description: () => t('legalPrivacySeoDesc'),
 })
 </script>

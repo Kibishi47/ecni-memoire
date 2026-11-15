@@ -117,10 +117,13 @@ export interface ShardCardCounter {
 export interface ShardComboCounter {
   comboId: string
   label: string
+  labelEn?: string
   cardId: string
   cardNameFr: string
+  cardNameEn?: string
   relatedCardIds?: string[]
   conditionSummary: string
+  conditionSummaryEn?: string
   sourceType: PlayableAction['sourceType']
   actionId: string
   gamesTriggered: number
@@ -185,6 +188,7 @@ function snapshotPokemon(poke: InPlayPokemon): TracedPokemonSnapshot {
     instanceId: poke.instanceId,
     cardId: poke.card.cardId,
     nameFr: poke.card.identity.nameFr,
+    nameEn: poke.card.identity.nameEn || poke.card.identity.nameFr,
     subCategory: poke.card.subCategory,
     currentHp: getRemainingHp(poke),
     maxHp: getPokemonMaxHp(poke),
@@ -209,7 +213,12 @@ export function snapshotBoardForTrace(board: PlayerBoardState): TracedBoardSnaps
   }
 }
 
-function describeComboCondition(card: EngineCardModel, action: PlayableAction): string {
+function describeComboCondition(
+  card: EngineCardModel,
+  action: PlayableAction,
+  lang: 'fr' | 'en' = 'fr',
+): string {
+  const isEn = lang === 'en'
   const normCardName = normalizeCardNameForMatch(card.identity.nameFr)
   const canDouble =
     Boolean(action.canAttackTwice) ||
@@ -218,19 +227,19 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
     normCardName.includes('poissoroy')
 
   if (canDouble && (action.actionType === 'ATTACK' || action.sourceType === 'ATTACK')) {
-    return 'Double attaque sous Stade (Fête Battante)'
+    return isEn ? 'Double attack under Stadium (Festival Grounds)' : 'Double attaque sous Stade (Fête Battante)'
   }
 
   for (const rawPre of action.preconditions) {
     const preType = typeof rawPre === 'string' ? rawPre : (rawPre as any).type
     if (preType === 'HAND_MAX_OTHER_CARDS_ZERO' || preType === 'HAND_IS_EMPTY') {
-      return 'Seule carte en main (0 autre carte)'
+      return isEn ? 'Only card in hand (0 other cards)' : 'Seule carte en main (0 autre carte)'
     }
     if (preType === 'KO_SUFFERED_LAST_TURN' || preType === 'OPPONENT_CAUSED_KO_LAST_TURN') {
-      return 'Après K.O. subi au tour précédent'
+      return isEn ? 'After a KO suffered last turn' : 'Après K.O. subi au tour précédent'
     }
     if (preType === 'PLAYER_BEHIND_ON_PRIZES') {
-      return 'Retard aux Récompenses'
+      return isEn ? 'Behind on Prize cards' : 'Retard aux Récompenses'
     }
     if (preType.startsWith('OPPONENT_PRIZES_EXACT_COUNT') || preType.startsWith('OPPONENT_PRIZES_EQUAL:')) {
       const minCount = preType.includes(':')
@@ -238,34 +247,36 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
         : typeof rawPre === 'object'
           ? (rawPre as any).minCount ?? 1
           : 1
-      return `Adversaire à ${minCount} Récompense(s)`
+      return isEn ? `Opponent at ${minCount} Prize card(s)` : `Adversaire à ${minCount} Récompense(s)`
     }
     if (preType === 'STADIUM_IN_PLAY') {
-      return 'Stade en jeu requis'
+      return isEn ? 'Requires a Stadium in play' : 'Stade en jeu requis'
     }
     if (preType === 'OPPONENT_ACTIVE_HAS_SPECIAL_CONDITION') {
-      return 'Actif adverse sous État Spécial'
+      return isEn ? 'Opponent Active affected by a Special Condition' : 'Actif adverse sous État Spécial'
     }
     if (preType === 'HAS_TERA_POKEMON_IN_PLAY') {
-      return 'Pokémon Téracristal en jeu requis'
+      return isEn ? 'Requires a Tera Pokémon in play' : 'Pokémon Téracristal en jeu requis'
     }
     if (preType === 'SECOND_PLAYER_TURN_1') {
-      return 'Joueur 2 dès le Tour 1'
+      return isEn ? 'Player 2 on Turn 1' : 'Joueur 2 dès le Tour 1'
     }
   }
 
   for (const eff of action.effects) {
     if (eff.scalingMetric) {
-      return `Dégâts dynamiques (${eff.scalingMetric})`
+      return isEn ? `Dynamic damage (${eff.scalingMetric})` : `Dégâts dynamiques (${eff.scalingMetric})`
     }
     if (eff.coinFlipMode) {
-      return `Lancer de pièce (${eff.coinFlipMode})`
+      return isEn ? `Coin flip (${eff.coinFlipMode})` : `Lancer de pièce (${eff.coinFlipMode})`
     }
     if (eff.damageScalingType) {
-      return `Dégâts dynamiques (${eff.damageScalingType})`
+      return isEn ? `Dynamic damage (${eff.damageScalingType})` : `Dégâts dynamiques (${eff.damageScalingType})`
     }
     if (eff.damageScalingPerOpponentPrizeTaken) {
-      return `Dégâts progressifs (+${eff.damageScalingPerOpponentPrizeTaken}/Récompense)`
+      return isEn
+        ? `Scaling damage (+${eff.damageScalingPerOpponentPrizeTaken}/Prize)`
+        : `Dégâts progressifs (+${eff.damageScalingPerOpponentPrizeTaken}/Récompense)`
     }
     if (
       eff.primitive === 'LOCK_ITEMS' ||
@@ -273,13 +284,13 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
       eff.primitive === 'APPLY_SPECIAL_CONDITION' ||
       (eff as any).primitive === 'PASSIVE_ABILITY_OR_ITEM_LOCK'
     ) {
-      return "Verrouillage & Contrôle"
+      return isEn ? 'Lock & Control' : 'Verrouillage & Contrôle'
     }
     if (eff.primitive === 'PLACE_DAMAGE_COUNTERS') {
-      return 'Placement de marqueurs de dégâts'
+      return isEn ? 'Damage counter placement' : 'Placement de marqueurs de dégâts'
     }
     if (eff.primitive === 'KNOCK_OUT' && eff.target === 'SELF') {
-      return 'Sacrifice stratégique (K.O.)'
+      return isEn ? 'Strategic self-KO sacrifice' : 'Sacrifice stratégique (K.O.)'
     }
   }
 
@@ -288,10 +299,13 @@ function describeComboCondition(card: EngineCardModel, action: PlayableAction): 
       action.cost && typeof action.cost === 'object' && !Array.isArray(action.cost)
         ? Object.values(action.cost).reduce((a, b) => a + Number(b), 0)
         : action.energyCost?.length ?? 0
+    if (isEn) {
+      return costLen === 0 ? '0-Energy Attack' : `Attack (${costLen} Energy)`
+    }
     return costLen === 0 ? 'Attaque à 0 Énergie' : `Attaque (${costLen} Énergie${costLen > 1 ? 's' : ''})`
   }
 
-  return 'Condition tactique spécifique'
+  return isEn ? 'Specific tactical condition' : 'Condition tactique spécifique'
 }
 
 function resolveComboRelatedCardIds(
@@ -471,13 +485,17 @@ export function createShardTelemetryAccumulator(
       if (hasNonTrivialPrecondition || hasDynamicDmg || hasDoubleAtk || isAttack) {
         const comboId = `${sampleModel.cardId}::${pAction.actionId}`
         if (!comboCounters[comboId]) {
+          const cardNameEn = sampleModel.identity.nameEn || sampleModel.identity.nameFr
           comboCounters[comboId] = {
             comboId,
             label: `${sampleModel.identity.nameFr} — ${pAction.label}`,
+            labelEn: `${cardNameEn} — ${pAction.label}`,
             cardId: sampleModel.cardId,
             cardNameFr: sampleModel.identity.nameFr,
+            cardNameEn,
             relatedCardIds: resolveComboRelatedCardIds(sampleModel, pAction, uniqueDeckModels),
-            conditionSummary: describeComboCondition(sampleModel, pAction),
+            conditionSummary: describeComboCondition(sampleModel, pAction, 'fr'),
+            conditionSummaryEn: describeComboCondition(sampleModel, pAction, 'en'),
             sourceType: (pAction.actionType || pAction.sourceType) as any,
             actionId: pAction.actionId,
             gamesTriggered: 0,
@@ -1457,10 +1475,13 @@ export function mergeSimulationShards(
     .map((cb) => ({
       comboId: cb.comboId,
       label: cb.label,
+      labelEn: cb.labelEn || cb.label,
       cardId: cb.cardId,
       cardNameFr: cb.cardNameFr,
+      cardNameEn: cb.cardNameEn || cb.cardNameFr,
       relatedCardIds: cb.relatedCardIds,
       conditionSummary: cb.conditionSummary,
+      conditionSummaryEn: cb.conditionSummaryEn || cb.conditionSummary,
       gamesTriggered: cb.gamesTriggered,
       totalTriggersCount: cb.totalTriggersCount,
       triggerRate: totalGames > 0 ? Math.round((cb.gamesTriggered / totalGames) * 1000) / 10 : 0,

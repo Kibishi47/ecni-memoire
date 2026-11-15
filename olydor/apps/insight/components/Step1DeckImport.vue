@@ -271,7 +271,7 @@ function closeCardZoom() {
             class="mt-3 space-y-1 border-t border-[#263044]/60 pt-2.5 text-xs text-[#8a93a2]"
           >
             <li v-for="(warn, wIdx) in validatedDeck.warnings" :key="wIdx">
-              • {{ warn.message }}
+              • {{ pickLocalizedField(warn.message, warn.messageEn) }}
             </li>
           </ul>
         </div>
