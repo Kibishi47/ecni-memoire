@@ -239,6 +239,56 @@ describe('POST /api/reports', () => {
     await app.close()
   })
 
+  it('does not consume rate limit quota on 400 validation errors, while still blocking exhausted IPs', async () => {
+    const { pool } = createMockPool()
+    const app = await buildServer({
+      pool,
+      logger: false,
+      githubService: { isConfigured: () => false, createBugReportIssue: vi.fn() },
+      reportRateLimiter: new InMemoryRateLimiter({ maxRequests: 2 }),
+    })
+
+    for (let i = 0; i < 4; i++) {
+      const invalidRes = await app.inject({
+        method: 'POST',
+        url: '/api/reports',
+        remoteAddress: '203.0.113.77',
+        payload: {
+          type: 'WEBSITE_ERROR',
+          userComment: '   ',
+        },
+      })
+      expect(invalidRes.statusCode).toBe(400)
+    }
+
+    for (let i = 0; i < 2; i++) {
+      const validRes = await app.inject({
+        method: 'POST',
+        url: '/api/reports',
+        remoteAddress: '203.0.113.77',
+        payload: {
+          type: 'WEBSITE_ERROR',
+          userComment: `Bug valide #${i + 1}`,
+        },
+      })
+      expect(validRes.statusCode).toBe(201)
+    }
+
+    // Once quota is exhausted, even an invalid payload returns 429
+    const blockedAfterExhaustion = await app.inject({
+      method: 'POST',
+      url: '/api/reports',
+      remoteAddress: '203.0.113.77',
+      payload: {
+        type: 'WEBSITE_ERROR',
+        userComment: '   ',
+      },
+    })
+    expect(blockedAfterExhaustion.statusCode).toBe(429)
+
+    await app.close()
+  })
+
   it('keeps DB report even if GitHub issue creation fails', async () => {
     const { pool } = createMockPool()
     const githubMock: GitHubIssueCreator = {

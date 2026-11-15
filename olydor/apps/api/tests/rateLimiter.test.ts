@@ -28,4 +28,37 @@ describe('InMemoryRateLimiter', () => {
     fakeNow += 60 * 60 * 1000 + 1
     expect(limiter.consume('192.168.1.10').allowed).toBe(true)
   })
+
+  it('peek checks remaining quota and blocked state without consuming slots', () => {
+    let fakeNow = 1_000_000
+    const limiter = new InMemoryRateLimiter({
+      maxRequests: 2,
+      windowMs: 60 * 60 * 1000,
+      now: () => fakeNow,
+    })
+
+    expect(limiter.peek('192.168.1.20')).toEqual({
+      allowed: true,
+      remaining: 2,
+      retryAfterSeconds: 0,
+    })
+
+    // Repeated peek calls do not consume capacity
+    expect(limiter.peek('192.168.1.20').remaining).toBe(2)
+
+    expect(limiter.consume('192.168.1.20').remaining).toBe(1)
+    expect(limiter.peek('192.168.1.20').remaining).toBe(1)
+    expect(limiter.consume('192.168.1.20').remaining).toBe(0)
+
+    const blockedPeek = limiter.peek('192.168.1.20')
+    expect(blockedPeek.allowed).toBe(false)
+    expect(blockedPeek.retryAfterSeconds).toBe(3600)
+
+    fakeNow += 60 * 60 * 1000 + 1
+    expect(limiter.peek('192.168.1.20')).toEqual({
+      allowed: true,
+      remaining: 2,
+      retryAfterSeconds: 0,
+    })
+  })
 })

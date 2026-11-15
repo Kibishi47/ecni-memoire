@@ -33,21 +33,29 @@ export async function registerReportRoutes(
 
   app.post('/api/reports', async (request, reply) => {
     const clientIp = (request.ip || 'unknown').slice(0, 45)
-    const rate = rateLimiter.consume(clientIp)
-
-    if (!rate.allowed) {
-      return reply
+    const sendRateLimitExceeded = (retryAfterSeconds: number) =>
+      reply
         .status(429)
-        .header('Retry-After', String(rate.retryAfterSeconds))
+        .header('Retry-After', String(retryAfterSeconds))
         .send({
           error: 'Too Many Requests',
           message: `Limite de signalements atteinte (maximum ${env.RATE_LIMIT_MAX_REPORTS_PER_HOUR} par heure).`,
-          retryAfterSeconds: rate.retryAfterSeconds,
+          retryAfterSeconds,
         })
+
+    // Reject already-blocked callers before parsing while avoiding burning slots on 400 validation errors.
+    const preCheck = rateLimiter.peek(clientIp)
+    if (!preCheck.allowed) {
+      return sendRateLimitExceeded(preCheck.retryAfterSeconds)
     }
 
     const parsed = parseWithZod(createReportBodySchema, request.body, reply)
     if (!parsed) return
+
+    const rate = rateLimiter.consume(clientIp)
+    if (!rate.allowed) {
+      return sendRateLimitExceeded(rate.retryAfterSeconds)
+    }
 
     const requestedCardId = parsed.cardId ?? null
     const matchLogs = parsed.matchLogs ?? null

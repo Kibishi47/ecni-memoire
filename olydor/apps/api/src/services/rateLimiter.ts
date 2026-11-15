@@ -26,24 +26,31 @@ export class InMemoryRateLimiter {
   }
 
   /**
+   * Checks whether the client key is currently rate-limited without consuming a slot.
+   */
+  peek(key: string): RateLimitResult {
+    const { active, blockedResult } = this.evaluateWindow(key, this.now())
+    if (blockedResult) {
+      return blockedResult
+    }
+
+    return {
+      allowed: true,
+      remaining: Math.max(0, this.maxRequests - active.length),
+      retryAfterSeconds: 0,
+    }
+  }
+
+  /**
    * Attempts to consume one request slot for the given client key (e.g. IP address).
    */
   consume(key: string): RateLimitResult {
     const currentTime = this.now()
     const cutoff = currentTime - this.windowMs
+    const { active, blockedResult } = this.evaluateWindow(key, currentTime)
 
-    const existing = this.hits.get(key) ?? []
-    const active = existing.filter((ts) => ts > cutoff)
-
-    if (active.length >= this.maxRequests) {
-      const oldest = active[0]!
-      const retryAfterSeconds = Math.max(1, Math.ceil((oldest + this.windowMs - currentTime) / 1000))
-      this.hits.set(key, active)
-      return {
-        allowed: false,
-        remaining: 0,
-        retryAfterSeconds,
-      }
+    if (blockedResult) {
+      return blockedResult
     }
 
     active.push(currentTime)
@@ -58,6 +65,38 @@ export class InMemoryRateLimiter {
       remaining: Math.max(0, this.maxRequests - active.length),
       retryAfterSeconds: 0,
     }
+  }
+
+  private evaluateWindow(
+    key: string,
+    currentTime: number,
+  ): { active: number[]; blockedResult: RateLimitResult | null } {
+    const cutoff = currentTime - this.windowMs
+    const existing = this.hits.get(key) ?? []
+    const active = existing.filter((ts) => ts > cutoff)
+
+    if (active.length < existing.length) {
+      if (active.length > 0) {
+        this.hits.set(key, active)
+      } else {
+        this.hits.delete(key)
+      }
+    }
+
+    if (active.length >= this.maxRequests) {
+      const oldest = active[0]!
+      const retryAfterSeconds = Math.max(1, Math.ceil((oldest + this.windowMs - currentTime) / 1000))
+      return {
+        active,
+        blockedResult: {
+          allowed: false,
+          remaining: 0,
+          retryAfterSeconds,
+        },
+      }
+    }
+
+    return { active, blockedResult: null }
   }
 
   /**
