@@ -21,6 +21,10 @@ function inferBadgeColor(name: string, index: number): MetaOpponentDeck['badgeCo
     return 'emerald'
   }
   if (lower.includes('roigada') || lower.includes('slowking')) return 'amber'
+  if (lower.includes('alakazam')) return 'indigo'
+  if (lower.includes('branette') || lower.includes('banette') || lower.includes('sinistrail') || lower.includes('dhelmise')) {
+    return 'rose'
+  }
   return ACCENT_PALETTE[index % ACCENT_PALETTE.length]!
 }
 
