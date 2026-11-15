@@ -190,6 +190,14 @@ python -m compiler.cli code -f data/target_ids.txt
 
 # Enchaîner les 2 passes automatiquement avec libération mémoire intermédiaire garantie
 python -m compiler.cli run --pipeline two_pass --phase all -f data/target_ids.txt
+
+# Compiler un ou plusieurs sets complets (en ignorant legal.standard, ex: nouveau set pas encore flaggé Standard sur TCGdex)
+python -m compiler.cli compile-sets me05 me06
+python -m compiler.cli compile-sets me05,DLR --pipeline two_pass --phase all
+# Ou directement via l'option --sets / --set / -s :
+python -m compiler.cli run --sets me05,me06
+python -m compiler.cli reason --sets me05,me06
+python -m compiler.cli code --sets me05,me06
 ```
 
 #### Méthode 3 : Réexécuter une phase existante (`re-run` / `rerun`)
@@ -268,10 +276,17 @@ python -m compiler.cli fetch-cards --raw -f data/target_ids.txt
 python -m compiler.cli fetch-raw -f data/target_ids.txt
 # Télécharger les fiches brutes d'identifiants précis :
 python -m compiler.cli fetch-raw --ids me02.5-016,sv04-125,sv05-144
+# Télécharger toutes les fiches brutes d'un ou plusieurs sets en ignorant legal.standard :
+python -m compiler.cli fetch-sets me05 me06
+python -m compiler.cli fetch-sets me05,DLR --no-raw -o data/new_sets_ids.txt
+python -m compiler.cli fetch-cards --sets me05,me06 --raw
 
 # 1. Connaître le nombre de cartes restantes à compiler (JSON Passe 2)
 python -m compiler.cli remaining
 python -m compiler.cli remaining --set sv08.5 --details
+# Suivre des extensions pas encore flaggées Standard sur TCGdex (en ignorant legal.standard) :
+python -m compiler.cli remaining --sets me05,me06
+python -m compiler.cli remaining --set me06 --ignore-standard
 # Suivre l'avancement spécifique d'une liste de cartes (fichier texte avec déduplication auto) :
 python -m compiler.cli remaining --ids-file data/target_ids.txt
 
@@ -328,10 +343,12 @@ PYTHONPATH=card-compiler python3 -m unittest discover -s card-compiler/tests -p 
 | Commande | Alias | Rôle & Description |
 | :--- | :--- | :--- |
 | `run` | `compile` | **Commande principale** : exécute le pipeline complet (mode Single-Pass direct ou Two-Pass enchaîné). |
+| `compile-sets` | `run-sets` | **Compilation par extensions** : résout et compile toutes les cartes d'un ou plusieurs sets TCGdex (ou codes PTCGL) en ignorant `legal.standard`. |
 | `reason` | — | **Passe 1** : Exécute l'IA de raisonnement et sauvegarde les fiches d'analyse textuelles dans `data/reasoning_texts/`. |
 | `code` | — | **Passe 2** : Exécute l'IA de coding pour transformer les analyses textuelles en modèles JSON dans `data/compiled_cards/`. |
 | `re-run` | `rerun`, `redo`, `recompile`, `reexecute` | **Réexécution de phase** : Réexécute la Passe 1, la Passe 2, ou les deux passes sur les cartes des dossiers existants ou sur sélection ciblée, avec récupération auto depuis TCGdex. |
-| `fetch-cards` | `update-cards`, `fetch-raw`, `cache-raw`, `refresh-cards`, `fetch-index`, `update-index` | **Mise à jour TCGdex** : Télécharge la liste officielle des cartes (Standard ou index global) et/ou les fiches détaillées individuelles dans `data/raw_tcgdex/{card_id}.json`. |
+| `fetch-cards` | `update-cards`, `fetch-raw`, `cache-raw`, `refresh-cards`, `fetch-index`, `update-index` | **Mise à jour TCGdex** : Télécharge la liste officielle des cartes (Standard, sets ciblés, ou index global) et/ou les fiches détaillées individuelles dans `data/raw_tcgdex/{card_id}.json`. |
+| `fetch-sets` | — | **Récupération par extensions** : Résout un ou plusieurs sets TCGdex en ignorant `legal.standard` et télécharge leurs fiches brutes dans `data/raw_tcgdex/`. |
 | `remaining` | `todo`, `left`, `pending`, `a-compiler` | Calcule et affiche le nombre de cartes restant à compiler (globalement ou par extension). |
 | `count` | — | Compte les cartes compilées sur le disque avec répartition par catégories et statut de synchronisation. |
 | `sync` | `sync-database`, `check-database`, `sync-db` | Vérifie et synchronise le fichier JSON consolidé global `data/cards_database.json`. |
@@ -352,7 +369,7 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | `--standard` | — | Raccourci pour forcer toutes les cartes légales au format Standard | Flag booléen | `False` | — | `run`, `reason`, `code`, `re-run` |
 | `--ids` | — | Liste d'identifiants précis (virgules `id1,id2`, syntaxe `@fichier.txt` ou chemin de fichier) | Chaîne texte | `None` (toutes) | — | `run`, `reason`, `code`, `re-run` |
 | `--ids-file` | `-f` | Chemin vers un fichier texte contenant des IDs ligne par ligne (déduplication automatique des doublons) | Chemin fichier | `None` | — | `run`, `reason`, `code`, `re-run` |
-| `--set` | `-s` | Filtre les cartes par extension (ex: `sv06`, `sv05`, `me01`) | Chaîne texte | `None` | — | `re-run`, `remaining` |
+| `--sets` | `--set`, `-s` | Cible un ou plusieurs sets séparés par des virgules (`me05,me06`, `DLR`) en ignorant `legal.standard` (filtre sur `re-run`/`remaining`) | Chaîne texte | `None` | — | `run`, `reason`, `code`, `re-run`, `remaining`, `fetch-cards` |
 | `--pipeline` | `-pl` | Architecture du pipeline de traitement | `single`, `two_pass` | `single` | `PIPELINE_MODE` | `run` |
 | `--intensity` | `-it` | Niveau de puissance et consommation mémoire de l'IA | `soft`, `intense` | `soft` | `INTENSITY_MODE` | `run`, `reason`, `code`, `re-run` |
 | `--local-backend` | `--local-opt` | Moteur d'optimisation Apple Silicon pour l'exécution locale | `mlx`, `llama_cpp` | `mlx` | `LOCAL_BACKEND` | `run`, `reason`, `code`, `re-run` |
@@ -376,6 +393,10 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | Commande | Option / Argument | Alias court | Description | Valeurs possibles | Valeur par défaut |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`fetch-cards`** / **`update-cards`** / **`fetch-raw`** | `--raw` | `--download-raw`, `--cache-raw` | Télécharge et enregistre chaque carte dans le cache individuel `data/raw_tcgdex/{card_id}.json` | Flag booléen | `False` (`True` pour `fetch-raw`) |
+| | `--sets` | `--set`, `-s` | Un ou plusieurs codes d'extension à résoudre sans filtre `legal.standard` (ex: `me05,me06`) | Chaîne texte | `None` |
+| **`fetch-sets`** | `<sets...>` *(argument)* | — | Un ou plusieurs codes d'extension TCGdex / PTCGL (ex: `me05 me06` ou `me05,DLR`) en ignorant `legal.standard` | Liste texte | *Requis* |
+| | `--raw` / `--no-raw` | — | Télécharge les fiches détaillées dans `data/raw_tcgdex/` | Flag booléen | `True` |
+| | `--out-file` | `-o` | Enregistre la liste d'IDs résolus dans un fichier texte (compatible `-f`) | Chemin fichier | `None` |
 | | `--ids` | — | Liste d'identifiants précis séparés par des virgules à télécharger dans `raw_tcgdex` (active automatiquement le mode raw) | Chaîne texte | `None` |
 | | `--ids-file` | `-f` | Chemin vers un fichier texte d'IDs à télécharger dans `raw_tcgdex` (déduplication auto, active automatiquement raw) | Chemin fichier | `None` |
 | | `--limit` | `-l` | Nombre maximum de fiches individuelles à télécharger | Entier (`int`) | `None` (toutes) |
@@ -390,6 +411,8 @@ Ce tableau détaille toutes les options configurables pour la commande principal
 | | `--ids` | — | Filtre les cartes restantes sur une liste précise séparée par des virgules | Chaîne texte | `None` |
 | | `--mode` | `-m` | Filtre les cartes cibles à comptabiliser (si aucun `--ids`/`--ids-file`) | `standard`, `test`, `all` | `standard` |
 | | `--set` | `-s` | Filtre le décompte sur une extension spécifique (ex: `sv08.5`, `sv01`, `sve`) | Chaîne texte | `None` (toutes) |
+| | `--sets` | — | Cible un ou plusieurs sets séparés par des virgules en ignorant `legal.standard` | Chaîne texte | `None` |
+| | `--ignore-standard` | — | Ignore le filtre `legal.standard` (utile avec `--set` sur un nouveau set) | Flag booléen | `False` |
 | | `--reasoned` | `-r`, `--reason` | Prend en compte les cartes analysées en Passe 1 (`data/reasoning_texts/`) plutôt que compilées (`data/compiled_cards/`) | Flag booléen | `False` |
 | | `--details` | `-d` | Affiche la liste complète des identifiants (IDs) des cartes restant à compiler/analyser | Flag booléen | `False` |
 | | `--quiet` | `-q` | Affiche uniquement le chiffre entier (idéal pour intégration dans des scripts bash) | Flag booléen | `False` |
