@@ -1,5 +1,5 @@
 import type { Pool } from 'pg'
-import { normalizeCardNameForMatch } from './cardResolutionService.js'
+import { normalizeCardNameForMatch, sanitizeCardData } from './cardResolutionService.js'
 
 export interface EngineCardFilter {
   category?: string | null
@@ -248,7 +248,7 @@ export function computeCardIntrinsicValue(card: EngineCardModel): number {
 
   let score = ROLE_INTRINSIC_SCORES[getCardRole(card)] ?? 68
 
-  if (card.identity?.isAceSpec) {
+  if (card.category !== 'POKEMON' && card.identity?.isAceSpec) {
     score += 18
   }
 
@@ -768,8 +768,8 @@ export class CardCatalogCache {
     const byCardId = new Map<string, EngineCardModel>()
 
     for (const row of result.rows) {
-      const model = row.data
-      if (!model) continue
+      if (!row.data) continue
+      const model = sanitizeCardData(row.data as unknown as Record<string, unknown>) as unknown as EngineCardModel
       const effectiveId = model.cardId || row.card_id
       models.push(model)
       byCardId.set(effectiveId, model)

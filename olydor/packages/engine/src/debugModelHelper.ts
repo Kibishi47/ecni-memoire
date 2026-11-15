@@ -1179,7 +1179,9 @@ export function buildHumanReadableAiBreakdown(
         : `Encadré Règle (${model.identity.prizeCardsGiven || 2} Récompenses)`,
     )
   }
-  if (model.identity.isAceSpec) traitBadges.push(lang === 'en' ? 'ACE SPEC (Max 1/deck)' : 'HIGH-TECH (Max 1/deck)')
+  if (model.category !== 'POKEMON' && model.identity.isAceSpec) {
+    traitBadges.push(lang === 'en' ? 'ACE SPEC (Max 1/deck)' : 'HIGH-TECH (Max 1/deck)')
+  }
   if (model.identity.isTera) traitBadges.push(lang === 'en' ? 'Tera Pokémon' : 'Téracristal')
   if (model.identity.isAncient) traitBadges.push(lang === 'en' ? 'Ancient' : 'Temps Passé')
   if (model.identity.isFuture) traitBadges.push(lang === 'en' ? 'Future' : 'Temps Futur')

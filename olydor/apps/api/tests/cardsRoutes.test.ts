@@ -3,6 +3,7 @@ import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 import { buildServer } from '../src/server.js'
 import type { EngineCardModel } from '../src/services/alternativesService.js'
+import { sanitizeCardData } from '../src/services/cardResolutionService.js'
 
 const sampleCards: Array<{
   card_id: string
@@ -456,5 +457,21 @@ describe('Cards API routes', () => {
     expect(largeBatch.headers['content-encoding']).toBe('gzip')
 
     await app.close()
+  })
+
+  it('sanitizeCardData strips erroneous isAceSpec=true from Pokémon cards while keeping Trainer/Energy ACE SPEC intact', () => {
+    const dirtyPokemon = sanitizeCardData({
+      cardId: 'sv06.5-040',
+      category: 'POKEMON',
+      identity: { nameFr: 'Genesect', isAceSpec: true },
+    })
+    expect((dirtyPokemon.identity as { isAceSpec: boolean }).isAceSpec).toBe(false)
+
+    const validAceSpecEnergy = sanitizeCardData({
+      cardId: 'sv08-191',
+      category: 'ENERGY',
+      identity: { nameFr: 'Énergie Enrichissante', isAceSpec: true },
+    })
+    expect((validAceSpecEnergy.identity as { isAceSpec: boolean }).isAceSpec).toBe(true)
   })
 })

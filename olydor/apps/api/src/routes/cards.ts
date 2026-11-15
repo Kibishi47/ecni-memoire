@@ -8,6 +8,7 @@ import {
   SQL_ACCENT_TARGET,
   resolveCardItems,
   resolvePtcglDeckText,
+  sanitizeCardData,
 } from '../services/cardResolutionService.js'
 import { parseWithZod } from './validation.js'
 
@@ -177,7 +178,7 @@ export async function registerCardRoutes(
     )
 
     return reply.status(200).send({
-      items: itemsResult.rows.map((row) => row.data),
+      items: itemsResult.rows.map((row) => sanitizeCardData(row.data)),
       total,
       limit: query.limit,
       offset: query.offset,
@@ -197,7 +198,7 @@ export async function registerCardRoutes(
 
     const dictionary: Record<string, Record<string, unknown>> = {}
     for (const row of result.rows) {
-      dictionary[row.card_id] = row.data
+      dictionary[row.card_id] = sanitizeCardData(row.data)
     }
 
     return reply.status(200).send(dictionary)
@@ -244,6 +245,6 @@ export async function registerCardRoutes(
       })
     }
 
-    return reply.status(200).send(result.rows[0]!.data)
+    return reply.status(200).send(sanitizeCardData(result.rows[0]!.data))
   })
 }

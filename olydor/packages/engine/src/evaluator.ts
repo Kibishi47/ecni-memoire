@@ -152,7 +152,7 @@ export function computeCardIntrinsicValue(card: EngineCardModel): number {
   else if (role === 'SECONDARY_ATTACKER') score = 82
   else if (role === 'DISRUPTION') score = 80
 
-  if (card.identity.isAceSpec) score += 18
+  if (card.category !== 'POKEMON' && card.identity.isAceSpec) score += 18
 
   let maxDmg = 0
   let utilityBonus = 0

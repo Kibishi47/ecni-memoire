@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import type { Pool } from 'pg'
 import { getBackendRoot } from '../config/env.js'
 import { closePool, getPool } from '../db/pool.js'
+import { sanitizeCardData } from '../services/cardResolutionService.js'
 
 const BATCH_SIZE = 100
 
@@ -94,7 +95,7 @@ export function extractCardsFromJson(parsed: unknown): NormalizedCardRow[] {
       nameFr,
       nameEn,
       setId,
-      data: raw,
+      data: sanitizeCardData(raw),
     })
   }
 

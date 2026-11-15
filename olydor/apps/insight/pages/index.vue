@@ -473,7 +473,7 @@ function handleAddCatalogCard(model: EngineCardModel) {
     const maxAllowed =
       existing.category === 'energy' && existing.subCategory === 'BASIC_ENERGY'
         ? 59
-        : model.identity.isAceSpec
+        : model.category !== 'POKEMON' && model.identity.isAceSpec
           ? 1
           : 4
     if (existing.quantity < maxAllowed) {
@@ -497,7 +497,7 @@ function handleReplaceCardInDeck(oldCardId: string, newModel: EngineCardModel) {
   const maxAllowed =
     newModel.category === 'ENERGY' && newModel.subCategory === 'BASIC_ENERGY'
       ? 59
-      : newModel.identity.isAceSpec
+      : newModel.category !== 'POKEMON' && newModel.identity.isAceSpec
         ? 1
         : 4
 

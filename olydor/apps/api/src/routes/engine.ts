@@ -106,7 +106,7 @@ export async function registerEngineRoutes(
         quantity: entry.quantity,
         setCode: entry.setCode,
         collectorNumber: entry.number,
-        isAceSpec: entry.model.identity.isAceSpec,
+        isAceSpec: entry.model.category !== 'POKEMON' && entry.model.identity.isAceSpec,
         aiRole: entry.model.strategicEvaluator.aiRole,
       })),
     })

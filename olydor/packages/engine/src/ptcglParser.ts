@@ -16,6 +16,22 @@ import { inferFormat, isCardLine, isSectionLine, isTotalLine, splitCardTokens } 
 import { detectBasicEnergy, isEnergyCardName } from './energy.js'
 import { lookupSetMapping } from './ptcglSetMapping.js'
 import { hasCompiledCardData, matchesCardFilter, normalizeCardNameForMatch, resolveCardModel } from './cardCatalog.js'
+import { normalizeCardModel } from './cardNormalizer.js'
+
+/**
+ * Determines whether a card model counts as a HIGH-TECH (ACE SPEC) card.
+ * Pokémon cards are never ACE SPEC even if their attack/ability text mentions ACE SPEC.
+ */
+function isModelAceSpec(model: EngineCardModel, includeNameFallback = false): boolean {
+  if (model.category === 'POKEMON') return false
+  if (model.identity.isAceSpec === true) return true
+  const rarityUpper = (model.identity.rarity || '').toUpperCase()
+  if (rarityUpper.includes('ACE SPEC') || rarityUpper.includes('HIGH-TECH')) return true
+  return (
+    includeNameFallback &&
+    /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr)
+  )
+}
 
 export type CardResolverFn = (
   items: ResolveCardItemInput[],
@@ -164,12 +180,7 @@ export function buildDeckEntryFromTokens(input: {
   const sectionCategory: DeckSectionCategory =
     model.category === 'POKEMON' ? 'pokemon' : model.category === 'TRAINER' ? 'trainer' : 'energy'
 
-  const isAceSpec =
-    model.category !== 'POKEMON' &&
-    (model.identity.isAceSpec === true ||
-      (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
-      (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH') ||
-      /attrape-suprême|prime catcher|tampon injuste|unfair stamp/i.test(model.identity.nameFr))
+  const isAceSpec = isModelAceSpec(model, true)
   const isRadiant = /radieux|radiant/i.test(model.identity.nameFr)
   const isEx = Boolean(model.pokemonStats?.isRuleBox)
   const isResolved = source === 'compiled_db' || source === 'native_basic_energy'
@@ -210,42 +221,45 @@ export function buildDeckEntryFromTokens(input: {
 }
 
 export function buildDeckEntryFromModel(model: EngineCardModel, quantity: number, lineIndex = 99): ParsedDeckEntry {
-  const mapping = lookupSetMapping(model.identity.setId)
-  const cleanNumber = stripLeadingZeros(model.identity.localId || '001')
+  const normalizedModel = normalizeCardModel(model)
+  const mapping = lookupSetMapping(normalizedModel.identity.setId)
+  const cleanNumber = stripLeadingZeros(normalizedModel.identity.localId || '001')
   const paddedNumber = padLocalNumber(cleanNumber)
   const sectionCategory: DeckSectionCategory =
-    model.category === 'POKEMON' ? 'pokemon' : model.category === 'TRAINER' ? 'trainer' : 'energy'
+    normalizedModel.category === 'POKEMON'
+      ? 'pokemon'
+      : normalizedModel.category === 'TRAINER'
+        ? 'trainer'
+        : 'energy'
 
   return {
-    uid: `${model.cardId}_${lineIndex}_${Date.now()}`,
+    uid: `${normalizedModel.cardId}_${lineIndex}_${Date.now()}`,
     quantity,
-    name: model.identity.nameFr,
-    nameFr: model.identity.nameFr,
-    nameEn: model.identity.nameEn || model.identity.nameFr,
+    name: normalizedModel.identity.nameFr,
+    nameFr: normalizedModel.identity.nameFr,
+    nameEn: normalizedModel.identity.nameEn || normalizedModel.identity.nameFr,
     setCode: mapping.ptcglCode,
     number: cleanNumber,
     paddedNumber,
     category: sectionCategory,
-    upperCategory: model.category,
-    subCategory: model.subCategory,
-    setId: model.identity.setId,
-    setName: model.identity.setName || mapping.nameFr,
+    upperCategory: normalizedModel.category,
+    subCategory: normalizedModel.subCategory,
+    setId: normalizedModel.identity.setId,
+    setName: normalizedModel.identity.setName || mapping.nameFr,
     serie: mapping.serie,
-    cardId: model.cardId,
-    unpaddedCardId: `${model.identity.setId}-${cleanNumber}`,
+    cardId: normalizedModel.cardId,
+    unpaddedCardId: `${normalizedModel.identity.setId}-${cleanNumber}`,
     ptcglId: `${mapping.ptcglCode}-${cleanNumber}`,
-    imageUrl: model.identity.imageUrl || `https://assets.tcgdex.net/fr/${mapping.serie}/${model.identity.setId}/${paddedNumber}`,
-    isAceSpec:
-      model.category !== 'POKEMON' &&
-      (model.identity.isAceSpec === true ||
-        (model.identity.rarity || '').toUpperCase().includes('ACE SPEC') ||
-        (model.identity.rarity || '').toUpperCase().includes('HIGH-TECH')),
-    isRadiant: /radieux|radiant/i.test(model.identity.nameFr),
-    isEx: Boolean(model.pokemonStats?.isRuleBox),
+    imageUrl:
+      normalizedModel.identity.imageUrl ||
+      `https://assets.tcgdex.net/fr/${mapping.serie}/${normalizedModel.identity.setId}/${paddedNumber}`,
+    isAceSpec: isModelAceSpec(normalizedModel),
+    isRadiant: /radieux|radiant/i.test(normalizedModel.identity.nameFr),
+    isEx: Boolean(normalizedModel.pokemonStats?.isRuleBox),
     line: lineIndex,
-    raw: `${quantity} ${model.identity.nameFr} ${mapping.ptcglCode} ${cleanNumber}`,
-    model: structuredClone(model),
-    resolvedFromSource: model.subCategory === 'BASIC_ENERGY' ? 'native_basic_energy' : 'compiled_db',
+    raw: `${quantity} ${normalizedModel.identity.nameFr} ${mapping.ptcglCode} ${cleanNumber}`,
+    model: normalizedModel,
+    resolvedFromSource: normalizedModel.subCategory === 'BASIC_ENERGY' ? 'native_basic_energy' : 'compiled_db',
     isResolved: true,
   }
 }
@@ -456,7 +470,7 @@ export function computeDeckSummary(
 
   // Règle stricte ACE SPEC : au maximum 1 seule carte ACE SPEC autorisée par deck
   const aceSpecCount = activeCards
-    .filter((c) => c.isAceSpec || c.model.identity.isAceSpec)
+    .filter((c) => c.isAceSpec || isModelAceSpec(c.model))
     .reduce((sum, c) => sum + c.quantity, 0)
 
   if (aceSpecCount > 1) {

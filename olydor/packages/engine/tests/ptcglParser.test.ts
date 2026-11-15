@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { decodeDeckFromUrl, encodeDeckForUrl, parsePtcglDecklist } from '../src/ptcglParser.js'
+import {
+  buildDeckEntryFromModel,
+  computeDeckSummary,
+  decodeDeckFromUrl,
+  encodeDeckForUrl,
+  parsePtcglDecklist,
+} from '../src/ptcglParser.js'
 import { exportDeckToPtcgl } from '../src/ptcglExporter.js'
 import { META_OPPONENT_DECKS } from '../src/metaDecks.js'
-import { getCompiledCardsCount, hasCompiledCardData, UNIFIED_CARD_REGISTRY } from '../src/cardCatalog.js'
+import {
+  getCompiledCardsCount,
+  hasCompiledCardData,
+  registerCompiledCard,
+  UNIFIED_CARD_REGISTRY,
+} from '../src/cardCatalog.js'
 
 describe('Catalogue EngineCardModel & Parseur PTCGL', () => {
   it('charge correctement cards_database.json et gère les énergies de base nativement', () => {
@@ -195,5 +206,34 @@ Total Cards: 60`
     expect(encoded).not.toContain('/')
     expect(encoded).not.toContain('=')
     expect(decodeDeckFromUrl(encoded)).toBe(sample)
+  })
+
+  it('ne compte jamais un Pokémon comme HIGH-TECH (ACE SPEC) même si le JSON brut porte isAceSpec: true', () => {
+    const rawGenesect = UNIFIED_CARD_REGISTRY['sv06.5-040']
+    expect(rawGenesect).toBeDefined()
+
+    // Simule un modèle brut non normalisé issu de JSON/PostgreSQL avec identity.isAceSpec=true sur un Pokémon
+    const dirtyGenesect = structuredClone(rawGenesect!)
+    dirtyGenesect.identity.isAceSpec = true
+    registerCompiledCard(dirtyGenesect)
+
+    const alakazamDeck = META_OPPONENT_DECKS.find((d) => d.name === 'Alakazam')!
+    const parsed = parsePtcglDecklist(alakazamDeck.ptcglText)
+    expect(parsed.totalCards).toBe(60)
+    expect(parsed.aceSpecCount).toBe(1)
+    expect(parsed.isValid60).toBe(true)
+    expect(parsed.warnings).toEqual([])
+
+    // Vérifie aussi la reconstruction via buildDeckEntryFromModel + computeDeckSummary avec modèle sale
+    const dirtyEntry = buildDeckEntryFromModel(dirtyGenesect, 1, 99)
+    expect(dirtyEntry.isAceSpec).toBe(false)
+    expect(dirtyEntry.model.identity.isAceSpec).toBe(false)
+
+    const rebuilt = computeDeckSummary([
+      ...parsed.cards.filter((c) => c.cardId !== 'sv06.5-040'),
+      dirtyEntry,
+    ])
+    expect(rebuilt.aceSpecCount).toBe(1)
+    expect(rebuilt.isValid60).toBe(true)
   })
 })

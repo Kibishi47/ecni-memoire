@@ -88,6 +88,32 @@ export function normalizeCardNameForMatch(rawName: string): string {
     .trim()
 }
 
+/**
+ * Sanitizes raw card JSON payloads before persisting or returning them via the API.
+ * Pokémon cards must never carry `identity.isAceSpec = true` even when attack/ability text mentions ACE SPEC.
+ */
+export function sanitizeCardData<T extends Record<string, unknown>>(rawCard: T): T {
+  const category = String(
+    rawCard.category ?? (rawCard.identity as Record<string, unknown> | undefined)?.category ?? '',
+  ).toUpperCase()
+  const identity = rawCard.identity
+  if (
+    category === 'POKEMON' &&
+    identity &&
+    typeof identity === 'object' &&
+    (identity as Record<string, unknown>).isAceSpec === true
+  ) {
+    return {
+      ...rawCard,
+      identity: {
+        ...(identity as Record<string, unknown>),
+        isAceSpec: false,
+      },
+    }
+  }
+  return rawCard
+}
+
 interface CardRow {
   card_id: string
   name_fr?: string
@@ -124,7 +150,7 @@ export async function resolveCardItems(
       [directCandidates],
     )
     for (const row of directRes.rows) {
-      directCardsById.set(row.card_id, row.data)
+      directCardsById.set(row.card_id, sanitizeCardData(row.data))
     }
   }
 
@@ -161,7 +187,7 @@ export async function resolveCardItems(
       [Array.from(aliasIdsToFetch)],
     )
     for (const row of aliasRes.rows) {
-      directCardsById.set(row.card_id, row.data)
+      directCardsById.set(row.card_id, sanitizeCardData(row.data))
     }
   }
 
@@ -222,17 +248,18 @@ export async function resolveCardItems(
     )
 
     for (const row of nameRes.rows) {
-      directCardsById.set(row.card_id, row.data)
+      const sanitized = sanitizeCardData(row.data)
+      directCardsById.set(row.card_id, sanitized)
       if (row.name_fr) {
         const normFr = normalizeCardNameForMatch(row.name_fr)
         if (!cardsByNormalizedFr.has(normFr)) {
-          cardsByNormalizedFr.set(normFr, row.data)
+          cardsByNormalizedFr.set(normFr, sanitized)
         }
       }
       if (row.name_en) {
         const normEn = normalizeCardNameForMatch(row.name_en)
         if (!cardsByNormalizedEn.has(normEn)) {
-          cardsByNormalizedEn.set(normEn, row.data)
+          cardsByNormalizedEn.set(normEn, sanitized)
         }
       }
     }
