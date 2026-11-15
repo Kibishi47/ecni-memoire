@@ -112,6 +112,7 @@ export interface ShardCardCounter {
   turnsStuckDeadInHand: number
   gamesAllCopiesPrized: number
   winsWhenAllPrized: number
+  drawsWhenAllPrized?: number
 }
 
 export interface ShardComboCounter {
@@ -454,6 +455,7 @@ export function createShardTelemetryAccumulator(
         turnsStuckDeadInHand: 0,
         gamesAllCopiesPrized: 0,
         winsWhenAllPrized: 0,
+        drawsWhenAllPrized: 0,
       }
     }
   }
@@ -628,6 +630,14 @@ function collectInPlayCardIds(
 }
 
 /**
+ * Calcule un pourcentage de taux de victoire où chaque match nul (`DRAW`) vaut 0,5 victoire :
+ * `(wins + 0.5 * draws) / totalGames * 100`, arrondi à 0,1 % près.
+ */
+function computeWinRatePct(wins: number, draws: number, totalGames: number): number {
+  return totalGames > 0 ? Math.round(((wins + 0.5 * draws) / totalGames) * 1000) / 10 : 0
+}
+
+/**
  * Joue une partie complète de Pokémon TCG du Tour 1 jusqu'à la victoire ou `config.maxTurns`.
  */
 export function playFullGame(
@@ -638,13 +648,15 @@ export function playFullGame(
   config: SimulationConfig,
   recordTrace: boolean,
   telemetryAcc?: ShardTelemetryAccumulator,
+  matchupGameIndex?: number,
 ): SingleGameOutcome {
+  const parityIndex = matchupGameIndex ?? gameIndex
   const firstPlayerIndex: 0 | 1 =
     config.firstPlayerMode === 'PLAYER'
       ? 0
       : config.firstPlayerMode === 'OPPONENT'
         ? 1
-        : gameIndex % 2 === 0
+        : parityIndex % 2 === 0
           ? 0
           : 1
 
@@ -1025,8 +1037,12 @@ export function playFullGame(
         counter.gamesDiscardedUnused += 1
       }
       counter.turnsStuckDeadInHand += deadTurnsByCardId.get(cardId) ?? 0
-      if (allPrizedCardIds.has(cardId) && state.winner === 'PLAYER') {
-        counter.winsWhenAllPrized += 1
+      if (allPrizedCardIds.has(cardId)) {
+        if (state.winner === 'PLAYER') {
+          counter.winsWhenAllPrized += 1
+        } else if (state.winner === 'DRAW') {
+          counter.drawsWhenAllPrized = (counter.drawsWhenAllPrized ?? 0) + 1
+        }
       }
     }
 
@@ -1112,6 +1128,7 @@ export function runSimulationShard(
   for (let i = 0; i < input.gameCount; i++) {
     const globalGameIdx = input.startGameIndex + i
     const oppDeck = input.opponentDecks[globalGameIdx % oppCount]!
+    const matchupGameIdx = Math.floor(globalGameIdx / oppCount)
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
     const shouldTrace = Boolean(input.config.debugMode) && globalGameIdx < MAX_TRACED_GAMES
 
@@ -1124,6 +1141,7 @@ export function runSimulationShard(
         input.config,
         shouldTrace,
         telemetry,
+        matchupGameIdx,
       )
 
       outcomes.push(outcome)
@@ -1197,6 +1215,8 @@ export function mergeSimulationShards(
           existing.turnsStuckDeadInHand += c.turnsStuckDeadInHand
           existing.gamesAllCopiesPrized += c.gamesAllCopiesPrized
           existing.winsWhenAllPrized += c.winsWhenAllPrized
+          existing.drawsWhenAllPrized =
+            (existing.drawsWhenAllPrized ?? 0) + (c.drawsWhenAllPrized ?? 0)
         }
       }
 
@@ -1253,8 +1273,10 @@ export function mergeSimulationShards(
 
   let gamesGoingFirst = 0
   let winsGoingFirst = 0
+  let drawsGoingFirst = 0
   let gamesGoingSecond = 0
   let winsGoingSecond = 0
+  let drawsGoingSecond = 0
   let turn1AttackOrItemLockCountJ2 = 0
   let turn1ItemLockCountJ2 = 0
 
@@ -1341,9 +1363,11 @@ export function mergeSimulationShards(
     if (o.firstPlayerIndex === 0) {
       gamesGoingFirst++
       if (o.winner === 'PLAYER') winsGoingFirst++
+      else if (o.winner === 'DRAW') drawsGoingFirst++
     } else {
       gamesGoingSecond++
       if (o.winner === 'PLAYER') winsGoingSecond++
+      else if (o.winner === 'DRAW') drawsGoingSecond++
       if (o.hadJ2Turn1AttackOrLock) turn1AttackOrItemLockCountJ2++
       if (o.hadJ2Turn1ItemLock) turn1ItemLockCountJ2++
     }
@@ -1370,14 +1394,14 @@ export function mergeSimulationShards(
     wins: b.wins,
     losses: b.losses,
     draws: b.draws,
-    winRate: b.games > 0 ? Math.round((b.wins / b.games) * 1000) / 10 : 0,
+    winRate: computeWinRatePct(b.wins, b.draws, b.games),
     avgPlayerPrizesWon: b.games > 0 ? Math.round((b.playerPrizes / b.games) * 100) / 100 : 0,
     avgOpponentPrizesWon: b.games > 0 ? Math.round((b.opponentPrizes / b.games) * 100) / 100 : 0,
   }))
 
   const safeDurationSec = Math.max(0.001, totalDurationMs / 1000)
   const gamesPerSecond = Math.round((totalGames / safeDurationSec) * 10) / 10
-  const globalWinRate = totalGames > 0 ? Math.round((wins / totalGames) * 1000) / 10 : 0
+  const globalWinRate = computeWinRatePct(wins, draws, totalGames)
 
   // Calcul final de `cardTelemetry`
   const cardTelemetry: Record<string, CardUsageMetrics> = {}
@@ -1386,7 +1410,7 @@ export function mergeSimulationShards(
     const gamesInDeck = Math.max(1, c.gamesInDeck)
     const winRateWhenAllPrized =
       c.gamesAllCopiesPrized > 0
-        ? Math.round((c.winsWhenAllPrized / c.gamesAllCopiesPrized) * 1000) / 10
+        ? computeWinRatePct(c.winsWhenAllPrized, c.drawsWhenAllPrized ?? 0, c.gamesAllCopiesPrized)
         : globalWinRate
     const winRateImpactWhenAllPrized =
       c.gamesAllCopiesPrized > 0
@@ -1499,12 +1523,10 @@ export function mergeSimulationShards(
   const turnOrderSplitStats: TurnOrderSplitStats = {
     gamesGoingFirst,
     winsGoingFirst,
-    winRateGoingFirst:
-      gamesGoingFirst > 0 ? Math.round((winsGoingFirst / gamesGoingFirst) * 1000) / 10 : 0,
+    winRateGoingFirst: computeWinRatePct(winsGoingFirst, drawsGoingFirst, gamesGoingFirst),
     gamesGoingSecond,
     winsGoingSecond,
-    winRateGoingSecond:
-      gamesGoingSecond > 0 ? Math.round((winsGoingSecond / gamesGoingSecond) * 1000) / 10 : 0,
+    winRateGoingSecond: computeWinRatePct(winsGoingSecond, drawsGoingSecond, gamesGoingSecond),
     turn1AttackOrItemLockCountJ2,
     turn1AttackOrItemLockRateJ2:
       gamesGoingSecond > 0
@@ -1517,7 +1539,7 @@ export function mergeSimulationShards(
         : 0,
   }
 
-  const pWinRate = totalGames > 0 ? wins / totalGames : 0
+  const pWinRate = totalGames > 0 ? (wins + 0.5 * draws) / totalGames : 0
   const marginOfErrorPct =
     totalGames > 0
       ? Math.round(1.96 * Math.sqrt((pWinRate * (1 - pWinRate)) / totalGames) * 1000) / 10

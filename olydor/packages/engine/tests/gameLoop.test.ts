@@ -178,4 +178,101 @@ describe('GameLoop — Full Match Simulation, 8 Mandatory KPIs & Traced Debug Mo
     expect(summary.marginOfErrorPct).toBeGreaterThanOrEqual(0)
     expect(Object.keys(summary.cardTelemetry)).toHaveLength(0)
   })
+
+  it('alternates firstPlayerIndex cleanly per opponent when oppCount is even in RANDOM mode', () => {
+    const playerDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const playerModels = expandParsedDeckToModels(playerDeck)
+    const opponentDecks = resolveOpponentDescriptors([
+      META_OPPONENT_DECKS[0]!.id,
+      META_OPPONENT_DECKS[1]!.id,
+    ])
+
+    const config: SimulationConfig = {
+      iterations: 4,
+      maxTurns: 4,
+      maxBranches: 4,
+      selectedOpponentIds: opponentDecks.map((d) => d.id),
+      firstPlayerMode: 'RANDOM',
+      workerCount: 1,
+      fixedSeed: 4242,
+      perturbationType: 'NONE',
+      perturbationTurn: 3,
+      lookaheadPly: 1,
+      collectDetailedTelemetry: false,
+    }
+
+    const shard = runSimulationShard({
+      shardId: 0,
+      startGameIndex: 0,
+      gameCount: 4,
+      baseSeed: 4242,
+      config,
+      playerDeckModels: playerModels,
+      opponentDecks,
+    })
+
+    for (const opp of opponentDecks) {
+      const oppGames = shard.outcomes.filter((o) => o.opponentId === opp.id)
+      expect(oppGames).toHaveLength(2)
+      expect(oppGames.filter((o) => o.firstPlayerIndex === 0)).toHaveLength(1)
+      expect(oppGames.filter((o) => o.firstPlayerIndex === 1)).toHaveLength(1)
+    }
+  })
+
+  it('computes global, matchup and turn-order win rates using (wins + 0.5 * draws) / totalGames', () => {
+    const playerDeck = parsePtcglDecklist(META_OPPONENT_DECKS[0]!.ptcglText)
+    const playerModels = expandParsedDeckToModels(playerDeck)
+    const opponentDecks = resolveOpponentDescriptors([
+      META_OPPONENT_DECKS[0]!.id,
+      META_OPPONENT_DECKS[1]!.id,
+    ])
+
+    const config: SimulationConfig = {
+      iterations: 4,
+      maxTurns: 2,
+      maxBranches: 4,
+      selectedOpponentIds: opponentDecks.map((d) => d.id),
+      firstPlayerMode: 'RANDOM',
+      workerCount: 1,
+      fixedSeed: 7777,
+      perturbationType: 'NONE',
+      perturbationTurn: 3,
+      lookaheadPly: 1,
+      collectDetailedTelemetry: false,
+    }
+
+    const shard = runSimulationShard({
+      shardId: 0,
+      startGameIndex: 0,
+      gameCount: 4,
+      baseSeed: 7777,
+      config,
+      playerDeckModels: playerModels,
+      opponentDecks,
+    })
+
+    const baseOutcome = shard.outcomes[0]!
+    shard.outcomes = [
+      { ...baseOutcome, gameIndex: 0, opponentId: opponentDecks[0]!.id, firstPlayerIndex: 0, winner: 'PLAYER' },
+      { ...baseOutcome, gameIndex: 1, opponentId: opponentDecks[1]!.id, firstPlayerIndex: 0, winner: 'DRAW', winReason: 'MAX_TURNS_REACHED' },
+      { ...baseOutcome, gameIndex: 2, opponentId: opponentDecks[0]!.id, firstPlayerIndex: 1, winner: 'DRAW', winReason: 'MAX_TURNS_REACHED' },
+      { ...baseOutcome, gameIndex: 3, opponentId: opponentDecks[1]!.id, firstPlayerIndex: 1, winner: 'OPPONENT' },
+    ]
+
+    const summary = mergeSimulationShards([shard], opponentDecks, config, 7777, 100)
+    // Global: 1 win + 2 draws out of 4 -> (1 + 0.5*2) / 4 = 50%
+    expect(summary.wins).toBe(1)
+    expect(summary.losses).toBe(1)
+    expect(summary.draws).toBe(2)
+    expect(summary.globalWinRate).toBe(50)
+
+    // Matchup 0: 1 win + 1 draw out of 2 -> (1 + 0.5*1) / 2 = 75%
+    // Matchup 1: 0 win + 1 draw out of 2 -> (0 + 0.5*1) / 2 = 25%
+    expect(summary.matchupBreakdown[0]!.winRate).toBe(75)
+    expect(summary.matchupBreakdown[1]!.winRate).toBe(25)
+
+    // Turn order splits: Going first = 1W + 1D / 2 = 75%; Going second = 0W + 1D / 2 = 25%
+    expect(summary.turnOrderSplitStats.winRateGoingFirst).toBe(75)
+    expect(summary.turnOrderSplitStats.winRateGoingSecond).toBe(25)
+  })
 })
