@@ -1,0 +1,30 @@
+# Name: Branette / Sinistrail | Archetype: Défausse & Cachette en Douce
+Pokémon: 25
+4 Poltchageist PBL 5
+2 Sinistcha PBL 6
+4 Dhelmise PBL 39
+3 Dunsparce JTG 120
+2 Dudunsparce TEF 129
+2 Shuppet PBL 33
+4 Banette PBL 34
+2 Lillie's Clefairy ex JTG 56
+1 Bloodmoon Ursaluna ex TWM 141
+1 Latias ex SSP 76
+
+Trainer: 28
+4 Lillie's Determination MEG 119
+4 Gwynn PBL 78
+3 Boss's Orders MEG 114
+2 Explorer's Guidance TEF 147
+1 Black Belt's Training JTG 143
+4 Ultra Ball MEG 131
+4 Poké Pad POR 81
+3 Night Stretcher ASC 196
+3 Prism Tower CRI 80
+
+Energy: 7
+4 Telepathic Psychic Energy POR 88
+2 Psychic Energy MEE 13
+1 Legacy Energy TWM 167
+
+Total Cards: 60

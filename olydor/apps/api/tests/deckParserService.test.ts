@@ -63,7 +63,7 @@ Total Cards: 10
 
   it('parses all meta_decks/*.txt files to exactly 60 cards without warnings', () => {
     const files = fs.readdirSync(META_DECKS_DIR).filter((f) => f.endsWith('.txt'))
-    expect(files.length).toBeGreaterThanOrEqual(3)
+    expect(files.length).toBe(5)
 
     for (const file of files) {
       const content = fs.readFileSync(path.join(META_DECKS_DIR, file), 'utf8')
