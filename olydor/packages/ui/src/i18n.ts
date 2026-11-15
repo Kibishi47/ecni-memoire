@@ -126,7 +126,7 @@ export const uiTranslations = {
       'Avant de lancer vos premières simulations, voici pourquoi cette plateforme existe, pourquoi elle est encore en Alpha et comment votre aide fait la différence.',
     onboardingGoalTitle: 'Le projet & son objectif',
     onboardingGoalBody:
-      'Olydor est un laboratoire d’analyse compétitive pour le Pokémon TCG : un simulateur Monte-Carlo exécuté localement dans votre navigateur pour mesurer stabilité, sorties T1/T2, courbes de dégâts et comparer des variantes de decklists (A/B).',
+      'Olydor est un laboratoire d’analyse compétitive lancé sur le Pokémon TCG, avec pour ambition d’accueillir d’autres TCG à l’avenir : un simulateur Monte-Carlo exécuté localement dans votre navigateur pour mesurer stabilité, sorties T1/T2, courbes de dégâts et comparer des variantes de decklists (A/B).',
     onboardingWhyAlphaTitle: 'Pourquoi est-ce en Alpha ?',
     onboardingWhyAlphaBody:
       'Le moteur de décision de l’IA (Pythia) n’est pas encore assez fort et doit être profondément retravaillé. Certaines séquences de cartes et interactions avancées peuvent donc produire des coups sous-optimaux ou des imprécisions : prenez les statistiques actuelles comme un prototype expérimental.',
@@ -138,7 +138,7 @@ export const uiTranslations = {
 
     // Footer
     footerDesc:
-      'Écosystème d’analyse compétitive Pokémon TCG : simulateur Monte-Carlo haute vélocité et laboratoire d’optimisation de decklists.',
+      'Écosystème d’analyse compétitive Pokémon TCG (et d’autres TCG à venir) : simulateur Monte-Carlo haute vélocité et laboratoire d’optimisation de decklists.',
     footerPlatformsHeading: 'Plateforme',
     footerHubLink: 'Hub — olydor.app',
     footerInsightLink: 'Insight & Simulateur — insight.olydor.app',
@@ -260,7 +260,7 @@ export const uiTranslations = {
       'Before running your first simulations, here is what this project aims to build, why it is currently in Alpha, and how your feedback helps.',
     onboardingGoalTitle: 'The Project & Goal',
     onboardingGoalBody:
-      'Olydor is a competitive Pokémon TCG analytics workbench: a local browser Monte Carlo simulator designed to measure decklist consistency, T1/T2 setup odds, damage output, and A/B tech comparisons.',
+      'Olydor is a competitive TCG analytics workbench starting with Pokémon TCG, with additional TCGs planned in the future: a local browser Monte Carlo simulator designed to measure decklist consistency, T1/T2 setup odds, damage output, and A/B tech comparisons.',
     onboardingWhyAlphaTitle: 'Why is it in Alpha?',
     onboardingWhyAlphaBody:
       'The decision AI (Pythia) is not strong enough yet and needs a deep rework. Some card mechanics and complex edge cases can also cause suboptimal plays or inaccuracies—please treat current numbers as an experimental prototype.',
@@ -272,7 +272,7 @@ export const uiTranslations = {
 
     // Footer
     footerDesc:
-      'High-throughput Monte Carlo simulator and deck optimization platform built for competitive Pokémon TCG Standard analysis.',
+      'High-throughput Monte Carlo simulator and deck optimization platform starting with Pokémon TCG Standard analysis, with other TCGs coming in the future.',
     footerPlatformsHeading: 'Ecosystem',
     footerHubLink: 'Hub — olydor.app',
     footerInsightLink: 'Insight Simulator — insight.olydor.app',

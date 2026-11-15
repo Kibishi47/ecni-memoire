@@ -111,11 +111,13 @@ describe('@olydor/ui Design System & Shared Components', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="alpha-onboarding-modal"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Bienvenue sur l’Alpha d’Olydor')
+    expect(wrapper.text()).toContain('d’autres TCG à l’avenir')
 
     await wrapper.find('[data-testid="onboarding-lang-en"]').trigger('click')
     expect(currentOlydorLang.value).toBe('en')
     expect(wrapper.emitted('update:lang')?.[0]).toEqual(['en'])
     expect(wrapper.text()).toContain('Welcome to the Olydor Alpha')
+    expect(wrapper.text()).toContain('additional TCGs planned in the future')
     expect(wrapper.text()).toContain('not strong enough yet')
 
     await wrapper.find('[data-testid="onboarding-dismiss-btn"]').trigger('click')

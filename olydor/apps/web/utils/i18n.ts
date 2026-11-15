@@ -5,7 +5,7 @@ export const webTranslations = {
   fr: {
     heroSubtitle: 'Ne devinez plus la méta. Simulez chaque branche.',
     heroDescription:
-      'Évaluez vos decklists de 60 cartes sur des centaines de parties parallélisées dans votre navigateur, identifiez vos tours morts et optimisez chaque slot grâce à l’atelier comparatif A/B.',
+      'Évaluez vos decklists de 60 cartes sur des centaines de parties parallélisées dans votre navigateur, identifiez vos tours morts et optimisez chaque slot grâce à l’atelier comparatif A/B. Pensé d’abord pour Pokémon TCG, avec d’autres TCG ajoutés à l’avenir.',
     heroLaunchSim: 'Lancer le Simulateur',
     heroArenaDisabled: 'Arène 1v1 vs Bot Pythia — Bientôt disponible',
     soonBadge: 'SOON',
@@ -79,7 +79,7 @@ export const webTranslations = {
   en: {
     heroSubtitle: 'Stop guessing the meta. Simulate every branch.',
     heroDescription:
-      'Stress-test your 60-card lists across hundreds of multi-threaded Web Worker games against meta archetypes, pinpoint consistency bricks, and optimize card slots with A/B simulation.',
+      'Stress-test your 60-card lists across hundreds of multi-threaded Web Worker games against meta archetypes, pinpoint consistency bricks, and optimize card slots with A/B simulation. Launching with Pokémon TCG, with additional TCGs planned for the future.',
     heroLaunchSim: 'Launch Simulator',
     heroArenaDisabled: '1v1 Arena vs Pythia Bot — Coming Soon',
     soonBadge: 'SOON',
