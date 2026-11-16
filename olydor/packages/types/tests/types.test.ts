@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createReportBodySchema, isCardStandardLegal } from '../src/index.js'
+import {
+  createReportBodySchema,
+  isCardStandardLegal,
+  isSetStandardOverridden,
+  STANDARD_ALLOWED_REGULATION_MARKS,
+} from '../src/index.js'
 
 describe('@olydor/types', () => {
   it('validates CARD_MODEL_ERROR, ENGINE_RULE_ERROR, and WEBSITE_ERROR payloads with Zod', () => {
@@ -52,5 +57,23 @@ describe('@olydor/types', () => {
         identity: { legalStandard: false, regulationMark: 'A', subCategory: 'BASIC_ENERGY' },
       }),
     ).toBe(true)
+    expect(STANDARD_ALLOWED_REGULATION_MARKS.has('J')).toBe(true)
+    expect(isSetStandardOverridden(null)).toBe(false)
+    expect(
+      isCardStandardLegal(
+        {
+          identity: { legalStandard: false, regulationMark: null, subCategory: 'BASIC', setId: 'me05' },
+        },
+        ['ME05'],
+      ),
+    ).toBe(true)
+    expect(
+      isCardStandardLegal(
+        {
+          identity: { legalStandard: false, regulationMark: null, subCategory: 'BASIC', setId: 'sv01' },
+        },
+        ['me05'],
+      ),
+    ).toBe(false)
   })
 })

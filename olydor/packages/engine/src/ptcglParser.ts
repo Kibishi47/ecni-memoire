@@ -516,13 +516,13 @@ export function computeDeckSummary(
     }
   }
 
-  // Validation de légalité Standard (marques de régulation G, H, I ou Énergies de base)
+  // Validation de légalité Standard (marques G/H/I/J, extensions autorisées ou Énergies de base)
   const illegalStandardCards = activeCards.filter((c) => !isCardStandardLegal(c.model))
   if (illegalStandardCards.length > 0) {
     const illegalCount = illegalStandardCards.reduce((sum, c) => sum + c.quantity, 0)
     warnings.push({
-      message: `Le deck contient ${illegalCount} carte(s) non légales au format Standard (seules les marques de régulation G, H, I et les Énergies de base sont autorisées).`,
-      messageEn: `Deck contains ${illegalCount} card(s) not legal in Standard format (only regulation marks G, H, I and Basic Energies are allowed).`,
+      message: `Le deck contient ${illegalCount} carte(s) non légales au format Standard (seules les marques de régulation G, H, I, J, les extensions autorisées et les Énergies de base sont acceptées).`,
+      messageEn: `Deck contains ${illegalCount} card(s) not legal in Standard format (only regulation marks G, H, I, J, allowed sets, and Basic Energies are accepted).`,
     })
   }
 

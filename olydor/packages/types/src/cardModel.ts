@@ -2,6 +2,8 @@
  * Contrat de données strict `EngineCardModel` aligné à 100 % sur `tools/card-compiler/compiler/schemas.py`.
  */
 
+import legalOverrides from './legalOverrides.json' with { type: 'json' }
+
 export type CardCategory = 'POKEMON' | 'TRAINER' | 'ENERGY'
 
 export type CardSubCategory =
@@ -360,13 +362,56 @@ export type PreconditionType =
   | 'HAND_MAX_OTHER_CARDS_ZERO'
 
 /**
- * Règle de légalité Standard avec correctif pour le marquage TCGdex.
+ * Extensions autorisées en Standard même si TCGdex indique `legal.standard = false`
+ * (source de vérité partagée avec `tools/card-compiler` via `legalOverrides.json`).
  */
-export function isCardStandardLegal(card: {
-  identity: Pick<CardIdentity, 'legalStandard' | 'regulationMark' | 'subCategory'>
-}): boolean {
+export const STANDARD_ALLOWED_SET_IDS: ReadonlySet<string> = new Set(
+  (legalOverrides.standardAllowedSetIds ?? [])
+    .map((id) => String(id).trim().toLowerCase())
+    .filter(Boolean),
+)
+
+/**
+ * Marques de régulation considérées légales au format Standard.
+ */
+export const STANDARD_ALLOWED_REGULATION_MARKS: ReadonlySet<string> = new Set(
+  (legalOverrides.standardAllowedRegulationMarks ?? [])
+    .map((mark) => String(mark).trim().toUpperCase())
+    .filter(Boolean),
+)
+
+/**
+ * Indique si une extension (`setId`) est explicitement autorisée en Standard via `legalOverrides.json`.
+ */
+export function isSetStandardOverridden(setId?: string | null): boolean {
+  if (!setId) return false
+  return STANDARD_ALLOWED_SET_IDS.has(String(setId).trim().toLowerCase())
+}
+
+/**
+ * Règle de légalité Standard avec correctif pour le marquage TCGdex et les overrides d'extensions.
+ */
+export function isCardStandardLegal(
+  card: {
+    identity: Pick<CardIdentity, 'legalStandard' | 'regulationMark' | 'subCategory'> & {
+      setId?: string | null
+    }
+  },
+  extraAllowedSetIds?: Iterable<string>,
+): boolean {
   if (card.identity.legalStandard === true) return true
   if (card.identity.subCategory === 'BASIC_ENERGY') return true
-  const mark = (card.identity.regulationMark || '').toUpperCase()
-  return mark === 'G' || mark === 'H' || mark === 'I' || mark === 'J'
+  if (isSetStandardOverridden(card.identity.setId)) return true
+  if (extraAllowedSetIds && card.identity.setId) {
+    const normalizedSetId = String(card.identity.setId).trim().toLowerCase()
+    if (normalizedSetId) {
+      for (const candidate of extraAllowedSetIds) {
+        if (String(candidate).trim().toLowerCase() === normalizedSetId) {
+          return true
+        }
+      }
+    }
+  }
+  const mark = (card.identity.regulationMark || '').trim().toUpperCase()
+  return STANDARD_ALLOWED_REGULATION_MARKS.has(mark)
 }

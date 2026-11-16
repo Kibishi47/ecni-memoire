@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, Field
 
+from compiler.legal_overrides import is_set_standard_overridden, load_legal_overrides
 from compiler.schemas import (
     AIRole,
     ActionType,
@@ -590,6 +591,7 @@ def build_identity_and_stats_from_raw(
     raw_fr: Dict[str, Any],
     raw_en: Optional[Dict[str, Any]] = None,
     evolution_info: Optional[Tuple[Optional[str], Optional[str], List[str]]] = None,
+    force_standard: bool = False,
 ) -> Tuple[CardIdentity, Optional[PokemonStats]]:
     """Construit de façon 100 % déterministe `CardIdentity` et `PokemonStats`."""
     category, sub_category = infer_category_and_subcategory(raw_fr, raw_en)
@@ -604,11 +606,14 @@ def build_identity_and_stats_from_raw(
     reg_mark = raw_fr.get("regulationMark") or (raw_en or {}).get("regulationMark")
     reg_mark_norm = str(reg_mark).strip().upper() if reg_mark else None
 
+    overrides = load_legal_overrides()
     legal_obj = raw_fr.get("legal") if isinstance(raw_fr.get("legal"), dict) else {}
     legal_standard = bool(
-        legal_obj.get("standard", False)
-        or (reg_mark_norm in {"G", "H", "I", "J"})
+        force_standard
+        or legal_obj.get("standard", False)
+        or (reg_mark_norm in overrides.standard_allowed_regulation_marks if reg_mark_norm else False)
         or (sub_category == CardSubCategory.BASIC_ENERGY)
+        or is_set_standard_overridden(set_id, overrides=overrides)
     )
     legal_expanded = bool(legal_obj.get("expanded", False) or legal_standard)
 

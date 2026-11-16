@@ -46,6 +46,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from compiler.legal_overrides import load_legal_overrides
 from compiler.llm_engine import (
     DEFAULT_MODEL_FILENAME,
     DEFAULT_MODEL_REPO_ID,
@@ -238,6 +239,39 @@ def resolve_card_ids(
     return list(dict.fromkeys(collected))
 
 
+def _resolve_cached_or_live_standard_ids(data_dir: Path, fetcher: TCGdexFetcher) -> List[str]:
+    """Résout la liste des IDs Standard (cache `_cards_standard_index.json` ou API + `legalOverrides.json`)."""
+    std_index_path = data_dir / "raw_tcgdex" / "_cards_standard_index.json"
+    cached_ids: List[str] = []
+    if std_index_path.exists():
+        try:
+            cached_std = json.loads(std_index_path.read_text(encoding="utf-8"))
+            cached_ids = [
+                str(c.get("id")).strip()
+                for c in cached_std
+                if isinstance(c, dict) and c.get("id")
+            ]
+        except Exception:
+            cached_ids = []
+
+    if cached_ids:
+        overrides = load_legal_overrides()
+        if not overrides.standard_allowed_set_ids:
+            return cached_ids
+
+        async def _merge_overrides() -> List[str]:
+            async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, follow_redirects=True) as client:
+                return await fetcher.merge_standard_override_ids(client, cached_ids)
+
+        return asyncio.run(_merge_overrides())
+
+    async def _resolve_std() -> List[str]:
+        async with httpx.AsyncClient(timeout=fetcher.timeout_seconds, follow_redirects=True) as client:
+            return await fetcher.resolve_standard_card_ids(client)
+
+    return asyncio.run(_resolve_std())
+
+
 def get_remaining_cards_summary(
     data_dir: Path,
     mode: str = "standard",
@@ -314,23 +348,7 @@ def get_remaining_cards_summary(
                     return [str(c.get("id")).strip() for c in idx if isinstance(c, dict) and c.get("id")]
             target_ids = asyncio.run(_fetch_all())
     else:
-        # Mode standard par défaut : vérifie d'abord le cache local _cards_standard_index.json
-        std_index_path = data_dir / "raw_tcgdex" / "_cards_standard_index.json"
-        if std_index_path.exists():
-            try:
-                cached_std = json.loads(std_index_path.read_text(encoding="utf-8"))
-                target_ids = [
-                    str(c.get("id")).strip()
-                    for c in cached_std
-                    if isinstance(c, dict) and c.get("id")
-                ]
-            except Exception:
-                target_ids = []
-        if not target_ids:
-            async def _resolve_std():
-                async with httpx.AsyncClient() as client:
-                    return await fetcher.resolve_standard_card_ids(client)
-            target_ids = asyncio.run(_resolve_std())
+        target_ids = _resolve_cached_or_live_standard_ids(data_dir, fetcher)
 
     # Application du filtre par extension / set
     if set_filter and not parsed_sets:
@@ -670,6 +688,7 @@ def _execute_run_pipeline(
     batch_size: Optional[int] = None,
     max_tokens: Optional[int] = None,
     sets: Optional[Union[str, List[str]]] = None,
+    force_standard: bool = False,
 ) -> None:
     """Implémentation partagée pour les commandes `run`, `compile` et `compile-sets`."""
     eff_batch_size = batch_size if isinstance(batch_size, int) else None
@@ -717,13 +736,25 @@ def _execute_run_pipeline(
     data_dir = get_data_dir()
     compiled_dir = data_dir / "compiled_cards"
 
+    overrides = load_legal_overrides()
+    override_sets_hint = (
+        f" + overrides {', '.join(sorted(overrides.standard_allowed_set_ids)).upper()}"
+        if overrides.standard_allowed_set_ids
+        else ""
+    )
+    force_std_hint = ", legalStandard forcé" if force_standard else ""
+
     mode_label = (
-        f"IDs personnalisés ({len(custom_ids)} carte(s) unique(s))"
+        f"IDs personnalisés ({len(custom_ids)} carte(s) unique(s){force_std_hint})"
         if custom_ids
         else (
-            f"Extensions {', '.join(s.upper() for s in parsed_sets)} (legal.standard ignoré)"
+            f"Extensions {', '.join(s.upper() for s in parsed_sets)} ({'legalStandard forcé' if force_standard else 'legal.standard ignoré'})"
             if parsed_sets
-            else (f"Standard (limite={limit or 'toutes'})" if effective_mode == "standard" else f"Test ({len(TEST_CARD_IDS)} cartes de référence)")
+            else (
+                f"Standard (limite={limit or 'toutes'}{override_sets_hint}{force_std_hint})"
+                if effective_mode == "standard"
+                else f"Test ({len(TEST_CARD_IDS)} cartes de référence{force_std_hint})"
+            )
         )
     )
 
@@ -856,6 +887,7 @@ def _execute_run_pipeline(
             "custom_ids": custom_ids,
             "force": False,
             "standard_limit": limit,
+            "force_standard": force_standard,
         }
         if parsed_sets:
             fetch_kwargs["set_ids"] = parsed_sets
@@ -1444,6 +1476,11 @@ def run_command(
         envvar=["REASONING_MAX_TOKENS"],
         help="Nombre maximum de tokens générés en Passe 1 (défaut: 8192 ou REASONING_MAX_TOKENS).",
     ),
+    force_standard: bool = typer.Option(
+        False,
+        "--force-standard",
+        help="Force `identity.legalStandard = True` sur les cartes compilées (utile avec `--sets` / `--set` lorsque `legal.standard=false`).",
+    ),
 ) -> None:
     """Exécute le pipeline complet d'extraction TCGdex et de compilation LLM sous contrainte GBNF."""
     effective_thinking = "null" if no_think else thinking
@@ -1473,6 +1510,7 @@ def run_command(
         batch_size=batch_size,
         max_tokens=max_tokens,
         sets=sets,
+        force_standard=force_standard,
     )
 
 
@@ -1588,6 +1626,11 @@ def compile_alias(
         envvar=["PIPELINE_PHASE"],
         help="Phase en mode two_pass : 'all', 'reason', 'code'.",
     ),
+    force_standard: bool = typer.Option(
+        False,
+        "--force-standard",
+        help="Force `identity.legalStandard = True` sur les cartes compilées (utile avec `--sets` / `--set` lorsque `legal.standard=false`).",
+    ),
 ) -> None:
     """Alias de la commande `run`."""
     effective_thinking = "null" if no_think else thinking
@@ -1615,6 +1658,7 @@ def compile_alias(
         phase=phase,
         ids_file=ids_file,
         sets=sets,
+        force_standard=force_standard,
     )
 
 
@@ -1921,6 +1965,11 @@ def compile_sets_command(
         envvar=["REASONING_MAX_TOKENS"],
         help="Nombre maximum de tokens générés en Passe 1.",
     ),
+    force_standard: bool = typer.Option(
+        False,
+        "--force-standard",
+        help="Force `identity.legalStandard = True` pour marquer ces extensions comme légales au format Standard dans les JSON compilés.",
+    ),
 ) -> None:
     """Compile toutes les cartes d'un ou plusieurs sets TCGdex en ignorant le filtre `legal.standard`."""
     effective_thinking = "null" if no_think else thinking
@@ -1949,6 +1998,7 @@ def compile_sets_command(
         batch_size=batch_size,
         max_tokens=max_tokens,
         sets=sets,
+        force_standard=force_standard,
     )
 
 
@@ -1972,6 +2022,7 @@ def run_sets_alias(
     phase: Optional[str] = typer.Option(None, "--phase"),
     batch_size: Optional[int] = typer.Option(None, "--batch-size", "-bs"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
+    force_standard: bool = typer.Option(False, "--force-standard"),
 ) -> None:
     """Alias de la commande `compile-sets`."""
     compile_sets_command(
@@ -1993,6 +2044,7 @@ def run_sets_alias(
         phase=phase,
         batch_size=batch_size,
         max_tokens=max_tokens,
+        force_standard=force_standard,
     )
 
 
@@ -2140,25 +2192,7 @@ def re_run_command(
         target_ids = list(TEST_CARD_IDS)
         origin_descr = f"Jeu d'essai de référence (--test) : {len(target_ids)} carte(s)"
     elif standard_flag or (mode is not None and mode == RunMode.standard):
-        std_index_path = data_dir / "raw_tcgdex" / "_cards_standard_index.json"
-        if std_index_path.exists():
-            try:
-                cached_std = json.loads(std_index_path.read_text(encoding="utf-8"))
-                target_ids = [
-                    str(c.get("id")).strip()
-                    for c in cached_std
-                    if isinstance(c, dict) and c.get("id")
-                ]
-            except Exception:
-                target_ids = []
-        else:
-            target_ids = []
-
-        if not target_ids:
-            async def _resolve_std():
-                async with httpx.AsyncClient() as client:
-                    return await fetcher.resolve_standard_card_ids(client)
-            target_ids = asyncio.run(_resolve_std())
+        target_ids = _resolve_cached_or_live_standard_ids(data_dir, fetcher)
         origin_descr = f"Ensemble légal Standard : {len(target_ids)} carte(s)"
     else:
         # Découverte automatique selon la phase demandée

@@ -3,8 +3,9 @@
  * Aligné à 100 % sur `card-compiler/compiler/schemas.py`.
  */
 
-import type {
-  ActionType,
+import {
+  isCardStandardLegal,
+  type ActionType,
   AIRole,
   AtomicEffect,
   CardCategory,
@@ -447,17 +448,22 @@ export function normalizeCardModel(raw: any): EngineCardModel {
     prizeCardsGiven = 2
   }
 
+  const setId = String(rawIdent.setId || raw.setId || '').trim()
   const regulationMark = rawIdent.regulationMark ? String(rawIdent.regulationMark).toUpperCase() : null
-  const legalStandard = Boolean(
-    rawIdent.legalStandard ??
-      (subCategory === 'BASIC_ENERGY' || ['G', 'H', 'I', 'J'].includes(regulationMark || '')),
-  )
+  const legalStandard = isCardStandardLegal({
+    identity: {
+      legalStandard: Boolean(rawIdent.legalStandard),
+      regulationMark,
+      subCategory,
+      setId,
+    },
+  })
 
   const identity: CardIdentity = {
     cardId,
     nameFr: String(rawIdent.nameFr || raw.nameFr || cardId),
     nameEn: rawIdent.nameEn ? String(rawIdent.nameEn) : null,
-    setId: String(rawIdent.setId || raw.setId || ''),
+    setId,
     setName: rawIdent.setName ? String(rawIdent.setName) : null,
     category,
     subCategory,

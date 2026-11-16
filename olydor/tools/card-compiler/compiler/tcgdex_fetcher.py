@@ -298,6 +298,7 @@ from compiler.deterministic_builder import (
     extract_raw_rules_text,
     infer_category_and_subcategory,
 )
+from compiler.legal_overrides import is_set_standard_overridden, load_legal_overrides
 
 
 def _normalize_text(text: Optional[str]) -> str:
@@ -550,6 +551,7 @@ class TCGdexFetcher:
         raw_fr: Dict[str, Any],
         raw_en: Optional[Dict[str, Any]],
         evolution_info: Optional[Tuple[Optional[str], Optional[str], List[str]]] = None,
+        force_standard: bool = False,
     ) -> Tuple[CardIdentity, Optional[PokemonStats]]:
         """Construit `CardIdentity` et `PokemonStats` à partir des données brutes TCGdex."""
         return build_identity_and_stats_from_raw(
@@ -557,6 +559,7 @@ class TCGdexFetcher:
             raw_fr=raw_fr,
             raw_en=raw_en,
             evolution_info=evolution_info,
+            force_standard=force_standard,
         )
 
     async def fetch_card_by_id(
@@ -564,6 +567,7 @@ class TCGdexFetcher:
         client: httpx.AsyncClient,
         card_id: str,
         force: bool = False,
+        force_standard: bool = False,
     ) -> FetchedCardBundle:
         """Étape 2 : Récupère une carte par ID (FR + EN) avec cache dans `data/raw_tcgdex/{id}.json`."""
         safe_id = card_id.strip()
@@ -588,6 +592,7 @@ class TCGdexFetcher:
                         raw_fr=raw_fr,
                         raw_en=raw_en,
                         evolution_info=evo_tuple,
+                        force_standard=force_standard,
                     )
                     return FetchedCardBundle(
                         card_id=safe_id,
@@ -647,6 +652,7 @@ class TCGdexFetcher:
             raw_fr=raw_fr,
             raw_en=raw_en,
             evolution_info=evolution_info,
+            force_standard=force_standard,
         )
 
         # Sauvegarde du brut consolidé dans data/raw_tcgdex/{id}.json
@@ -680,17 +686,35 @@ class TCGdexFetcher:
             raw_cache_path=cache_path,
         )
 
+    async def merge_standard_override_ids(
+        self,
+        client: httpx.AsyncClient,
+        base_ids: List[str],
+        force: bool = False,
+    ) -> List[str]:
+        """Ajoute les identifiants des extensions déclarées dans `legalOverrides.json` à la liste Standard."""
+        overrides = load_legal_overrides()
+        if not overrides.standard_allowed_set_ids:
+            return list(dict.fromkeys(base_ids))
+
+        override_ids = await self.resolve_set_card_ids(
+            client,
+            set_ids=sorted(overrides.standard_allowed_set_ids),
+            force=force,
+        )
+        return list(dict.fromkeys([*base_ids, *override_ids]))
+
     async def resolve_standard_card_ids(
         self,
         client: httpx.AsyncClient,
         limit: Optional[int] = None,
         force: bool = False,
     ) -> List[str]:
-        """Récupère les IDs des cartes légales au format Standard (`legal.standard == true`).
+        """Récupère les IDs des cartes légales au format Standard (`legal.standard == true` + overrides).
 
         Interroge en priorité le SDK Python officiel TCGdex (`t.card.listSync(Query().contains('legal.standard', 'true'))`)
-        avec repli HTTP REST (`GET /v2/fr/cards?legal.standard=true`).
-        Met en cache les résultats dans `data/raw_tcgdex/_cards_standard_index.json`.
+        avec repli HTTP REST (`GET /v2/fr/cards?legal.standard=true`), puis fusionne les extensions
+        autorisées dans `legalOverrides.json`.
         """
         try:
             cards_index = await self.fetch_standard_cards_index(client, force=force)
@@ -699,7 +723,7 @@ class TCGdexFetcher:
                 for entry in cards_index
                 if isinstance(entry, dict) and entry.get("id")
             ]
-            unique_ids = list(dict.fromkeys(card_ids))
+            unique_ids = await self.merge_standard_override_ids(client, card_ids, force=force)
             if unique_ids:
                 if limit is not None and limit > 0:
                     return unique_ids[:limit]
@@ -709,6 +733,7 @@ class TCGdexFetcher:
 
         # Repli défensif si hors ligne et sans cache _cards_standard_index.json
         cards_index = await self.fetch_cards_index(client, force=False)
+        overrides = load_legal_overrides()
         candidate_ids: List[str] = []
         for entry in cards_index:
             if not isinstance(entry, dict):
@@ -716,8 +741,11 @@ class TCGdexFetcher:
             cid = str(entry.get("id") or "").strip()
             if not cid:
                 continue
+            set_prefix = cid.split("-")[0].lower() if "-" in cid else ""
             reg_m = str(entry.get("regulationMark") or "").strip().upper()
-            if reg_m in {"G", "H", "I"}:
+            if reg_m in overrides.standard_allowed_regulation_marks:
+                candidate_ids.append(cid)
+            elif set_prefix and set_prefix in overrides.standard_allowed_set_ids:
                 candidate_ids.append(cid)
             elif cid.lower().startswith(("sv", "me")):
                 candidate_ids.append(cid)
@@ -904,6 +932,7 @@ class TCGdexFetcher:
         set_ids: Optional[List[str]] = None,
         force: bool = False,
         standard_limit: Optional[int] = None,
+        force_standard: bool = False,
     ) -> List[FetchedCardBundle]:
         """Exécute les Étapes 1 et 2 du workflow : index global puis récupération détaillée par lot."""
         headers = {
@@ -940,8 +969,20 @@ class TCGdexFetcher:
             async def _fetch_one(cid: str) -> Optional[FetchedCardBundle]:
                 async with semaphore:
                     try:
-                        bundle = await self.fetch_card_by_id(client, cid, force=force)
-                        if mode == "standard" and not custom_ids and not parsed_sets and not bundle.identity.legalStandard:
+                        bundle = await self.fetch_card_by_id(
+                            client,
+                            cid,
+                            force=force,
+                            force_standard=force_standard,
+                        )
+                        if (
+                            mode == "standard"
+                            and not custom_ids
+                            and not parsed_sets
+                            and not force_standard
+                            and not bundle.identity.legalStandard
+                            and not is_set_standard_overridden(bundle.identity.setId)
+                        ):
                             return None
                         return bundle
                     except Exception:
