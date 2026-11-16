@@ -45,7 +45,7 @@ import {
 import { selectBestTurnBranch, type EvaluatorOptions } from './evaluator.js'
 import { deriveGameSeed } from './prng.js'
 
-export const MAX_TRACED_GAMES = 20
+export const MAX_TRACED_GAMES = 50
 
 export interface OpponentDeckDescriptor {
   id: string
@@ -1125,12 +1125,19 @@ export function runSimulationShard(
       ? undefined
       : createShardTelemetryAccumulator(input.playerDeckModels)
 
+  const maxTracedGames =
+    input.config.debugMode
+      ? MAX_TRACED_GAMES
+      : input.config.traceSampleLimit != null && Number.isFinite(input.config.traceSampleLimit)
+        ? Math.min(MAX_TRACED_GAMES, Math.max(0, Math.trunc(input.config.traceSampleLimit)))
+        : 0
+
   for (let i = 0; i < input.gameCount; i++) {
     const globalGameIdx = input.startGameIndex + i
     const oppDeck = input.opponentDecks[globalGameIdx % oppCount]!
     const matchupGameIdx = Math.floor(globalGameIdx / oppCount)
     const gameSeed = deriveGameSeed(input.baseSeed, globalGameIdx + 1)
-    const shouldTrace = Boolean(input.config.debugMode) && globalGameIdx < MAX_TRACED_GAMES
+    const shouldTrace = globalGameIdx < maxTracedGames
 
     try {
       const outcome = playFullGame(

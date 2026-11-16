@@ -88,6 +88,7 @@ const simConfig = ref<SimulationConfig>({
   firstPlayerMode: 'RANDOM',
   fixedSeed: null,
   debugMode: false,
+  traceSampleLimit: 50,
   perturbationType: 'NONE',
   perturbationTurn: 2,
   stressTestOhkoEachTurn: false,
@@ -290,6 +291,7 @@ async function executeInitialSimulation() {
       ...toRaw(simConfig.value),
       fixedSeed: effectiveSeed,
       debugMode: isDebugMode.value,
+      traceSampleLimit: 50,
     }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(
@@ -396,6 +398,7 @@ async function executeComparisonSimulation() {
       ...toRaw(simConfig.value),
       fixedSeed: effectiveSeed,
       debugMode: isDebugMode.value,
+      traceSampleLimit: 50,
     }
     const rawOpponents = toRaw(metaOpponentDescriptors.value)
     const summary = await workerPool.runSimulation(

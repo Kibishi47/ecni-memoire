@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { Bot, ChevronDown } from 'lucide-vue-next'
 import type { CardCategory, CardSubCategory, EngineCardModel } from '@olydor/types'
 import type { MetaOpponentDeck, ParsedDeck, ParsedDeckEntry } from '@olydor/types'
 import type {
@@ -88,6 +89,16 @@ const replacedCardFeedback = ref<string | null>(null)
 const zoomedCard = ref<ParsedDeckEntry | EngineCardModel | null>(null)
 const zoomedCards = ref<Array<ParsedDeckEntry | EngineCardModel>>([])
 const zoomInitialIndex = ref<number>(0)
+const isAiInspectorOpen = ref<boolean>(Boolean(props.isDebugMode))
+
+watch(
+  () => props.isDebugMode,
+  (debugActive) => {
+    if (debugActive) {
+      isAiInspectorOpen.value = true
+    }
+  },
+)
 
 async function executeCatalogSearch(query: string) {
   if (searchAbortController) {
@@ -1674,10 +1685,64 @@ const sortedCardTelemetry = computed<CardUsageMetrics[]>(() => {
       @close="closeZoom"
     />
 
-    <!-- Inspecteur granulaire (actif avec ?debug=true) -->
-    <DebugInspectorPanel
-      v-if="isDebugMode && currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
-      :traced-games="currentSummary.tracedGames"
-    />
+    <!-- Collapse tout en bas : Inspecteur "Voir comment joue l'IA" (jusqu'à 50 parties simulées) -->
+    <div
+      v-if="!isSimulating && currentSummary?.tracedGames && currentSummary.tracedGames.length > 0"
+      data-testid="ai-inspector-collapse"
+      class="rounded-2xl border transition-colors"
+      style="background-color: var(--bg-surface); border-color: var(--border-subtle)"
+    >
+      <button
+        type="button"
+        data-testid="toggle-ai-inspector"
+        :aria-expanded="isAiInspectorOpen"
+        @click="isAiInspectorOpen = !isAiInspectorOpen"
+        class="flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-4 text-left transition hover:opacity-90"
+      >
+        <div class="flex items-center gap-3 min-w-0">
+          <div
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
+            style="background-color: rgba(255, 107, 0, 0.12); border-color: rgba(255, 107, 0, 0.35); color: var(--brand-primary)"
+          >
+            <Bot class="h-5 w-5" />
+          </div>
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-bold" style="color: var(--text-primary)">
+                {{ t('aiInspectorToggleTitle') }}
+              </span>
+              <span
+                class="rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                style="background-color: var(--bg-elevated); border-color: var(--border-subtle); color: var(--text-secondary)"
+              >
+                {{ t('aiInspectorGamesBadge', { n: currentSummary.tracedGames.length }) }}
+              </span>
+            </div>
+            <p class="mt-0.5 text-xs" style="color: var(--text-secondary)">
+              {{ t('aiInspectorToggleSubtitle', { n: currentSummary.tracedGames.length }) }}
+            </p>
+          </div>
+        </div>
+
+        <div
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold"
+          style="background-color: var(--bg-elevated); border-color: var(--border-subtle); color: var(--text-primary)"
+        >
+          <span>{{ isAiInspectorOpen ? t('aiInspectorHide') : t('aiInspectorShow') }}</span>
+          <ChevronDown
+            class="h-4 w-4 transition-transform duration-200"
+            :class="isAiInspectorOpen ? 'rotate-180' : ''"
+          />
+        </div>
+      </button>
+
+      <div
+        v-if="isAiInspectorOpen"
+        class="border-t p-4 sm:p-5"
+        style="border-color: var(--border-subtle)"
+      >
+        <DebugInspectorPanel :traced-games="currentSummary.tracedGames" />
+      </div>
+    </div>
   </div>
 </template>

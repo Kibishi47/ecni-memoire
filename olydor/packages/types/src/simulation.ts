@@ -20,6 +20,8 @@ export interface SimulationConfig {
   workerCount: number
   fixedSeed: number | null
   debugMode?: boolean
+  /** Nombre maximal de parties détaillées à conserver pour l'inspecteur IA (plafonné à 50). */
+  traceSampleLimit?: number
   perturbationType?: DebugPerturbationType
   perturbationTurn?: number
   stressTestOhkoEachTurn?: boolean

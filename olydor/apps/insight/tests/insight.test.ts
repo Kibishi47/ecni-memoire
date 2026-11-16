@@ -164,7 +164,7 @@ describe('@olydor/insight migrated simulator suite', () => {
     const decoded = decodeDeckFromUrl(encoded)
     expect(decoded).toContain('60')
 
-    // Run 4 quick games with debugMode=true via SimulationWorkerPool fallback
+    // Run 4 quick games with traceSampleLimit=50 and debugMode=false via SimulationWorkerPool fallback
     const pool = new SimulationWorkerPool()
     const summary = await pool.runSimulation(
       parsedDeck,
@@ -179,7 +179,8 @@ describe('@olydor/insight migrated simulator suite', () => {
         firstPlayerMode: 'RANDOM',
         workerCount: 1,
         fixedSeed: 12345,
-        debugMode: true,
+        debugMode: false,
+        traceSampleLimit: 50,
         collectDetailedTelemetry: true,
       },
       undefined,
@@ -244,7 +245,13 @@ describe('@olydor/insight migrated simulator suite', () => {
       expect(src).not.toMatch(/\/450\b/)
       expect(src).not.toMatch(/\/(?:35|45|60)\/(?:25|40|50|60|70)\b/)
     }
-    expect(step3).toContain('v-if="isDebugMode && currentSummary?.tracedGames')
+    expect(step3).toContain('data-testid="toggle-ai-inspector"')
+    expect(step3).toContain('<DebugInspectorPanel :traced-games="currentSummary.tracedGames" />')
+    expect(step3).not.toContain('v-if="isDebugMode && currentSummary?.tracedGames')
+    expect(debugPanel).toContain('data-testid="inspector-prev-game"')
+    expect(debugPanel).toContain('data-testid="inspector-next-game"')
+    expect(debugPanel).toContain('data-testid="inspector-game-select"')
+    expect(indexPage).toContain('traceSampleLimit: 50')
     expect(step3).toContain('sm:flex-row sm:items-center sm:justify-between')
     expect(step3).toContain('min-w-0 flex-1')
     expect(step3).toContain('bg-emerald-500')
