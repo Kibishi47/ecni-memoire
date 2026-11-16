@@ -1,4 +1,4 @@
 {
-  "standardAllowedSetIds": [],
+  "standardAllowedSetIds": ["me06"],
   "standardAllowedRegulationMarks": ["G", "H", "I", "J"]
 }
